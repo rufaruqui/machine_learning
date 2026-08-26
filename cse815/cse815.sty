@@ -1,0 +1,195 @@
+% ---------------------------------------------------------------
+%  cse815.sty --- shared beamer style for CSE 815 Machine Learning
+%  Dept. of CSE, University of Chittagong
+% ---------------------------------------------------------------
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cse815}[2026/08/26 CSE 815 lecture style]
+
+\RequirePackage[T1]{fontenc}
+\RequirePackage{lmodern}
+\RequirePackage{amsmath,amssymb,amsthm}
+\RequirePackage{bm}
+\RequirePackage{array}
+\RequirePackage{booktabs}
+\RequirePackage{tikz}
+\RequirePackage{pgfplots}
+\RequirePackage{tcolorbox}
+\RequirePackage{xcolor}
+
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,shapes.geometric,decorations.pathreplacing}
+\tcbuselibrary{skins,breakable}
+
+% ---------------- colour palette ----------------
+\definecolor{cublue}{HTML}{123B63}
+\definecolor{cuteal}{HTML}{1B7F79}
+\definecolor{cuamber}{HTML}{C97B17}
+\definecolor{curose}{HTML}{9B2C4B}
+\definecolor{culight}{HTML}{EEF3F7}
+\definecolor{cugray}{HTML}{4A5560}
+
+% ---------------- beamer theme ----------------
+\usetheme{default}
+\usecolortheme{whale}
+\useinnertheme{rectangles}
+\setbeamercovered{invisible}
+
+\setbeamercolor{structure}{fg=cublue}
+\setbeamercolor{frametitle}{fg=white,bg=cublue}
+% whale makes `titlelike' a child of `palette primary' (white on cublue);
+% clear the background explicitly or the title is cublue-on-cublue.
+\setbeamercolor{titlelike}{fg=cublue,bg=}
+\setbeamercolor{title}{fg=cublue,bg=}
+\setbeamercolor{subtitle}{fg=cuteal,bg=}
+\setbeamercolor{author}{fg=cugray,bg=}
+\setbeamercolor{institute}{fg=cugray,bg=}
+\setbeamercolor{date}{fg=cugray,bg=}
+\setbeamercolor{section in toc}{fg=cublue}
+\setbeamercolor{itemize item}{fg=cuteal}
+\setbeamercolor{itemize subitem}{fg=cuamber}
+\setbeamercolor{enumerate item}{fg=cuteal}
+\setbeamercolor{block title}{fg=white,bg=cuteal}
+\setbeamercolor{block body}{bg=culight}
+\setbeamercolor{block title alerted}{fg=white,bg=curose}
+\setbeamercolor{block title example}{fg=white,bg=cuamber}
+\setbeamercolor{palette primary}{fg=white,bg=cublue}
+\setbeamercolor{palette secondary}{fg=white,bg=cuteal}
+\setbeamercolor{palette tertiary}{fg=white,bg=cugray}
+
+\setbeamerfont{frametitle}{series=\bfseries,size=\large}
+\setbeamerfont{title}{series=\bfseries,size=\LARGE}
+\setbeamerfont{subtitle}{series=\mdseries,shape=\itshape,size=\normalsize}
+\setbeamerfont{block title}{series=\bfseries,size=\small}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{itemize item}{\raisebox{0.15ex}{\tiny$\blacksquare$}}
+\setbeamertemplate{itemize subitem}{\raisebox{0.15ex}{\tiny$\blacktriangleright$}}
+
+% Full-bleed frametitle: the bar is \paperwidth but is typeset inside a
+% \textwidth measure, so it is shifted left by the margin and the excess is
+% absorbed by \hss (which also keeps the log free of overfull-box warnings).
+% \hss on both sides splits the (\paperwidth-\textwidth) excess evenly across
+% the two equal margins, giving true full bleed with no overfull warnings.
+\newcommand{\cse@bleed}[1]{%
+  \nointerlineskip
+  \hbox to \textwidth{\hss#1\hss}%
+  \nointerlineskip
+}
+
+\setbeamertemplate{frametitle}{%
+  \cse@bleed{%
+    \begin{beamercolorbox}[wd=\paperwidth,sep=0pt,leftskip=0.28cm,rightskip=0.28cm]{frametitle}
+      \vskip4pt\strut\insertframetitle\strut\vskip4pt
+      \ifx\insertframesubtitle\@empty\else
+        {\usebeamerfont{framesubtitle}\footnotesize\itshape\insertframesubtitle\par\vskip2pt}
+      \fi
+    \end{beamercolorbox}}%
+  \cse@bleed{\color{cuamber}\rule{\paperwidth}{1.2pt}}%
+  \vskip2pt
+}
+
+\setbeamertemplate{footline}{%
+  \leavevmode
+  \hbox{%
+  \begin{beamercolorbox}[wd=.50\paperwidth,ht=2.4ex,dp=1ex,leftskip=.3cm]{palette tertiary}%
+    \tiny\insertshorttitle
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=.30\paperwidth,ht=2.4ex,dp=1ex,center]{palette secondary}%
+    \tiny\insertshortdate
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=.12\paperwidth,ht=2.4ex,dp=1ex,right,rightskip=.3cm]{palette primary}%
+    \tiny\insertframenumber\,/\,\inserttotalframenumber
+  \end{beamercolorbox}}%
+  \vskip0pt%
+}
+
+% ---------------- title page ----------------
+% Course banner shown on the title slide; redefine in a deck to override.
+\newcommand{\coursebanner}{CSE 815 $\cdot$ Machine Learning}
+\newcommand{\coursedept}{Department of CSE $\cdot$ University of Chittagong}
+
+\defbeamertemplate*{title page}{cse815}[1][]{%
+  \cse@bleed{%
+    \begin{beamercolorbox}[wd=\paperwidth,sep=0pt,leftskip=0.9cm,rightskip=0.9cm]{palette primary}
+      \vskip5pt
+      {\small\bfseries\coursebanner}\hfill{\small\coursedept}
+      \vskip5pt
+    \end{beamercolorbox}}%
+  \vfill
+  \begin{center}
+    {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle\par}
+    \ifx\insertsubtitle\@empty\else
+      \vskip6pt
+      {\usebeamerfont{subtitle}\usebeamercolor[fg]{subtitle}\insertsubtitle\par}
+    \fi
+    \vskip10pt
+    {\color{cuamber}\rule{0.55\textwidth}{1.2pt}}
+    \vskip12pt
+    {\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}
+    \vskip8pt
+    {\usebeamerfont{institute}\usebeamercolor[fg]{institute}\insertinstitute\par}
+    \vskip10pt
+    {\usebeamerfont{date}\usebeamercolor[fg]{date}\insertdate\par}
+  \end{center}
+  \vfill
+}
+
+% ---------------- section divider ----------------
+\AtBeginSection[]{%
+  \begin{frame}[plain,noframenumbering]
+    \vfill
+    \begin{beamercolorbox}[wd=\paperwidth,sep=14pt,center]{palette primary}
+      {\usebeamerfont{title}\insertsectionhead}\\[4pt]
+      {\small\color{culight}Section \insertsectionnumber}
+    \end{beamercolorbox}
+    \vfill
+  \end{frame}
+}
+
+% ---------------- reusable boxes ----------------
+\newtcolorbox{keyidea}[1][Key idea]{%
+  enhanced, colback=culight, colframe=cuteal, coltitle=white,
+  fonttitle=\bfseries\small, title={#1}, boxrule=0.8pt, arc=2pt,
+  left=4pt,right=4pt,top=3pt,bottom=3pt}
+
+\newtcolorbox{pitfall}[1][Common pitfall]{%
+  enhanced, colback=curose!5, colframe=curose, coltitle=white,
+  fonttitle=\bfseries\small, title={#1}, boxrule=0.8pt, arc=2pt,
+  left=4pt,right=4pt,top=3pt,bottom=3pt}
+
+\newtcolorbox{defnbox}[1][Definition]{%
+  enhanced, colback=cuamber!8, colframe=cuamber, coltitle=white,
+  fonttitle=\bfseries\small, title={#1}, boxrule=0.8pt, arc=2pt,
+  left=4pt,right=4pt,top=3pt,bottom=3pt}
+
+% ---------------- learning-outcome helper ----------------
+% ragged-right paragraph column, for narrow table cells
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\newcommand{\clo}[1]{{\footnotesize\color{cugray}\textbf{[#1]}}}
+
+% ---------------- maths shorthands ----------------
+\newcommand{\xii}[1]{x^{(#1)}}
+\newcommand{\yii}[1]{y^{(#1)}}
+\newcommand{\fwb}{f_{w,b}}
+\newcommand{\yhat}{\hat{y}}
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% ---------------- contour-map helper ----------------
+% Level sets of a quadratic cost are exact ellipses, so we draw them
+% directly instead of invoking an external contour engine.
+%   \costcontours{width}{height}{cx}{cy}{semi-a}{semi-b}{rotation}
+\newcommand{\costcontours}[7]{%
+  \draw[cugray,thick,-{Stealth}] (0,0) -- (#1,0) node[anchor=north east,font=\scriptsize] {$w$};
+  \draw[cugray,thick,-{Stealth}] (0,0) -- (0,#2) node[anchor=north east,font=\scriptsize] {$b$};
+  \begin{scope}
+    \clip (0.03,0.03) rectangle ({#1-0.05},{#2-0.05});
+    \foreach \lvl/\lc in {0.34/cublue, 0.62/cublue!55!cuteal, 0.94/cuteal,
+                          1.3/cuteal!45!cuamber, 1.72/cuamber, 2.2/cuamber!65}{%
+      \draw[\lc,thick,rotate around={#7:(#3,#4)}]
+        (#3,#4) ellipse ({#5*\lvl} and {#6*\lvl});}
+  \end{scope}
+}
+
+\endinput
