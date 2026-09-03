@@ -1,0 +1,992 @@
+%% ch02.tex --- Linear Regression with One Variable
+%% Numbers are computed by verify/ch02_cost_function.py.
+
+\chapter{Linear Regression with One Variable}
+\label{ch:ch02}
+
+\epigraph{All models are wrong, but some are useful.}{---\ George E.\ P.\ Box}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Write the univariate linear regression model and say what each of its
+        two parameters does to the fitted line.
+  \item Define the squared-error cost function, and justify each of its three
+        design choices: the square, the $1/m$, and the $\tfrac12$.
+  \item Compute $J(w,b)$ by hand for a given dataset and a given pair of
+        parameters.
+  \item Explain why $J$ is a parabola in one parameter and a bowl in two, and
+        why that guarantees a single minimum.
+  \item Read a contour plot of $J$: identify the minimum, compare two parameter
+        pairs, and recognise what elongated contours indicate.
+  \item Derive the closed-form solution for the best-fitting line, and apply it.
+  \item Explain why a low cost does not by itself mean a good model.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch01} said that every supervised learner has four parts: data, a
+hypothesis space, a cost, and an optimizer. This chapter examines the third of
+them in the simplest setting that exists --- fitting a straight line ---
+because the squared-error cost introduced here reappears, essentially unchanged,
+in \cref{ch:ch04,ch:ch05}, is modified only in its inner expression in
+\cref{ch:ch06}, and is what neural networks in \cref{ch:ch09} are still
+minimising. Understand it once, thoroughly, and much of the rest of the book is
+bookkeeping.
+
+\section{The Model}
+\label{sec:the-model}
+
+\begin{defbox}{Univariate linear regression}
+Given a single input feature $x$, the \term{univariate linear regression} model
+is
+\[
+  \fwb(x) \;=\; wx + b ,
+\]
+with parameters $w\in\R$, the \term{weight} (or slope), and $b\in\R$, the
+\term{bias} (or intercept). The hypothesis space is
+$\Hspace = \{\,x \mapsto wx+b \;:\; w,b\in\R\,\}$: one line for each pair
+$(w,b)$.
+\end{defbox}
+
+The two parameters do different jobs, and it is worth fixing the picture before
+any algebra. Changing $w$ tilts the line about its intercept; changing $b$
+slides it vertically without tilting it. \Cref{fig:wb-effect} shows both.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.2cm,
+        xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=4, ymin=-1, ymax=7,
+        legend pos=north west, legend style={font=\tiny}]
+        \addplot[MLBlue,thick,domain=0:4]{0.5*x+1}; \addlegendentry{$w=0.5$}
+        \addplot[MLTeal,thick,domain=0:4]{1.5*x+1}; \addlegendentry{$w=1.5$}
+        \addplot[MLRose,thick,domain=0:4]{2.5*x+1}; \addlegendentry{$w=2.5$}
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Varying $w$ with $b=1$ fixed: the line pivots.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.2cm,
+        xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=4, ymin=-1, ymax=7,
+        legend pos=north west, legend style={font=\tiny}]
+        \addplot[MLBlue,thick,domain=0:4]{1.2*x-0.5}; \addlegendentry{$b=-0.5$}
+        \addplot[MLTeal,thick,domain=0:4]{1.2*x+1};   \addlegendentry{$b=1$}
+        \addplot[MLRose,thick,domain=0:4]{1.2*x+2.5}; \addlegendentry{$b=2.5$}
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Varying $b$ with $w=1.2$ fixed: the line shifts.\par}
+  \end{minipage}
+  \caption{The two parameters of the model, seen separately. Every straight line
+  in the plane is one point $(w,b)$, and vice versa --- a correspondence we will
+  exploit heavily from \cref{sec:cost-two-params} onward.}
+  \label{fig:wb-effect}
+\end{figure}
+
+That last sentence in the caption is the idea that makes this chapter work.
+There are two spaces in play, and we will move between them constantly:
+
+\begin{itemize}
+  \item \textbf{Data space}, with $x$ horizontal and $y$ vertical. A model is a
+        \emph{line}; a training example is a \emph{point}.
+  \item \textbf{Parameter space}, with $w$ horizontal and $b$ vertical. A model
+        is a \emph{point}; the training set is fixed and invisible, having been
+        absorbed into the cost.
+\end{itemize}
+
+Confusing the two is the single most common source of bewilderment in this
+material. When you see a plot, ask first what its axes are.
+
+\section{Notation for the Training Set}
+\label{sec:notation}
+
+We are given $m$ examples $(\xii{1},\yii{1}),\dots,(\xii{m},\yii{m})$. Throughout
+this chapter the running example is four points, small enough to compute with by
+hand:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+$i$      & $1$ & $2$ & $3$ & $4$\\
+\midrule
+$\xii{i}$ & $1$ & $2$ & $3$ & $4$\\
+$\yii{i}$ & $1$ & $3$ & $4$ & $6$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent so $m = 4$, $\xii{2} = 2$ and $\yii{2} = 3$. Call this the
+\term{four-point set}; it is dataset~T4 in \cref{ch:appD}. Its points are not
+collinear --- no straight line passes through all four --- which is what makes
+the fitting problem non-trivial and, as it happens, what makes every real
+regression problem non-trivial.
+
+\section{Measuring Fit: The Cost Function}
+\label{sec:cost}
+
+Fix a candidate line, say $\fwb(x) = x + 1$, that is $(w,b) = (1,1)$. For each
+training example it makes a prediction $\yhat^{(i)} = \fwb(\xii{i})$, and each
+prediction misses its target by some amount.
+
+\begin{defbox}{Residual}
+The \term{residual} of example $i$ under the model $\fwb$ is
+\[
+  r^{(i)} \;=\; \yhat^{(i)} - \yii{i} \;=\; \fwb(\xii{i}) - \yii{i} .
+\]
+It is positive when the model over-predicts and negative when it
+under-predicts.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.62\linewidth, height=5.0cm,
+      xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=5, ymin=0, ymax=7.5,
+      legend pos=north west, legend style={font=\tiny}]
+      \addplot[MLBlue,thick,domain=0.3:4.6]{1*x+1};
+      \addlegendentry{$\fwb(x)=x+1$}
+      \addplot[only marks,mark=*,mark size=1.8pt,MLTeal]
+        coordinates {(1,1)(2,3)(3,4)(4,6)};
+      \addlegendentry{training examples}
+      \addplot[MLRose,thick,dashed,forget plot] coordinates {(1,1)(1,2)};
+      \addplot[MLRose,thick,dashed,forget plot] coordinates {(2,3)(2,3)};
+      \addplot[MLRose,thick,dashed,forget plot] coordinates {(3,4)(3,4)};
+      \addplot[MLRose,thick,dashed,forget plot] coordinates {(4,6)(4,5)};
+      \node[font=\tiny,MLRose,anchor=west] at (axis cs:1.08,1.5)  {$r=+1$};
+      \node[font=\tiny,MLRose,anchor=west] at (axis cs:2.08,3.0)  {$r=0$};
+      \node[font=\tiny,MLRose,anchor=west] at (axis cs:3.08,4.0)  {$r=0$};
+      \node[font=\tiny,MLRose,anchor=west] at (axis cs:4.08,5.5)  {$r=-1$};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Residuals of the line $(w,b)=(1,1)$ on the four-point set: the
+  vertical gaps between prediction and observation. The cost aggregates these
+  four numbers into one.}
+  \label{fig:residuals}
+\end{figure}
+
+We now need to collapse $m$ residuals into a single number, so that two
+candidate lines can be compared. The standard choice is their mean square.
+
+\begin{defbox}{Squared-error cost}
+The \term{squared-error cost} of the model $\fwb$ on a training set of $m$
+examples is
+\[
+  J(w,b) \;=\; \frac{1}{2m}\sum_{i=1}^{m}
+              \bigl(\fwb(\xii{i}) - \yii{i}\bigr)^{2}
+        \;=\; \frac{1}{2m}\sum_{i=1}^{m}\bigl(r^{(i)}\bigr)^{2} .
+\]
+It is a function of the parameters $(w,b)$; the data is held fixed.
+\end{defbox}
+
+\begin{derivation}{The cost as a squared length}
+Collect the residuals into a vector $\mathbf{r}\in\Real{m}$ with components
+$r^{(i)}$. Then
+\[
+  \sum_{i=1}^{m}\bigl(r^{(i)}\bigr)^{2}
+  \;=\; \mathbf{r}\cdot\mathbf{r}
+  \;=\; \|\mathbf{r}\|^{2},
+  \qquad\text{so}\qquad
+  J(w,b) \;=\; \frac{1}{2m}\,\|\mathbf{r}\|^{2}
+         \;=\; \frac{1}{2m}\,\bigl\|\hat{\mathbf{y}} - \vy\bigr\|^{2}.
+\]
+The cost is therefore the squared Euclidean distance between the vector of
+predictions and the vector of observations, scaled. Minimising $J$ means
+bringing the prediction vector as close as possible to the observation vector in
+$\Real{m}$ --- a reading we return to in \cref{sec:projection}, where it turns
+out to explain the whole method geometrically.
+\end{derivation}
+
+Three features of this definition are chosen rather than forced, and each
+deserves a justification.
+
+\subsection{Why square the residuals}
+
+The obvious first attempt, summing the residuals themselves, fails immediately:
+positive and negative errors cancel. In \cref{fig:residuals} the residuals are
+$+1, 0, 0, -1$, summing to zero, which would rate that mediocre line as perfect.
+Any usable measure must treat over- and under-prediction as equally bad, so it
+must be built from a symmetric, non-negative function of each residual.
+
+That leaves two natural candidates, $|r|$ and $r^{2}$, and squares win for three
+reasons:
+
+\begin{enumerate}
+  \item \textbf{Differentiability.} $|r|$ has no derivative at $r = 0$, exactly
+        the point the optimizer is heading for. $r^{2}$ is smooth everywhere,
+        and \cref{ch:ch03}'s method needs derivatives.
+  \item \textbf{A closed-form solution exists.} Squaring makes $J$ a quadratic
+        in the parameters, which we can minimise exactly with algebra
+        (\cref{sec:closed-form}). Absolute values do not permit this.
+  \item \textbf{Large errors dominate.} An error of $4$ contributes sixteen
+        times as much as an error of $1$, so the fitted line works hard to avoid
+        being badly wrong anywhere. Whether that is desirable is a modelling
+        decision, not a mathematical fact --- see \cref{sec:low-cost}.
+\end{enumerate}
+
+There is also a statistical justification, which \cref{ch:ch06} makes precise:
+if the observations differ from the true line by independent Gaussian noise,
+the line minimising squared error is the one of maximum likelihood. Squaring is
+not arbitrary; it is the correct thing to do under a specific and often
+reasonable assumption about how the data was generated.
+
+\subsection{Why divide by \texorpdfstring{$m$}{m}}
+
+Without the $1/m$, the cost would grow with the size of the training set, and a
+model fitted to $1000$ examples would appear a thousand times worse than the
+same model fitted to one. Averaging makes the number comparable across datasets
+of different sizes --- and, more immediately, means that adding more of the same
+data does not change the answer.
+
+\begin{workedexample}{The $1/m$ earns its place}
+Take the four-point set, and a second dataset consisting of the same four points
+each written down twice, so $m = 8$. Any sensible measure of fit should be
+unchanged: nothing new has been observed.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{$\sum_i (r^{(i)})^2$} & \multicolumn{2}{c}{$J$}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+$(w,b)$ & $m=4$ & $m=8$ & $m=4$ & $m=8$\\
+\midrule
+$(1.6,-0.5)$ & $0.200$ & $0.400$ & $0.0250$ & $0.0250$\\
+$(1.0,\ \ 1.0)$ & $2.000$ & $4.000$ & $0.2500$ & $0.2500$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The raw sum doubles; the cost does not. Note also that the \emph{ranking} of the
+two lines is unaffected either way --- which is why the $1/m$ is a convenience
+rather than a necessity, and why you will occasionally see it omitted.
+\end{workedexample}
+
+\subsection{Why the one half}
+
+The $\tfrac12$ has no effect whatsoever on which $(w,b)$ minimises $J$: scaling
+a function by a positive constant moves its graph but not the location of its
+lowest point. It is there purely so that the $2$ produced by differentiating the
+square cancels it. \Cref{ch:ch03} derives
+\[
+  \frac{\partial J}{\partial w}
+    = \frac{1}{m}\sum_{i=1}^{m}\bigl(\fwb(\xii{i})-\yii{i}\bigr)\xii{i},
+\]
+with no stray factor of two, and you will be grateful for the tidiness a hundred
+gradient computations from now.
+
+\begin{keyinsight}{What $J$ is a function of}
+$J$ is a function of the \emph{parameters}, not of the data. When we write
+$J(w,b)$ and plot it, the training set has been fixed and folded into the
+function's definition. Every point of that plot answers one question: if the
+line were this one, how badly would it fit the data we have?
+\end{keyinsight}
+
+\section{The Cost as a Function of One Parameter}
+\label{sec:cost-one-param}
+
+Two parameters are one too many for a first picture, so temporarily fix $b = 0$
+and consider the simpler model $f_w(x) = wx$. Take three training points lying
+exactly on a line through the origin: $(1,1)$, $(2,2)$, $(3,3)$, so that we know
+in advance that $w = 1$ is perfect.
+
+\begin{derivation}{$J(w)$ is a parabola}
+With $b=0$, $m=3$ and $\yii{i} = \xii{i}$,
+\[
+  \begin{aligned}
+    J(w) &= \frac{1}{2\cdot 3}\sum_{i=1}^{3}\bigl(w\xii{i}-\xii{i}\bigr)^{2}
+          = \frac{1}{6}(w-1)^{2}\sum_{i=1}^{3}\bigl(\xii{i}\bigr)^{2}\\[2pt]
+         &= \frac{1+4+9}{6}(w-1)^{2}
+          = \frac{14}{6}(w-1)^{2}.
+  \end{aligned}
+\]
+This is a parabola in $w$: it opens upward, because the coefficient
+$\tfrac{14}{6}$ is positive, and it touches zero at $w=1$. Upward-opening
+parabolas have exactly one minimum and no other stationary point, so for this
+data the search for the best $w$ has a unique answer and no way to get stuck.
+\end{derivation}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.4cm,
+        xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=3.6, ymin=0, ymax=5,
+        legend pos=north west, legend style={font=\tiny}]
+        \addplot[only marks,mark=*,mark size=1.8pt,MLTeal]
+          coordinates {(1,1)(2,2)(3,3)};
+        \addlegendentry{data}
+        \addplot[MLRose,thick,domain=0:3.4]{0.5*x};  \addlegendentry{$w=0.5$}
+        \addplot[MLBlue,very thick,domain=0:3.4]{1*x}; \addlegendentry{$w=1$}
+        \addplot[MLAmber,thick,domain=0:3.4]{1.5*x}; \addlegendentry{$w=1.5$}
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Data space: three candidate lines.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.4cm,
+        xlabel={$w$}, ylabel={$J(w)$}, xmin=-0.6, xmax=2.6, ymin=-0.3, ymax=5.6]
+        \addplot[MLBlue,very thick,domain=-0.6:2.6,samples=80]
+          {14/6*(x-1)^2};
+        \addplot[only marks,mark=*,mark size=2pt,MLRose,forget plot]
+          coordinates {(0.5,0.5833)};
+        \addplot[only marks,mark=*,mark size=2pt,MLBlue,forget plot]
+          coordinates {(1,0)};
+        \addplot[only marks,mark=*,mark size=2pt,MLAmber,forget plot]
+          coordinates {(1.5,0.5833)};
+        \node[font=\tiny,anchor=south east] at (axis cs:0.5,0.60) {$0.583$};
+        \node[font=\tiny,anchor=south west] at (axis cs:1.5,0.60) {$0.583$};
+        \node[font=\tiny,anchor=south west] at (axis cs:1.02,0.05) {$0$};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Parameter space: the cost of each.\par}
+  \end{minipage}
+  \caption{The same three models in both spaces. A line on the left is a point
+  on the right. The curve on the right is not a model --- it is the cost of
+  every possible model, and it is what the optimizer walks down.}
+  \label{fig:parabola}
+\end{figure}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+$w$    & $-0.5$ & $0.0$ & $0.5$ & $1.0$ & $1.5$ & $2.0$ & $2.5$\\
+$J(w)$ & $5.2500$ & $2.3333$ & $0.5833$ & $0.0000$ & $0.5833$ & $2.3333$ & $5.2500$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two observations to carry forward. First, $J$ is symmetric about its minimum
+here, so being wrong by $0.5$ in either direction costs the same. Second,
+$J(1)=0$ only because these three points happen to be collinear; on real data
+the minimum of $J$ is positive, and \cref{sec:low-cost} explains why chasing
+$J=0$ is a mistake rather than a goal.
+
+\section{The Cost as a Function of Both Parameters}
+\label{sec:cost-two-params}
+
+Now let $b$ vary again, and return to the four-point set. Expanding the square
+in the definition of $J$ and collecting terms gives a quadratic in two
+variables:
+\begin{align*}
+  J(w,b) &= \frac{1}{2m}\sum_{i=1}^{m}\bigl(w\xii{i}+b-\yii{i}\bigr)^{2}\\
+         &= \frac{1}{2m}\Bigl[
+              w^{2}\textstyle\sum_i (\xii{i})^{2}
+            + 2wb\sum_i \xii{i}
+            + m b^{2}\\
+         &\qquad\qquad
+            - 2w\textstyle\sum_i \xii{i}\yii{i}
+            - 2b\sum_i \yii{i}
+            + \sum_i (\yii{i})^{2}
+            \Bigr].
+\end{align*}
+For the four-point set the six sums are $\sum x^2 = 30$, $\sum x = 10$, $m=4$,
+$\sum xy = 43$, $\sum y = 14$ and $\sum y^2 = 62$, so
+\begin{equation}
+  J(w,b) \;=\; \frac{30w^{2} + 20wb + 4b^{2} - 86w - 28b + 62}{8}.
+  \label{eq:t4-cost}
+\end{equation}
+
+Every term is either a square or a product of the two parameters, and the
+quadratic part $30w^2 + 20wb + 4b^2$ is positive for every $(w,b)\neq(0,0)$.
+A quadratic of that kind is an \term{elliptic paraboloid}: a bowl.
+\Cref{fig:bowl} draws it.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[width=0.72\linewidth, height=5.6cm,
+      view={40}{32},
+      xlabel={$w$}, ylabel={$b$}, zlabel={$J(w,b)$},
+      tick label style={font=\tiny}, label style={font=\small},
+      colormap={ml}{color=(MLLight) color=(MLTeal) color=(MLBlue)},
+      samples=26, domain=0.2:3.0, y domain=-3:2]
+      \addplot3[surf,shader=interp,opacity=0.93]
+        {(30*x^2 + 20*x*y + 4*y^2 - 86*x - 28*y + 62)/8};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The cost surface \cref{eq:t4-cost} for the four-point set. Horizontal
+  axes are the parameters; height is the cost. There is one lowest point, no
+  local minima and no flat regions --- a shape called \emph{convex}, and the
+  reason the optimizer of \cref{ch:ch03} cannot get stuck.}
+  \label{fig:bowl}
+\end{figure}
+
+\subsection{Reading a contour map}
+\label{sec:contours}
+
+A three-dimensional surface is hard to read precisely and impossible to draw for
+more than two parameters. The standard alternative is to look straight down at
+it and draw \term{contours}: curves joining all points of equal height, exactly
+as a topographic map joins points of equal elevation.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=\linewidth, height=5.2cm,
+        xlabel={$w$}, ylabel={$b$},
+        tick label style={font=\scriptsize}, label style={font=\small},
+        view={0}{90}, domain=0.2:3.0, y domain=-3:2,
+        colormap={ml}{color=(MLBlue) color=(MLTeal) color=(MLAmber)}]
+        \costcontour{}{0.1,0.25,0.6,1.2,2.2,3.6}
+          {(30*x^2 + 20*x*y + 4*y^2 - 86*x - 28*y + 62)/8}
+        \addplot3[only marks,mark=*,mark size=2.2pt,MLBlue]
+          coordinates {(1.6,-0.5,0)};
+        \addplot3[only marks,mark=square*,mark size=2pt,MLRose]
+          coordinates {(1.0,1.0,0)};
+        \addplot3[only marks,mark=triangle*,mark size=2.6pt,MLAmber]
+          coordinates {(2.2,-2.0,0)};
+        \node[font=\tiny,MLBlue,anchor=north west]  at (axis cs:1.62,-0.6,0) {A};
+        \node[font=\tiny,MLRose,anchor=south west]  at (axis cs:1.04,1.0,0)  {B};
+        \node[font=\tiny,MLAmber,anchor=north west] at (axis cs:2.24,-2.0,0) {C};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Parameter space, seen from above.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=5.2cm,
+        xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=5, ymin=-1, ymax=8,
+        legend style={font=\tiny, at={(0.02,0.98)}, anchor=north west}]
+        \addplot[only marks,mark=*,mark size=1.8pt,MLTeal]
+          coordinates {(1,1)(2,3)(3,4)(4,6)};
+        \addlegendentry{data}
+        \addplot[MLBlue,very thick,domain=0.2:4.6]{1.6*x-0.5};
+        \addlegendentry{A: $J=0.025$}
+        \addplot[MLRose,thick,domain=0.2:4.6]{1*x+1};
+        \addlegendentry{B: $J=0.250$}
+        \addplot[MLAmber,thick,dashed,domain=0.2:4.6]{2.2*x-2};
+        \addlegendentry{C: $J=0.250$}
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Data space: the three lines.\par}
+  \end{minipage}
+  \caption{The same information twice. Point~A is the minimum, $J = 0.025$.
+  Points~B and~C sit on the \emph{same} contour and therefore have exactly equal
+  cost, $J = 0.250$, despite being very different lines --- B too shallow, C too
+  steep. The cost is a single number and cannot distinguish between the two ways
+  of being wrong.}
+  \label{fig:contours}
+\end{figure}
+
+Four things to take from \cref{fig:contours}, all of which recur throughout the
+book:
+
+\begin{enumerate}
+  \item \textbf{The centre of the innermost closed curve is the minimum.} That
+        is where training is trying to get to.
+  \item \textbf{Points on one contour are equally good.} B and C both cost
+        $0.250$. If your optimizer reports a cost, it is telling you which
+        contour you are on and nothing about which direction you are off in.
+  \item \textbf{Closely spaced contours mean a steep slope}, widely spaced ones a
+        shallow slope. \Cref{ch:ch03}'s method moves perpendicular to the
+        contours, so contour spacing is exactly what determines how fast it
+        moves.
+  \item \textbf{The contours are ellipses, not circles.} For the four-point set
+        the ratio of the long axis to the short one is about $7.5$; for the
+        apartment data of \cref{ch:ch01} it is about $41$. Elongation is caused
+        by the features' scale, it slows optimization badly, and
+        \cref{ch:ch05} shows how to remove it.
+\end{enumerate}
+
+\begin{pitfall}{Which space am I in?}
+In \cref{fig:contours}, the left panel's horizontal axis is $w$ and the right
+panel's is $x$. A point on the left is a whole line on the right. Students who
+are stuck on cost-function questions are, nine times out of ten, reading a
+parameter-space plot as though it were data space --- looking for the training
+points in the contour plot, or expecting the fitted line to appear there. The
+training data is not in the contour plot. It has been consumed by the definition
+of $J$.
+\end{pitfall}
+
+\section{Fitting by Hand: The Closed Form}
+\label{sec:closed-form}
+
+For this model we can find the minimum exactly, without any iteration, because a
+smooth function is stationary at its minimum: both partial derivatives vanish
+there.
+
+\begin{derivation}{The least-squares line}
+Differentiate $J(w,b) = \frac{1}{2m}\sum_i (w\xii{i}+b-\yii{i})^2$ with respect
+to each parameter in turn, using the chain rule:
+\[
+  \frac{\partial J}{\partial b}
+    = \frac{1}{m}\sum_{i=1}^{m}\bigl(w\xii{i}+b-\yii{i}\bigr),
+  \qquad
+  \frac{\partial J}{\partial w}
+    = \frac{1}{m}\sum_{i=1}^{m}\bigl(w\xii{i}+b-\yii{i}\bigr)\xii{i}.
+\]
+Setting the first to zero and writing $\bar x = \frac1m\sum_i \xii{i}$,
+$\bar y = \frac1m\sum_i \yii{i}$:
+\begin{equation}
+  w\bar x + b - \bar y = 0
+  \qquad\Longrightarrow\qquad
+  b = \bar y - w\bar x .
+  \label{eq:b-star}
+\end{equation}
+So the fitted line passes through the point $(\bar x, \bar y)$, the centre of
+mass of the data, whatever $w$ turns out to be.
+
+Setting the second to zero gives
+$\sum_i (w\xii{i}+b)\xii{i} = \sum_i \yii{i}\xii{i}$, that is
+$w\sum_i (\xii{i})^2 + b\sum_i \xii{i} = \sum_i \xii{i}\yii{i}$. Substituting
+\cref{eq:b-star} for $b$ and using $\sum_i \xii{i} = m\bar x$:
+\[
+  \begin{aligned}
+    w\sum_i (\xii{i})^{2} + (\bar y - w \bar x)\,m\bar x
+      &= \sum_i \xii{i}\yii{i}\\[2pt]
+    \Longrightarrow\quad
+    w\Bigl[\sum_i (\xii{i})^{2} - m\bar x^{2}\Bigr]
+      &= \sum_i \xii{i}\yii{i} - m\bar x\bar y ,
+  \end{aligned}
+\]
+and both bracketed quantities can be rewritten as sums of deviations from the
+mean, giving the form worth memorising:
+\begin{equation}
+  w^{\star} = \frac{\sum_{i=1}^{m}\bigl(\xii{i}-\bar x\bigr)
+                        \bigl(\yii{i}-\bar y\bigr)}
+                   {\sum_{i=1}^{m}\bigl(\xii{i}-\bar x\bigr)^{2}},
+  \qquad
+  b^{\star} = \bar y - w^{\star}\bar x .
+  \label{eq:closed-form}
+\end{equation}
+The numerator is (up to a factor $m$) the covariance of $x$ and $y$, the
+denominator the variance of $x$. The best slope is the covariance divided by the
+variance --- which says, in one line, that the model tilts in proportion to how
+strongly the two variables move together, tempered by how spread out the input
+is.
+\end{derivation}
+
+\begin{workedexample}{The four-point set, fitted by hand}
+$\bar x = (1+2+3+4)/4 = 2.5$ and $\bar y = (1+3+4+6)/4 = 3.5$. Tabulate the
+deviations:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+$\xii{i}$ & $\yii{i}$ & $\xii{i}-\bar x$ & $\yii{i}-\bar y$ &
+$(\xii{i}-\bar x)(\yii{i}-\bar y)$ & $(\xii{i}-\bar x)^2$\\
+\midrule
+$1$ & $1$ & $-1.5$ & $-2.5$ & $3.75$ & $2.25$\\
+$2$ & $3$ & $-0.5$ & $-0.5$ & $0.25$ & $0.25$\\
+$3$ & $4$ & $ 0.5$ & $ 0.5$ & $0.25$ & $0.25$\\
+$4$ & $6$ & $ 1.5$ & $ 2.5$ & $3.75$ & $2.25$\\
+\midrule
+    &     &        &        & $\mathbf{8.00}$ & $\mathbf{5.00}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Hence $w^\star = 8.00/5.00 = 1.6$ and $b^\star = 3.5 - 1.6(2.5) = -0.5$: the
+fitted line is $f(x) = 1.6x - 0.5$.
+
+Its residuals and cost:
+\begin{center}
+\small
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$\xii{i}$ & $\yii{i}$ & $\yhat^{(i)}$ & $r^{(i)}$\\
+\midrule
+$1$ & $1$ & $1.1$ & $+0.1$\\
+$2$ & $3$ & $2.7$ & $-0.3$\\
+$3$ & $4$ & $4.3$ & $+0.3$\\
+$4$ & $6$ & $5.9$ & $-0.1$\\
+\bottomrule
+\end{tabular}
+\end{center}
+$\sum_i (r^{(i)})^2 = 0.01+0.09+0.09+0.01 = 0.20$, so
+$J = 0.20/(2\cdot 4) = 0.025$, matching point~A of \cref{fig:contours}.
+
+\textbf{Two checks worth doing every time.} The residuals sum to
+$0.1-0.3+0.3-0.1 = 0$, and weighted by $x$ they also sum to
+$0.1 - 0.6 + 0.9 - 0.4 = 0$. These are not coincidences: they are precisely the
+two equations $\partial J/\partial b = 0$ and $\partial J/\partial w = 0$ that
+we solved. If your fitted residuals fail either check, the fit is wrong.
+\end{workedexample}
+
+Applying \cref{eq:closed-form} to the twelve apartments of \cref{ch:ch01}
+returns $w^\star = 3.2984$ and $b^\star = 4.3308$ with $J = 2.4845$ --- the
+numbers quoted there, now derived rather than asserted.
+
+\subsection{Then why does the rest of the book exist?}
+
+A fair question: we have solved the problem exactly, in closed form, in half a
+page. Three reasons this is not the end of the story, each of which motivates a
+later chapter.
+
+\begin{itemize}
+  \item \textbf{More features.} With $n$ features, \cref{eq:closed-form}
+        generalises to a matrix equation requiring the inversion of an
+        $n\times n$ matrix, at a cost of about $n^{3}$ operations. At $n =
+        10{,}000$ features --- unremarkable for text or images --- that is out
+        of reach. \Cref{ch:ch04} derives it anyway, and says exactly when to use
+        it.
+  \item \textbf{The matrix may not be invertible}, for instance when two
+        features are duplicates of each other. Also \cref{ch:ch04}.
+  \item \textbf{Most cost functions have no closed form at all.} The moment we
+        change the model --- to logistic regression in \cref{ch:ch06}, or to a
+        neural network in \cref{ch:ch09} --- setting the derivatives to zero
+        produces equations no one can solve in closed form. An iterative method
+        that needs only the derivatives, and never solves anything exactly, is
+        the only approach that survives. That method is \cref{ch:ch03}'s
+        gradient descent, and this chapter's bowl is the landscape it walks on.
+\end{itemize}
+
+\section{Least Squares as Projection}
+\label{sec:projection}
+
+The derivation above is correct but unilluminating; the geometry behind it is
+worth five minutes because it makes the two residual checks obvious rather than
+lucky.
+
+Work in $\Real{m}$, with one dimension per training example. This space is not
+the plane of the scatter plot. In it the observations form a single
+vector $\vy = (\yii{1},\dots,\yii{m})$, the inputs form a vector
+$\vx = (\xii{1},\dots,\xii{m})$, and $\mathbf{1} = (1,\dots,1)$. The model's
+predictions are then
+\[
+  \hat{\vy} \;=\; w\,\vx + b\,\mathbf{1},
+\]
+which, as $w$ and $b$ range over all real numbers, sweeps out exactly the plane
+through the origin spanned by $\vx$ and $\mathbf{1}$. Call it $\Hspace$: it is
+the hypothesis space, drawn.
+
+Minimising $J = \frac{1}{2m}\|\hat{\vy} - \vy\|^2$ therefore means finding the
+point of that plane closest to $\vy$. Geometry answers this without any
+calculus: the closest point is the \term{orthogonal projection} of $\vy$ onto
+the plane, and the vector joining them --- the residual $\mathbf{r}$ --- is
+perpendicular to the plane.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[scale=1.15, every node/.style={font=\small}]
+    % the hypothesis plane, spanned by x and 1
+    \fill[MLLight,draw=MLBlue!45]
+      (-3.0,-0.9) -- (3.0,-1.7) -- (4.1,0.8) -- (-1.9,1.6) -- cycle;
+    \node[MLBlue!70,anchor=north east,font=\footnotesize] at (4.0,0.7)
+      {$\Hspace = \operatorname{span}\{\vx,\mathbf{1}\}$};
+    \coordinate (O)   at (-1.2,-0.20);
+    \coordinate (P)   at ( 1.70, 0.05);
+    \coordinate (Y)   at ( 1.70, 2.60);
+    \coordinate (X)   at ( 0.20,-0.95);
+    \coordinate (ONE) at (-1.75, 0.85);
+    \draw[-{Stealth},MLGray]      (O) -- (X)
+      node[anchor=north,font=\footnotesize] {$\vx$};
+    \draw[-{Stealth},MLGray]      (O) -- (ONE)
+      node[anchor=east,font=\footnotesize] {$\mathbf{1}$};
+    \draw[-{Stealth},MLBlue,very thick] (O) -- (Y)
+      node[midway,anchor=south east,font=\footnotesize] {$\vy$};
+    \draw[-{Stealth},MLTeal,very thick] (O) -- (P)
+      node[midway,anchor=north,font=\footnotesize] {$\hat{\vy}=w\vx+b\mathbf{1}$};
+    \draw[-{Stealth},MLRose,very thick] (Y) -- (P)
+      node[midway,anchor=west,font=\footnotesize] {$\mathbf{r}=\hat{\vy}-\vy$};
+    % right angle between the residual and the plane
+    \draw[MLRose,thin] ($(P)+(0,0.30)$) -- ($(P)+(-0.30,0.33)$)
+                       -- ($(P)+(-0.30,0.03)$);
+    \fill[MLGray] (O) circle (1.2pt);
+    \fill[MLTeal] (P) circle (1.4pt);
+    \fill[MLBlue] (Y) circle (1.4pt);
+  \end{tikzpicture}
+  \caption{Least squares in $\Real{m}$. Every model the hypothesis space
+  contains lies in the plane spanned by $\vx$ and $\mathbf{1}$. The observation
+  vector $\vy$ generally does not. The best model is the point of the plane
+  nearest $\vy$, and the residual is perpendicular to the plane.}
+  \label{fig:projection}
+\end{figure}
+
+Perpendicular to the plane means perpendicular to everything in it, and in
+particular to the two vectors that span it:
+\[
+  \mathbf{r}\cdot\mathbf{1} = 0
+  \quad\text{i.e.}\quad \sum_i r^{(i)} = 0,
+  \qquad\qquad
+  \mathbf{r}\cdot\vx = 0
+  \quad\text{i.e.}\quad \sum_i r^{(i)}\xii{i} = 0 .
+\]
+These are the two checks from the worked example, and they are the same two
+equations obtained by setting the partial derivatives to zero. Calculus and
+geometry give the identical answer, as they must.
+
+\begin{keyinsight}{What fitting actually does}
+Fitting does not find the ``true'' line. It finds the point of the hypothesis
+space nearest the data, in the squared-distance sense. If the truth is not in
+the hypothesis space --- if the data is curved and $\Hspace$ contains only
+straight lines --- fitting will still return the nearest line, cheerfully and
+without complaint. The distance that remains, $\|\mathbf{r}\|$, is the part of
+the data your model cannot represent, and \cref{ch:ch10} gives it a name:
+\emph{bias}.
+\end{keyinsight}
+
+\section{A Low Cost Is Not a Good Model}
+\label{sec:low-cost}
+
+The cost is the quantity we minimise. It is not the quantity we care about, and
+the gap between the two is where most beginners' models go wrong.
+
+\subsection{The cost has no scale}
+
+$J = 2.4845$ was a good result in \cref{ch:ch01} and $J = 0.025$ is a good
+result here, but neither number means anything on its own: $J$ carries the
+squared units of $y$, so changing the units of the target changes $J$ by a
+constant factor while changing nothing about the model. You cannot compare $J$
+across datasets, and you cannot conclude anything from a single value of it. Use
+a baseline, as \cref{ch:ch01} insisted, or report the root mean squared error
+$\sqrt{2J}$, which at least has the same units as $y$.
+
+\subsection{Squares make outliers loud}
+
+Because the cost squares each residual, one badly wrong observation can dominate
+the sum and drag the whole fit toward itself.
+
+\begin{workedexample}{One bad point moves the line}
+Add a single erroneous fifth observation to the four-point set, $(5, 30)$ ---
+say a data-entry slip that put an extra digit on a price. Refitting with
+\cref{eq:closed-form} gives
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& $w$ & $b$ & $\yhat$ at $x=1$ & $\yhat$ at $x=4$\\
+\midrule
+without the outlier & $1.6$ & $-0.5$ & $1.1$  & $5.9$\\
+with the outlier    & $6.1$ & $-9.5$ & $-3.4$ & $14.9$\\
+\midrule
+observed $y$        &       &        & $1$    & $6$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+One point in five has nearly quadrupled the slope and made the model predict a
+negative value where the data says $1$. The four original points are now fitted
+far worse than before, and the fit is worse \emph{everywhere} rather than just
+near the outlier. Nothing in the procedure noticed or objected: $J$ was
+faithfully minimised throughout.
+\end{workedexample}
+
+\begin{pitfall}{Minimising $J$ is not the same as fitting well}
+The optimizer answers exactly the question you asked: which member of
+$\Hspace$ minimises this cost on this data. It cannot tell you that
+\begin{itemize}
+  \item an observation is a typo, or a different kind of thing from the rest;
+  \item the relationship is curved, so no line will do (\cref{ch:ch05});
+  \item the model fits the training data beautifully and new data terribly
+        (\cref{ch:ch07});
+  \item the input you fitted on will not be available at prediction time
+        (\cref{ch:ch21}).
+\end{itemize}
+Always plot the data and the fitted model together, and always plot the
+residuals against $x$. A residual plot showing structure --- a curve, a fan, a
+cluster far from the rest --- is telling you that the hypothesis space is wrong,
+and no amount of further optimization will fix that.
+\end{pitfall}
+
+\begin{labbox}{Lab 2 --- The cost function}
+Implement \code{cost(x, y, w, b)} for the four-point set and confirm
+$J(1.6,-0.5) = 0.0250$, $J(1,1) = 0.2500$ and $J(2.2,-2) = 0.2500$. Plot $J(w)$
+with $b=0$ for the three-point set and check the vertex against the table in
+\cref{sec:cost-one-param}. Then produce a contour plot matching
+\cref{fig:contours}, and implement \cref{eq:closed-form} to recover
+$w^\star = 1.6$, $b^\star = -0.5$. Finally, verify both residual identities to
+machine precision: $\sum_i r^{(i)}$ and $\sum_i r^{(i)}\xii{i}$ should each come
+out below $10^{-12}$ in magnitude, not merely small.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item The univariate model is $\fwb(x) = wx+b$; $w$ tilts the line and $b$
+        raises it. Each pair $(w,b)$ is one point in parameter space and one
+        line in data space, and keeping the two spaces distinct is essential.
+  \item The residual is $r^{(i)} = \fwb(\xii{i}) - \yii{i}$, and the cost is
+        $J(w,b) = \frac{1}{2m}\sum_i (r^{(i)})^2 = \frac{1}{2m}\|\mathbf{r}\|^2$.
+  \item Squares are used because they are symmetric, differentiable, admit a
+        closed-form solution, and correspond to Gaussian noise; the $1/m$ makes
+        the cost independent of dataset size; the $\tfrac12$ cancels the $2$
+        from differentiation and changes nothing else.
+  \item With one parameter $J$ is an upward-opening parabola; with two it is a
+        bowl. Both are convex, so there is exactly one minimum.
+  \item Contours join parameter pairs of equal cost. The innermost contour
+        surrounds the minimum, points on one contour are equally good, and
+        elongated elliptical contours signal features on very different scales.
+  \item The minimum is available in closed form:
+        $w^\star = \sum_i (\xii{i}-\bar x)(\yii{i}-\bar y) / \sum_i (\xii{i}-\bar
+        x)^2$ and $b^\star = \bar y - w^\star\bar x$. The fitted line always
+        passes through $(\bar x, \bar y)$, and its residuals satisfy
+        $\sum_i r^{(i)} = 0$ and $\sum_i r^{(i)}\xii{i} = 0$.
+  \item Geometrically, fitting is the orthogonal projection of $\vy$ onto the
+        plane spanned by $\vx$ and $\mathbf{1}$; the two residual identities are
+        that perpendicularity.
+  \item A small $J$ is not by itself evidence of a good model: $J$ has no
+        absolute scale, squaring amplifies outliers, and the cost is blind to
+        every question except the one it was asked.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq State the univariate linear regression model and say, in one sentence each,
+what $w$ and $b$ control.
+
+\sq Define the residual of a training example. Under what circumstances is it
+positive?
+
+\sq Write down the squared-error cost function and state the units of $J$ when
+$y$ is measured in kilograms.
+
+\sq Give two reasons for squaring the residuals rather than taking their
+absolute value.
+
+\sq Why does the $\tfrac12$ in $J$ not change which line is chosen?
+
+\sq A dataset is duplicated so that every example appears twice. What happens to
+$\sum_i (r^{(i)})^2$, and what happens to $J$?
+
+\sq Sketch $J(w)$ for a model with $b$ fixed. Why can this curve have no local
+minimum other than the global one?
+
+\sq Two parameter pairs lie on the same contour of $J$. What does that tell you
+about them, and what does it not tell you?
+
+\sq The contours of $J$ for some dataset are long thin ellipses. What does this
+say about the data, and which later chapter addresses it?
+
+\sq State the two identities satisfied by the residuals of a least-squares fit,
+and say what they mean geometrically.
+
+\exercisesection{Analytical Problems}
+
+\ap For the four-point set of \cref{sec:notation}, compute $J(2,0)$ and
+$J(1,0.5)$ by hand, showing the residual for each example. Which of the two
+lines is better, and by how much?
+
+\ap Using \cref{eq:closed-form}, fit a line to the three points $(0,1)$,
+$(1,2)$, $(2,6)$. Report $w^\star$, $b^\star$ and $J$, and verify both residual
+identities.
+
+\ap Show that the value of $b$ minimising $J$ for a fixed $w$ is
+$b = \bar y - w\bar x$, and hence that every least-squares line passes through
+$(\bar x, \bar y)$, regardless of the data.
+
+\ap Suppose every target is multiplied by a constant $c > 0$, so that
+$\yii{i} \mapsto c\,\yii{i}$. Show that the optimal parameters become
+$(cw^\star, cb^\star)$ and that the minimum cost becomes $c^2$ times its
+original value. What does this imply about comparing $J$ between two models
+whose targets are measured in different units?
+
+\ap Expand $J(w,b)$ for a general dataset into the form
+$Aw^2 + Bwb + Cb^2 + Dw + Eb + F$ and express each of the six coefficients in
+terms of $m$ and the sums $\sum x$, $\sum x^2$, $\sum y$, $\sum y^2$,
+$\sum xy$. Verify your expressions against \cref{eq:t4-cost}.
+
+\ap Consider fitting the constant model $f(x) = b$ (that is, $w$ forced to zero)
+to the four-point set. Find the optimal $b$ and the resulting $J$, and compare
+with the $J = 0.025$ of the full model. What fraction of the cost did the slope
+remove?
+
+\exercisesection{Design Problems}
+
+\dpr A colleague proposes replacing the squared-error cost with
+$J' = \frac{1}{m}\sum_i |r^{(i)}|$ for a dataset known to contain occasional
+data-entry errors. Set out the argument for and against, covering the effect on
+outliers, on the existence of a closed-form solution, and on the optimizer of
+\cref{ch:ch03}. What would you recommend, and what would you check first?
+
+\dpr You are fitting a model that predicts a patient's dose of a drug from their
+body mass. Over-prediction and under-prediction are not equally harmful. Propose
+a modification to the cost function that reflects this, state what property of
+$J$ your modification preserves or destroys, and describe how you would choose
+its parameter.
+
+\dpr A model is to be reported to a non-technical audience who will ask ``how
+accurate is it?''. You have $J$, the root mean squared error, and the mean
+absolute error available. Choose one, justify the choice, and write the single
+sentence you would put in the report.
+
+\dpr Design a small dataset --- at most six points --- for which the
+least-squares line is a visibly poor description of the data even though it is
+the exact minimiser of $J$. Explain what feature of your dataset causes this,
+and what a residual plot would show.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement \code{cost(x, y, w, b)} without a loop over examples, and
+reproduce the table in \cref{sec:cost-one-param} and the three values marked in
+\cref{fig:contours}.
+
+\pe Plot $J(w)$ for the four-point set with $b$ fixed at $-0.5$, over
+$w \in [0, 3]$. Mark the minimum. Then plot it again with $b$ fixed at $0$ and
+explain, in one sentence, why the two minima occur at different values of $w$.
+
+\pe Draw a contour plot of $J(w,b)$ for the four-point set by evaluating $J$ on
+a grid and calling your plotting library's contour routine. Overlay the three
+points A, B and C of \cref{fig:contours}. Then repeat for the twelve apartments
+of \cref{ch:ch01} and comment on the difference in shape.
+
+\pe Implement \cref{eq:closed-form} and verify it on both the four-point set and
+the apartment data. Then write a brute-force alternative that evaluates $J$ over
+a fine grid of $(w,b)$ and reports the best pair found. How fine must the grid be
+to agree with the closed form to three decimal places, and how many evaluations
+is that?
+
+\exercisesection{Self-Test}
+
+\qz $J(w,b)$ is a function of: (a)~the training data; (b)~the parameters;
+(c)~the predictions; (d)~the residuals only.
+
+\qz Doubling every residual multiplies $J$ by: (a)~$2$; (b)~$4$;
+(c)~$\sqrt{2}$; (d)~it depends on $m$.
+
+\qz The $\tfrac12$ in the cost function exists to: (a)~halve the error;
+(b)~cancel the $2$ from differentiating the square; (c)~keep $J$ below $1$;
+(d)~average over both parameters.
+
+\qz Points on the same contour of $J$ have equal: (a)~slope; (b)~intercept;
+(c)~cost; (d)~residuals.
+
+\qz The least-squares line always passes through: (a)~the origin; (b)~the first
+training example; (c)~the point $(\bar x, \bar y)$; (d)~none of these.
+
+\qz If $\sum_i r^{(i)} \neq 0$ for a supposedly least-squares fit, then:
+(a)~the data is noisy; (b)~the fit is wrong; (c)~$m$ is too small; (d)~the cost
+needs a $\tfrac12$.
+
+\qz The contours of $J$ are circles rather than ellipses when: (a)~the data is
+noise-free; (b)~$m$ is large; (c)~the feature is centred and suitably scaled;
+(d)~never.
+
+\qz A model achieves $J = 0$ on its training set. This means: (a)~the model is
+correct; (b)~the model will generalise; (c)~every training point lies exactly on
+the fitted line; (d)~the cost function is misconfigured.
+
+\furtherreading
+
+\textcite{james2021} §3.1 covers simple linear regression, including the
+closed-form coefficients derived in \cref{sec:closed-form}; read §3.1.1 and
+§3.1.2 now and return to §3.1.3 after \cref{ch:ch10}, since it concerns
+assessing a fit rather than obtaining one. \textcite{bishop2006} §1.1 sets up
+the same cost through polynomial curve fitting and is worth reading for the
+alternative framing, while §3.1.1 gives the geometric projection picture of
+\cref{sec:projection} in full generality.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch03} keeps the bowl and throws away the closed
+form. We ask how a program that can measure the local slope, and nothing else,
+can find the bottom of a surface it cannot see.

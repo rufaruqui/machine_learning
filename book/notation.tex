@@ -1,0 +1,88 @@
+%% notation.tex --- the notation table, front matter
+%% Symbols here match the companion lecture slides. Keep the two in step.
+
+\chapter*{Notation}
+\addcontentsline{toc}{chapter}{Notation}
+\markboth{Notation}{Notation}
+
+One set of symbols is used throughout the book. Where a chapter needs more, it
+extends this table rather than redefining it.
+
+\vspace{4pt}
+\noindent\textbf{Data.}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{2.6cm}L{7.4cm}L{1.6cm}@{}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{From}\\
+\midrule
+$x$                 & an input variable, or \emph{feature} & Ch.\ 1\\
+$y$                 & the output, or \emph{target}, we wish to predict & Ch.\ 1\\
+$m$                 & number of training examples & Ch.\ 1\\
+$n$                 & number of features & Ch.\ 4\\
+$\xii{i},\ \yii{i}$ & the $i$-th training example; the superscript is an index, not a power & Ch.\ 1\\
+$\xjj{i}{j}$        & feature $j$ of training example $i$ & Ch.\ 4\\
+$\vx$               & a feature vector, $\vx\in\Real{n}$ & Ch.\ 4\\
+$\Xmat$             & the design matrix, $m\times n$ & Ch.\ 4\\
+$\vy$               & the vector of targets, $\vy\in\Real{m}$ & Ch.\ 4\\
+$\Dset$             & the training set $\{(\xii{i},\yii{i})\}_{i=1}^{m}$ & Ch.\ 1\\
+$\Xspace,\ \Yspace$ & the input space and the output space & Ch.\ 1\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{6pt}
+\noindent\textbf{Models and learning.}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{2.6cm}L{7.4cm}L{1.6cm}@{}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{From}\\
+\midrule
+$f$                 & the model, or hypothesis, $f:\Xspace\to\Yspace$ & Ch.\ 1\\
+$\Hspace$           & the hypothesis space: every model the algorithm may return & Ch.\ 1\\
+$\yhat$             & a prediction, $\yhat=f(x)$ & Ch.\ 1\\
+$w,\ b$             & the weight and the bias of a univariate linear model & Ch.\ 2\\
+$\vw$               & the weight vector, $\vw\in\Real{n}$ & Ch.\ 4\\
+$\fwb,\ \fvwb$      & the model with parameters $(w,b)$, or $(\vw,b)$ & Ch.\ 2\\
+$J(w,b)$            & the cost: the objective minimised over the training set & Ch.\ 2\\
+$\loss$             & the loss on a single example & Ch.\ 6\\
+$\alpha$            & the learning rate, or step size & Ch.\ 3\\
+$\lambda$           & the regularization strength & Ch.\ 7\\
+$\grad J$           & the gradient of $J$ & Ch.\ 4\\
+$\argmin$           & the argument at which a function attains its minimum & Ch.\ 2\\
+$\gsig(z)$          & the sigmoid, $\gsig(z)=1/(1+e^{-z})$ & Ch.\ 6\\
+$\aL{l}{j}$         & activation of unit $j$ in layer $l$ & Ch.\ 8\\
+$\Wl{l},\ \bl{l}$   & weights and biases of layer $l$ & Ch.\ 8\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{6pt}
+\noindent\textbf{Mathematics.}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{2.6cm}L{7.4cm}L{1.6cm}@{}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{From}\\
+\midrule
+$\R,\ \Real{n}$     & the reals; the space of real $n$-vectors & Ch.\ 1\\
+$\Prob(A)$          & the probability of an event & Ch.\ 6\\
+$\Exp[X]$           & the expectation of a random variable & Ch.\ 10\\
+$\|\vx\|$           & the Euclidean norm of $\vx$ & App.\ A\\
+$\vw\cdot\vx$       & the dot product $\sum_j w_j x_j$ & Ch.\ 4\\
+$\Xmat^{\mathsf{T}}$ & the transpose of a matrix & Ch.\ 4\\
+$:=$                & assignment, as opposed to the assertion $=$ & Ch.\ 3\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{6pt}
+\noindent A superscript in parentheses is always an example index, never an
+exponent: $\xii{2}$ is the second training example, while $x^2$ is $x$ squared.
+Vectors are column vectors and are set in bold, $\vx$; scalars are italic, $x$.
+
+\cleardoublepage

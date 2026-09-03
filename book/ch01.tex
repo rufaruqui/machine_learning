@@ -1,0 +1,1033 @@
+%% ch01.tex --- What Machine Learning Is
+%% Numbers in Section 1.8 are computed by verify/ch01_flat_prices.py.
+
+\chapter{What Machine Learning Is}
+\label{ch:ch01}
+
+\epigraph{Programming computers to learn from experience should eventually
+eliminate the need for much of this detailed programming effort.}%
+{---\ Arthur L.\ Samuel, 1959}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Say what distinguishes a machine learning solution from an ordinary
+        program, and recognise the situations in which the distinction matters.
+  \item State Mitchell's definition of learning and instantiate
+        $\langle T, P, E\rangle$ for a problem you are given.
+  \item Name the four components present in every supervised learning
+        algorithm: the data, the hypothesis space, the cost, and the optimizer.
+  \item Classify a problem as supervised regression, supervised
+        classification, unsupervised, or reinforcement learning, and justify
+        the classification.
+  \item Read a scatter plot with a fitted model on it, and compute the cost of
+        that model on the plotted data.
+  \item Explain why a model must be judged against a baseline and on data it
+        has not seen.
+  \item Identify problems for which machine learning is the wrong tool.
+\end{enumerate}
+\end{chapterlearning}
+
+\section{Two Ways to Make a Computer Do Something}
+\label{sec:two-ways}
+
+Consider two tasks. The first: given a list of one million numbers, sort it into
+ascending order. The second: given a photograph, decide whether it contains a
+cat.
+
+You already know how to do the first. You choose an algorithm, you write it
+down, you can prove it correct, and you can state exactly how long it will take.
+The rules that solve the problem are known in advance, and programming consists
+of writing them out in a language a machine can execute.
+
+Now try to do the same for the second task. Write down the rules that decide
+whether a photograph contains a cat. You will find yourself reaching for
+conditions like \emph{two triangular ears near the top} or \emph{a pair of
+elliptical highlights where the eyes are}, and every one of them will fail on
+photographs a three-year-old classifies instantly: a cat seen from behind, a
+black cat in shadow, a cat behind a chair leg. The rules exist --- you apply them
+several times a day --- but nobody can state them.
+
+This is the gap machine learning fills. Instead of supplying the rules, you
+supply examples of the correct answers, and a learning algorithm searches for
+rules consistent with them. \Cref{fig:two-ways} draws the difference.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    {\small\textbf{Classical programming}\par}
+    \vspace{4pt}
+    \begin{tikzpicture}[node distance=5mm,
+                        every node/.style={font=\scriptsize}]
+      \node[draw,rounded corners,fill=MLLight,minimum width=1.5cm] (r) {Rules};
+      \node[draw,rounded corners,fill=MLLight,minimum width=1.5cm,below=of r] (d) {Data};
+      \node[draw,fill=MLBlue,text=white,rounded corners,
+            right=7mm of $(r)!0.5!(d)$] (p) {Program};
+      \node[draw,rounded corners,fill=MLAmber!25,right=7mm of p] (a) {Answers};
+      \draw[-{Stealth}] (r) -- (p);
+      \draw[-{Stealth}] (d) -- (p);
+      \draw[-{Stealth}] (p) -- (a);
+    \end{tikzpicture}
+    \vspace{4pt}
+    {\scriptsize The human supplies the rules.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.47\linewidth}
+    \centering
+    {\small\textbf{Machine learning}\par}
+    \vspace{4pt}
+    \begin{tikzpicture}[node distance=5mm,
+                        every node/.style={font=\scriptsize}]
+      \node[draw,rounded corners,fill=MLLight,minimum width=1.5cm] (d) {Data};
+      \node[draw,rounded corners,fill=MLLight,minimum width=1.5cm,below=of d] (a) {Answers};
+      \node[draw,fill=MLTeal,text=white,rounded corners,
+            right=7mm of $(d)!0.5!(a)$] (t) {Training};
+      \node[draw,rounded corners,fill=MLAmber!25,right=7mm of t] (r) {Rules};
+      \draw[-{Stealth}] (d) -- (t);
+      \draw[-{Stealth}] (a) -- (t);
+      \draw[-{Stealth}] (t) -- (r);
+    \end{tikzpicture}
+    \vspace{4pt}
+    {\scriptsize The machine infers the rules from examples.\par}
+  \end{minipage}
+  \caption{The two arrangements. Machine learning inverts the usual flow: rules
+  become an output rather than an input.}
+  \label{fig:two-ways}
+\end{figure}
+
+The inversion has a consequence that is easy to state and hard to internalise.
+In classical programming, the program is the thing you write and the answers are
+what you get. In machine learning, the answers are what you supply and the
+program is what you get. Everything that is difficult about the subject follows
+from this: the quality of what you get out is bounded by the quality of the
+examples you put in, and the rules you get are not written in a form you can
+easily read.
+
+\begin{keyinsight}{When to reach for machine learning}
+Machine learning is not magic, and it is not a replacement for algorithms. It is
+the tool of choice in exactly one situation: when a rule exists but cannot be
+written down, and examples of the rule's output are available in quantity. If
+you can state the rule, state it --- the resulting program will be faster,
+smaller, testable, and explainable.
+\end{keyinsight}
+
+\section{Where Machine Learning Is Used}
+\label{sec:applications}
+
+You have already used a dozen learned models today. \Cref{tab:applications}
+lists a few, with the part of each system that is learned rather than
+programmed.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}L{3.3cm}L{3.9cm}L{4.0cm}@{}}
+    \toprule
+    \textbf{System} & \textbf{What is learned} & \textbf{From what examples}\\
+    \midrule
+    Web search        & how well a page answers a query & billions of past
+                        queries and the results people clicked\\
+    Spam filtering    & whether a message is unwanted    & messages users marked
+                        as spam or not\\
+    Speech recognition& which words an audio clip contains & transcribed audio\\
+    Machine translation & a sentence in another language & aligned sentence
+                        pairs\\
+    Medical imaging   & whether a scan is suspicious     & scans labelled by
+                        radiologists\\
+    Credit scoring    & the probability a loan is repaid & past loans and their
+                        outcomes\\
+    Predictive maintenance & when a machine will fail    & sensor logs with
+                        recorded failures\\
+    Recommendation    & what a user will want next       & what similar users
+                        chose\\
+    \bottomrule
+  \end{tabular}
+  \caption{Applications, and the component in each that is learned from data.}
+  \label{tab:applications}
+\end{table}
+
+The common thread is worth naming, because it is also the checklist you will use
+when someone proposes a machine learning project. In every row: a large pool of
+\emph{recorded past decisions} exists; the decision rule is too intricate,
+too varied, or too personal to hand-code; and a small error rate is tolerable.
+Take away any one of the three and the case for learning weakens. There is no
+pool of recorded decisions for a system nobody has operated yet. The rule for
+computing sales tax is intricate but perfectly writable, so learning it from
+examples of receipts would be an act of self-harm. And no error rate is
+tolerable in the code that computes a bank balance.
+
+\section{Defining Learning}
+\label{sec:defining}
+
+Two definitions have stuck, and they do different jobs.
+
+\begin{defbox}{Machine learning, informally}
+Machine learning is the field of study that gives computers the ability to learn
+without being explicitly programmed.
+\end{defbox}
+
+This is the popular paraphrase of Arthur Samuel's position, and it is a good
+slogan: it says what the field is \emph{for}. What it does not do is tell you
+whether a particular system is working. For that we need a definition with
+moving parts.
+
+\begin{defbox}{Machine learning, operationally (Mitchell)}
+A computer program is said to \term{learn} from experience $E$ with respect to
+some class of tasks $T$ and performance measure $P$, if its performance at tasks
+in $T$, as measured by $P$, improves with experience $E$.
+\end{defbox}
+
+Mitchell's definition earns its place by forcing you to name three things before
+you write any code \parencite{mitchell1997}. Name the task $T$, and you have
+said what the system does. Name the performance measure $P$, and you have said
+how you will know whether it works. Name the experience $E$, and you have said
+what data you need. A project that cannot fill in all three boxes is not yet a
+project. In my experience the box most often left empty is $P$, and the projects
+that leave it empty are the ones that run for months without anyone being able
+to say whether they are succeeding.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}L{2.3cm}L{2.9cm}L{3.1cm}L{2.9cm}@{}}
+    \toprule
+    \textbf{Problem} & \textbf{Task $T$} & \textbf{Performance $P$} &
+    \textbf{Experience $E$}\\
+    \midrule
+    Checkers player & play a game of checkers &
+      fraction of games won against opponents &
+      games played against itself\\
+    Spam filter & label a message spam or not &
+      fraction of messages labelled correctly &
+      a corpus of user-flagged messages\\
+    Price estimator & predict a sale price from floor area &
+      mean squared prediction error &
+      records of past sales\\
+    Handwriting reader & identify the digit in an image &
+      fraction of digits read correctly &
+      images labelled by hand\\
+    \bottomrule
+  \end{tabular}
+  \caption{Four problems with $\langle T,P,E\rangle$ filled in. Doing this
+  before writing code is the cheapest useful step in a project.}
+  \label{tab:tpe}
+\end{table}
+
+\begin{pitfall}{Accuracy is not automatically the right $P$}
+Suppose a spam filter is evaluated on a mailbox in which $99\%$ of messages are
+legitimate. The program \code{return "not spam"} --- which contains no learning,
+no data, and no intelligence --- achieves $99\%$ accuracy. Any real filter that
+scores $97\%$ looks worse by this measure while being infinitely more useful.
+Choosing $P$ is a design decision with consequences, and on skewed data,
+accuracy is usually the wrong choice. We return to this in \cref{ch:ch11} with
+measures that survive skew.
+\end{pitfall}
+
+\begin{researchspotlight}{Samuel (1959) --- Studies in Machine Learning Using the Game of Checkers}
+\textbf{The problem.} In the 1950s, getting a computer to play a board game well
+meant a programmer encoding their own judgement of a good position. Samuel, at
+IBM, wanted the machine to acquire that judgement itself.
+
+\textbf{The idea.} His program evaluated a board position with a weighted sum of
+simple features --- piece count, kings, control of the centre. The weights were
+not set by hand. The program played, recorded which positions preceded wins, and
+adjusted the weights toward evaluations that had proved predictive: an early
+form of what \cref{ch:ch17} calls temporal-difference learning. A second scheme,
+rote learning, cached previously evaluated positions.
+
+\textbf{The result.} The program came to play a better game than Samuel himself,
+who was a weak player, and it did so on an IBM 704 with a few kilobytes of
+memory. That a program could exceed its author's ability at the very task it was
+written for was the paper's real contribution, and it remains the clearest
+one-sentence argument for the field.
+
+\textbf{Reading it today.} The famous definition quoted at the top of this
+section is a paraphrase; the phrase ``without being explicitly programmed'' does
+not appear verbatim in the paper. What does appear, in the first paragraph, is
+the epigraph to this chapter --- a more modest and more accurate claim.
+\parencite{samuel1959}
+\end{researchspotlight}
+
+\section{The Four Parts of a Learning Algorithm}
+\label{sec:four-parts}
+
+Every supervised learning method in this book --- linear regression, logistic
+regression, neural networks, decision trees --- is assembled from the same four
+components. Learning to see them separately is the single most useful habit you
+can form in this chapter, because when a model misbehaves, the fix always lies
+in exactly one of the four.
+
+\subsection{The data}
+
+\begin{defbox}{Training set}
+A \term{training set} is a collection of $m$ examples
+\[
+  \Dset \;=\; \bigl\{(\xii{1},\yii{1}),\,(\xii{2},\yii{2}),\,\dots,\,
+                     (\xii{m},\yii{m})\bigr\},
+  \quad \xii{i}\in\Xspace,\; \yii{i}\in\Yspace,
+\]
+where $\xii{i}$ is the \term{input} (or \term{feature}) of the $i$-th example and
+$\yii{i}$ is its \term{target} (or \term{label}). The superscript in parentheses
+is an index, never an exponent.
+\end{defbox}
+
+That last sentence is not pedantry. Throughout this book $\xii{2}$ means the
+second training example and $x^2$ means $x$ squared, and the two appear in the
+same equation often enough that confusing them will cost you an exercise.
+
+\subsection{The hypothesis space}
+
+The learning algorithm does not search all possible functions --- there are far
+too many, and most of them merely memorise the training data. Instead you choose,
+in advance, a family of candidate functions.
+
+\begin{defbox}{Hypothesis space}
+The \term{hypothesis space} $\Hspace$ is the set of functions
+$f:\Xspace\to\Yspace$ that the learning algorithm is permitted to return. It is
+chosen by the designer, before training, and it is usually described by a small
+number of \term{parameters}.
+\end{defbox}
+
+For example, taking $\Hspace$ to be the set of straight lines
+$\{f(x)=wx+b : w,b\in\R\}$ gives \term{linear regression}, the subject of
+\cref{ch:ch02}. Every choice of $(w,b)$ is one hypothesis; learning means
+choosing among them. Choosing $\Hspace$ well is the central modelling decision:
+too small and no member of it fits the data (\cref{ch:ch10} calls this
+\emph{bias}), too large and many members fit the training data while disagreeing
+wildly elsewhere (\emph{variance}, and \cref{ch:ch07}'s \emph{overfitting}).
+
+\subsection{The cost function}
+
+Given a candidate $f$, we need a number saying how badly it does on the training
+set. That number is the \term{cost} (or objective) $J$. For regression, the usual
+choice measures squared error,
+\[
+  J \;=\; \frac{1}{2m}\sum_{i=1}^{m}\bigl(f(\xii{i}) - \yii{i}\bigr)^2 ,
+\]
+and \cref{ch:ch02} explains every part of it, including the otherwise mysterious
+$\tfrac12$. For now, note only that $J$ is a function of the parameters, not of
+the data: the data is fixed, and the parameters are what we vary.
+
+\subsection{The optimizer}
+
+Finally, something must search $\Hspace$ for the hypothesis of least cost:
+\[
+  f^\star \;=\; \argmin_{f\in\Hspace} J(f).
+\]
+Sometimes this can be solved with algebra in one step (\cref{ch:ch04}'s normal
+equation). Usually it cannot, and we use \term{gradient descent}
+(\cref{ch:ch03}), which starts from a guess and repeatedly steps downhill.
+
+\begin{keyinsight}{Learning is search}
+Learning is a search over a hypothesis space, guided by a cost function. The
+model you get is not ``what the data says''; it is the cheapest member of a
+family \emph{you} chose, measured by a criterion \emph{you} chose. Change the
+family or the criterion and you get a different answer from identical data.
+\end{keyinsight}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize},node distance=7mm]
+    \node[draw,rounded corners,fill=MLLight,align=center,minimum height=9mm]
+      (D) {Training set\\ $(\xii{i},\yii{i})_{i=1}^{m}$};
+    \node[draw,fill=MLTeal,text=white,rounded corners,right=of D,
+          minimum height=9mm,align=center] (L) {Learning algorithm\\
+          \scriptsize ($\Hspace$, $J$, optimizer)};
+    \node[draw,fill=MLBlue,text=white,rounded corners,right=of L,
+          minimum height=9mm] (f) {model $f$};
+    \node[right=12mm of f,align=center] (x) {new input $x$};
+    \node[below=9mm of f,align=center] (yh) {prediction $\yhat=f(x)$};
+    \draw[-{Stealth}] (D) -- (L);
+    \draw[-{Stealth}] (L) -- (f);
+    \draw[-{Stealth}] (x) -- (f);
+    \draw[-{Stealth}] (f) -- (yh);
+  \end{tikzpicture}
+  \caption{The supervised learning pipeline. Training happens once, on the left;
+  prediction happens many times, on the right. The two are separated in time,
+  and confusing them is the source of most leakage bugs (\cref{ch:ch21}).}
+  \label{fig:pipeline}
+\end{figure}
+
+\section{Supervised Learning}
+\label{sec:supervised}
+
+The setting just described --- examples that come with their right answers --- is
+\term{supervised learning}. The word \emph{supervised} refers to those answers: a
+supervisor has already solved $m$ instances of the problem for us, and the
+learner's job is to generalise from them to instances nobody has solved.
+
+That last word carries the weight. A lookup table storing every training pair
+reproduces the training answers perfectly and is useless, because it says nothing
+about a new $x$. What we want from $f$ is performance on inputs it was not
+trained on, and \cref{ch:ch10} is entirely about measuring that honestly.
+
+Supervised problems divide into two kinds, according to what $\Yspace$ looks
+like.
+
+\subsection{Regression: predicting a number}
+
+In \term{regression}, the output is a number drawn from a continuous range,
+$\Yspace = \R$. \Cref{fig:regression} shows twelve apartments, each plotted by
+floor area and sale price, with a straight line fitted through them. To predict
+the price of a 1700 square foot apartment, we read the line at $x=17$.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.78\linewidth, height=5.6cm,
+      xlabel={floor area $x$ (hundreds of sq.\ ft)},
+      ylabel={price $y$ (\$1000s)},
+      xmin=0, xmax=26, ymin=0, ymax=95,
+      legend pos=north west]
+      \addplot[only marks,mark=*,mark size=1.5pt,MLTeal] coordinates {
+        (5,22)(7,26)(9,36)(10,33)(12,44)(13,49)
+        (15,52)(16,61)(18,63)(20,72)(22,74)(24,84)};
+      \addlegendentry{training examples}
+      \addplot[MLRose,very thick,domain=3:25]{3.2984*x+4.3308};
+      \addlegendentry{$f(x)=3.2984x+4.3308$}
+      \addplot[only marks,mark=diamond*,mark size=3pt,MLAmber,forget plot]
+        coordinates {(17,60.404)};
+      \draw[dashed,MLAmber,thick] (axis cs:17,0) -- (axis cs:17,60.404)
+            -- (axis cs:0,60.404);
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Regression. The fitted line is the least-squares fit to these twelve
+  points, computed in \cref{sec:end-to-end}. Reading it at $x=17$ predicts
+  $\yhat = 60.4$, or about \$60{,}400.}
+  \label{fig:regression}
+\end{figure}
+
+The defining feature is that the output space is infinite and ordered. There are
+infinitely many prices between \$60{,}000 and \$61{,}000, and a prediction of
+\$60{,}400 when the truth is \$61{,}000 is nearly right --- a fact the cost
+function will exploit. Other regression problems: forecasting tomorrow's
+rainfall, predicting a student's final grade, estimating the remaining life of a
+battery, predicting a delivery time.
+
+\subsection{Classification: predicting a category}
+
+In \term{classification}, the output is one of a small, finite set of categories:
+$\Yspace = \{0,1\}$ for \term{binary classification}, or $\{1,\dots,K\}$ for
+\term{multiclass classification}. The categories need not be numbers at all;
+$\{\text{benign}, \text{malignant}\}$ is a perfectly good $\Yspace$, and we
+encode it numerically only for the algebra's convenience.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.78\linewidth, height=5.4cm,
+      xlabel={tumour size}, ylabel={patient age},
+      xmin=0, xmax=10, ymin=15, ymax=75,
+      legend pos=south east]
+      \addplot[only marks,mark=o,mark size=2pt,MLTeal,thick] coordinates {
+        (1.2,25)(2,32)(1.6,45)(2.8,28)(3.2,38)(2.2,52)(3.8,30)(1.4,58)(4.2,24)};
+      \addlegendentry{benign}
+      \addplot[only marks,mark=x,mark size=3pt,MLRose,thick] coordinates {
+        (6,48)(7.2,55)(5.4,62)(8,45)(6.8,38)(7.8,66)(5.8,52)(8.6,58)};
+      \addlegendentry{malignant}
+      \addplot[MLBlue,very thick,domain=1.1:7.6,forget plot]{-8*x+76};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Classification with two features. The learner's output is a
+  \term{decision boundary}: points on one side are predicted benign, points on
+  the other malignant. \Cref{ch:ch06} derives a principled way to place it.}
+  \label{fig:classification}
+\end{figure}
+
+\begin{pitfall}{Regression or classification?}
+The test is not whether the target is written as a number. It is whether the
+\emph{distance} between two outputs is meaningful. Prices of 52 and 53 are nearly
+the same, so price is a regression target. If you encode
+$\{\text{cat},\text{dog},\text{bird}\}$ as $\{1,2,3\}$, the encoding claims that
+a dog is halfway between a cat and a bird, and that a bird is three times a cat.
+It is not, and \cref{ch:ch09} shows how to encode categories without smuggling in
+an order that does not exist.
+
+The awkward middle case is an ordered category: a star rating from 1 to 5, or a
+severity grade. Distances there are partly meaningful, and either treatment can
+be defended. Say which you chose and why.
+\end{pitfall}
+
+\section{Unsupervised Learning}
+\label{sec:unsupervised}
+
+Now remove the labels. We are given only $\{\xii{1},\dots,\xii{m}\}$, with no
+$y$ of any kind, and asked to find \emph{structure}. This is
+\term{unsupervised learning}, and it is what you do when nobody has solved any
+instances for you --- which, outside textbooks, is the common case, because
+labels are expensive and data is not.
+
+Three shapes of structure recur, and each gets a chapter later in the book.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.32\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=3.9cm,height=3.2cm,axis lines=box,
+        xtick=\empty,ytick=\empty,xmin=0,xmax=10,ymin=0,ymax=10,
+        title={\scriptsize Clustering}, title style={font=\scriptsize}]
+        \addplot[only marks,mark=*,mark size=1.3pt,MLTeal]
+          coordinates {(1.5,7.5)(2,8.4)(2.6,7)(1.2,6.6)(2.4,8.9)};
+        \addplot[only marks,mark=*,mark size=1.3pt,MLAmber]
+          coordinates {(7.6,7.8)(8.4,8.6)(8.8,7.2)(7.2,8.8)};
+        \addplot[only marks,mark=*,mark size=1.3pt,MLRose]
+          coordinates {(4.6,2.2)(5.4,1.5)(5.8,2.8)(4.2,1.4)(6,1.9)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Group similar items.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.32\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=3.9cm,height=3.2cm,axis lines=box,
+        xtick=\empty,ytick=\empty,xmin=0,xmax=10,ymin=0,ymax=10,
+        title={\scriptsize Anomaly detection}, title style={font=\scriptsize}]
+        \addplot[only marks,mark=*,mark size=1.3pt,MLTeal] coordinates {
+          (4,4.4)(4.6,5)(5.2,4.2)(3.8,5.4)(5,5.6)(4.4,4)(5.6,4.8)(4.2,5.8)};
+        \addplot[only marks,mark=star,mark size=3.4pt,MLRose,thick]
+          coordinates {(8.6,1.6)};
+        \draw[MLRose,dashed] (axis cs:8.6,1.6) circle[radius=10pt];
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Flag the unusual.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.32\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=3.9cm,height=3.2cm,axis lines=box,
+        xtick=\empty,ytick=\empty,xmin=0,xmax=10,ymin=0,ymax=10,
+        title={\scriptsize Dimensionality reduction},
+        title style={font=\scriptsize}]
+        \addplot[only marks,mark=*,mark size=1.3pt,MLTeal] coordinates {
+          (1.6,2.4)(2.6,3.2)(3.6,4.6)(4.6,5)(5.6,6.4)(6.6,7)(7.6,8.4)
+          (3,3.4)(5,5.8)};
+        \addplot[MLBlue,very thick,domain=1:8.4]{1.05*x+0.8};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Compress many features into few.\par}
+  \end{minipage}
+  \caption{Three kinds of structure found without labels, treated in
+  \cref{ch:ch13,ch:ch14,ch:ch16} respectively.}
+  \label{fig:unsupervised}
+\end{figure}
+
+\textbf{Clustering} partitions the examples into groups whose members resemble
+one another: news articles by topic, customers by buying pattern, genes by
+expression profile. Nobody supplies the groups; the algorithm proposes them, and
+a human decides afterwards whether they mean anything. \Cref{ch:ch13} develops
+$k$-means.
+
+\textbf{Anomaly detection} builds a model of what normal data looks like and
+flags examples that do not fit: a fraudulent transaction, an engine about to
+fail, a server behaving unlike its peers. \Cref{ch:ch14} does this with a
+density estimate.
+
+\textbf{Dimensionality reduction} replaces many features with a few that retain
+most of the information, for visualization, for compression, or to make a
+downstream model cheaper. \Cref{ch:ch16} derives principal component analysis.
+
+\begin{keyinsight}{The two settings in one line}
+Supervised: \emph{here are the right answers; learn to reproduce them on new
+inputs.} Unsupervised: \emph{here is the data; tell me something about its
+structure.} The first has an objective measure of success on held-out data. The
+second usually does not, which is why unsupervised results need more careful
+justification, not less.
+\end{keyinsight}
+
+\section{Reinforcement Learning}
+\label{sec:rl-preview}
+
+A third setting sits alongside these two and is the subject of \cref{ch:ch17}.
+In \term{reinforcement learning} there are no labelled examples at all. An
+\term{agent} takes \term{actions} in an \term{environment}, the environment
+returns a new \term{state} and a scalar \term{reward}, and the agent must learn a
+\term{policy} --- a rule for choosing actions --- that maximises reward
+accumulated over time.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}]
+    \node[draw,rounded corners,fill=MLTeal,text=white,minimum width=2.4cm,
+          minimum height=8mm] (ag) {Agent};
+    \node[draw,rounded corners,fill=MLBlue,text=white,minimum width=2.4cm,
+          minimum height=8mm,below=18mm of ag] (env) {Environment};
+    \draw[-{Stealth},thick] (ag.east) to[bend left=55]
+      node[midway,right=1pt,align=left] {action $a_t$} (env.east);
+    \draw[-{Stealth},thick] (env.west) to[bend left=55]
+      node[midway,left=1pt,align=right]
+        {state $s_{t+1}$\\ reward $r_{t+1}$} (ag.west);
+  \end{tikzpicture}
+  \caption{The reinforcement learning loop. No example says which action was
+  correct; the only signal is a reward that may arrive many steps later.}
+  \label{fig:rl}
+\end{figure}
+
+What makes this hard, and separate from supervised learning, is that the reward
+is \emph{delayed} and \emph{evaluative}. A chess engine that loses on move 60
+receives no instruction as to which of its moves was the mistake, only that the
+sequence ended badly. Assigning credit backwards through time is the whole
+problem, and \cref{ch:ch17} solves it with the Bellman equation.
+
+Use this rough guide for classifying a problem you meet:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{4.2cm}L{6.8cm}@{}}
+\toprule
+\textbf{You have} & \textbf{You are doing}\\
+\midrule
+inputs with correct outputs & supervised learning
+  (regression if $y$ is a number, classification if $y$ is a category)\\
+inputs only & unsupervised learning\\
+an environment that responds to actions with rewards &
+  reinforcement learning\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{A First End-to-End Example}
+\label{sec:end-to-end}
+
+Abstractions settle faster when attached to numbers, so here is a complete, tiny
+project. Everything in it is developed properly later; the point now is to see
+the whole shape at once.
+
+\textbf{The problem.} An estate agency wants to quote a price for an apartment
+from its floor area alone. Following \cref{sec:defining}: the task $T$ is
+predicting a sale price; the performance measure $P$ is the average squared
+error of the prediction; the experience $E$ is twelve recorded sales.
+
+\textbf{The data.} Dataset~D1 of \cref{ch:appD}, plotted in
+\cref{fig:regression}. Floor area $x$ is in hundreds of square feet, price $y$
+in thousands of dollars, and $m=12$.
+
+\textbf{The hypothesis space.} Straight lines, $f(x)=wx+b$. This is a strong
+assumption --- prices are not exactly linear in area --- and \cref{ch:ch05}
+relaxes it.
+
+\textbf{The cost.} Squared error, $J(w,b)=\frac{1}{2m}\sum_i (f(\xii{i})-\yii{i})^2$.
+
+\textbf{The optimizer.} Gradient descent, which \cref{ch:ch03} derives. Started
+at $w=b=0$ with a step size of $0.005$, it produces the trajectory in
+\cref{fig:gd-trace}: the cost falls from $1499.7$ to $3.7$ within ten
+iterations, then spends thousands more inching to its final value.
+
+\begin{workedexample}{Fitting, scoring, and testing the apartment model}
+\textbf{1. The fitted model.} Minimising $J$ over the twelve points gives
+\[
+  w = 3.2984, \qquad b = 4.3308, \qquad J(w,b) = 2.4845 .
+\]
+Interpretation: each additional hundred square feet is worth about \$3{,}300,
+and the line meets the axis at \$4{,}330 --- a number with no physical meaning,
+since an apartment of zero area does not sell for \$4{,}330. Intercepts often
+lack an interpretation; that is not an error.
+
+\textbf{2. A prediction.} For $x = 17$,
+$\yhat = 3.2984(17) + 4.3308 = 60.4040$, so about \$60{,}400.
+
+\textbf{3. Is that any good?} The number $J=2.4845$ means nothing alone. Compare
+it with the simplest model that ignores the input entirely: always predict the
+mean price, $\bar y = 51.3333$. That constant model has $J = 182.1111$. The
+fitted line reduces the cost by a factor of $73$, and its root mean squared
+error is $2.23$ against the baseline's $19.08$. \emph{Now} we know something.
+
+\textbf{4. Do other lines do better?} No, and the cost says so:
+\begin{center}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+model & $J(w,b)$ & RMSE\\
+\midrule
+$f(x)=3.2984x+4.3308$ \quad(the fit) & $2.4845$  & $2.2291$\\
+$f(x)=3.0x+10.0$                     & $4.9583$  & $3.1491$\\
+$f(x)=3.6x+3.0$                      & $8.3867$  & $4.0955$\\
+$f(x)=4.0x$                          & $26.6667$ & $7.3030$\\
+$f(x)=0$                             & $1499.6667$ & $54.7662$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Note the third line: a plausible-looking fit, eyeballed onto the same scatter,
+costs more than three times the optimum. Eyeballing is not fitting.
+
+\textbf{5. The honest test.} All of the above is measured on the same twelve
+points the model was fitted to, which flatters it. Refit using only the nine
+smallest apartments and predict the three largest, which the model has never
+seen:
+\[
+  w = 3.3626,\qquad b = 3.6584,
+\]
+\begin{center}
+\small
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$x$ & actual $y$ & predicted $\yhat$ & error\\
+\midrule
+$20$ & $72$ & $70.91$ & $-1.09$\\
+$22$ & $74$ & $77.64$ & $+3.64$\\
+$24$ & $84$ & $84.36$ & $+0.36$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Training RMSE $2.30$, test RMSE $2.20$. The model does about as well on
+apartments it has never seen as on the ones it was fitted to, which is the
+outcome we want and, as \cref{ch:ch07} shows, not the outcome we always get.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.78\linewidth, height=5.2cm,
+      xmode=log, ymode=log,
+      xlabel={iteration}, ylabel={cost $J(w,b)$},
+      xmin=1, xmax=20000, ymin=2, ymax=100]
+      \addplot[MLBlue,thick,mark=*,mark size=0.9pt] coordinates {
+        (1,54.7135)(2,5.4081)(3,3.7241)(4,3.6651)(6,3.6598)(7,3.6581)
+        (10,3.6532)(13,3.6484)(18,3.6403)(24,3.6306)(32,3.6179)(42,3.6022)
+        (56,3.5806)(75,3.5520)(100,3.5154)(133,3.4691)(178,3.4092)
+        (237,3.3362)(316,3.2474)(422,3.1426)(562,3.0259)(750,2.9011)
+        (1000,2.7785)(1334,2.6691)(1778,2.5839)(2371,2.5280)(3162,2.4989)
+        (4217,2.4878)(5623,2.4850)(7499,2.4845)(10000,2.4845)(13335,2.4845)
+        (17783,2.4845)};
+      \addlegendentry{gradient descent, $\alpha=0.005$}
+      \addplot[MLRose,dashed,thick,domain=1:20000,forget plot]{2.4845};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Cost against iteration, on log axes. The dashed line is the minimum,
+  $J=2.4845$. Most of the improvement happens in the first ten steps; the long
+  tail is the slow drift of the intercept, and \cref{ch:ch05} explains why it is
+  slow and how feature scaling fixes it.}
+  \label{fig:gd-trace}
+\end{figure}
+
+\begin{keyinsight}{Two numbers, never one}
+A model's error is meaningless in isolation. Always report it against a baseline
+--- the constant prediction, the existing rule, the human --- and always measure
+it on data the model has not seen. An error rate with neither comparison nor a
+held-out set is a claim about memory, not about learning.
+\end{keyinsight}
+
+\begin{labbox}{Lab 1 --- Environment, data, and a first model}
+Set up Python, NumPy and Jupyter; load dataset D1; reproduce
+\cref{fig:regression}; and write a function \code{cost(x, y, w, b)} that returns
+$J$. Check it against the table in the worked example: your function must return
+$2.4845$ at $(3.2984, 4.3308)$ and $1499.6667$ at $(0,0)$. Two near misses tell
+you exactly what went wrong: $4.9690$ means you omitted the $\tfrac12$, and
+$29.8141$ means you omitted the $\tfrac{1}{m}$.
+\end{labbox}
+
+\section{What Machine Learning Is Not}
+\label{sec:what-its-not}
+
+The failures worth learning about early are not algorithmic. They are failures of
+judgement about whether learning applies at all.
+
+\subsection{It is not a substitute for a known rule}
+
+If the rule can be written, write it. A learned model that computes a payroll
+deduction will be right \emph{almost} always, will fail unpredictably on rare
+inputs, cannot be audited line by line, and requires a data pipeline to keep
+working. A dozen lines of arithmetic have none of those properties. Use learning
+where specification by example is the only specification available.
+
+\subsection{It does not discover causes}
+
+A model finds patterns that predict, and prediction is not causation. A model
+trained on hospital records may learn that patients who receive a particular
+drug die more often, because the drug is given to the sickest patients. The
+correlation is real and useful for prediction --- and acting on it as though it
+were a cause would kill people.
+
+\begin{pitfall}{The direction of the arrow}
+Ask of any model you are tempted to act on: am I \emph{predicting} an outcome, or
+am I \emph{intervening} to change it? Predictive accuracy licenses the first and
+says nothing about the second. Every feature that works because it is a
+\emph{consequence} of the target rather than a cause of it --- a treatment code,
+a follow-up appointment, a flag written after the fact --- will predict
+beautifully in training and fail the moment the model is used to make decisions.
+\Cref{ch:ch21} treats this as a data-leakage problem, which is what it is.
+\end{pitfall}
+
+\subsection{It cannot outrun its data}
+
+The model inherits every property of the training set, including the ones nobody
+intended. If the recorded past decisions were made by people, the model learns
+their judgement, including its errors and its prejudices. If some group of inputs
+is rare in the data, the model will be worse for that group, and the overall
+accuracy figure will hide it, because that group is rare in the test set too.
+
+\begin{ethicsnote}{Whose examples are they?}
+When \textcite{buolamwini2018} evaluated three commercial gender-classification
+systems, every one of them reported strong overall accuracy. Disaggregated, the
+error rate for lighter-skinned men was under $1\%$, while for darker-skinned
+women it exceeded $30\%$ in the worst system. Nothing was wrong with the
+algorithms in any sense a course on optimization would recognise. The training
+sets simply contained far more of some faces than others, and a single averaged
+accuracy figure is arithmetically incapable of revealing that.
+
+Two habits follow, and they cost almost nothing to adopt now: know the
+composition of your training data, and report performance for each group your
+system will be applied to, not only the average. \Cref{ch:ch11} makes both
+routine.
+\end{ethicsnote}
+
+\subsection{It is not finished when it is accurate}
+
+A model that scores well in a notebook is roughly a third of a working system.
+The rest --- serving predictions within a latency budget, noticing when incoming
+data stops resembling training data, retraining, and rolling back a bad release
+--- is the subject of \cref{ch:ch20,ch:ch21,ch:ch22}, and is where most
+industrial machine learning projects actually fail.
+
+\section{A Map of This Book}
+\label{sec:map}
+
+\Cref{tab:map} shows the route. Parts~I and~II are the load-bearing ones: they
+develop cost functions, gradient descent, overfitting, regularization and
+evaluation on models simple enough to draw on a page and check by hand. Almost
+everything later is a variation on machinery introduced there.
+
+\begin{table}[htbp]
+  \centering
+  \small
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}L{1.1cm}L{4.4cm}L{5.6cm}@{}}
+    \toprule
+    \textbf{Part} & \textbf{Subject} & \textbf{The question it answers}\\
+    \midrule
+    I    & Linear regression &
+      How does fitting work, mechanically?\\
+    II   & Classification and regularization &
+      How do we predict categories, and why does a model that fits perfectly
+      often predict badly?\\
+    III  & Neural networks &
+      What if the right features are themselves unknown?\\
+    IV   & Diagnosis and improvement &
+      The model is not good enough. What should I do next?\\
+    V    & Unsupervised learning &
+      What can be learned with no labels at all?\\
+    VI   & Recommenders and PCA &
+      How do we learn about users and items together, and how do we compress
+      features?\\
+    VII  & Reinforcement learning &
+      How does an agent learn from delayed reward?\\
+    VIII & Transformers and language models &
+      Where does the current generation of language models come from?\\
+    IX   & Machine learning systems &
+      It works in a notebook. Now what?\\
+    \bottomrule
+  \end{tabular}
+  \caption{The nine parts and what each is for.}
+  \label{tab:map}
+\end{table}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item Machine learning inverts classical programming: examples of correct
+        answers go in, and rules come out. It is the right tool when a rule
+        exists, cannot be stated, and examples of its output are plentiful.
+  \item Mitchell's definition makes a project concrete by forcing you to name
+        the task $T$, the performance measure $P$, and the experience $E$.
+        Accuracy is frequently the wrong $P$.
+  \item Every supervised learner has four parts: a training set, a hypothesis
+        space $\Hspace$ chosen by the designer, a cost function $J$ measuring
+        fit, and an optimizer that searches $\Hspace$ for the cheapest
+        hypothesis.
+  \item Supervised learning uses labelled examples, and splits into regression
+        (continuous output) and classification (categorical output). The test
+        is whether distance between two outputs is meaningful.
+  \item Unsupervised learning finds structure in data that carries no labels
+        at all: clustering, anomaly detection, and dimensionality reduction.
+  \item Reinforcement learning learns a policy from delayed, evaluative reward.
+  \item A cost is meaningless in isolation. Compare it against a baseline, and
+        measure it on data the model has not seen.
+  \item Machine learning does not discover causes, cannot outrun its training
+        data, and is not finished when it is accurate.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Give one task for which machine learning is clearly the wrong tool, and one
+for which it is clearly the right one. Justify each in a single sentence using
+the criteria of \cref{sec:applications}.
+
+\sq State Mitchell's definition of learning, and identify $T$, $P$ and $E$ for a
+system that learns to route a delivery van.
+
+\sq Define the hypothesis space. Why does the learning algorithm not simply
+search over all functions from $\Xspace$ to $\Yspace$?
+
+\sq What does the superscript in $\xii{3}$ denote? Write an expression in which
+both $\xii{3}$ and $x^3$ appear, and say what each means.
+
+\sq Explain, in two sentences, the difference between regression and
+classification, without using the words \emph{continuous} or \emph{discrete}.
+
+\sq A dataset has $m = 400$ examples and each example has $12$ measurements.
+What are $m$ and $n$? What is the shape of the design matrix $\Xmat$?
+
+\sq Name the three shapes of structure that unsupervised learning looks for, and
+give an application of each not mentioned in this chapter.
+
+\sq Why is a lookup table that stores every training pair a poor model, despite
+achieving zero error on the training set?
+
+\sq What is a baseline, and why is a reported error rate without one close to
+useless?
+
+\sq In one sentence each, say why machine learning cannot establish causation
+and why it cannot exceed the quality of its training data.
+
+\exercisesection{Analytical Problems}
+
+\ap For each of the following, state whether it is supervised regression,
+supervised classification, unsupervised, or reinforcement learning, and say what
+$x$ and $y$ (if any) are.
+\begin{enumerate}[label=(\alph*)]
+  \item From $10{,}000$ patient records carrying a diabetic / non-diabetic flag,
+        predict whether a new patient is diabetic.
+  \item Given browsing logs for $50{,}000$ users with no annotation, split them
+        into groups with similar interests.
+  \item Given yesterday's electricity load curve, predict today's peak demand in
+        megawatts.
+  \item Given millions of card transactions, none marked fraudulent, find the
+        ones worth investigating.
+  \item Train a robot arm to place a component on a circuit board, where the only
+        feedback is whether the finished board passes testing.
+  \item Given $60{,}000$ images of handwritten digits, each labelled $0$--$9$,
+        read the digit in a new image.
+\end{enumerate}
+
+\ap A screening test is applied to a population in which $2\%$ of people have the
+condition. A program that always answers ``healthy'' is proposed.
+\begin{enumerate}[label=(\alph*)]
+  \item What accuracy does it achieve?
+  \item Describe, in words, a performance measure $P$ under which this program
+        scores badly.
+  \item Which of the two errors --- missing a sick patient, or alarming a healthy
+        one --- would you weight more heavily, and what does your answer imply
+        about $P$?
+\end{enumerate}
+
+\ap Using the twelve apartments of \cref{fig:regression}, compute $J(w,b)$ by
+hand for $w = 3$, $b = 5$. Show the residual for each of the first four
+examples, then the total. Is your answer larger or smaller than the $2.4845$
+achieved by the fitted line? Explain why it must be.
+
+\ap The constant model $f(x)=c$ has one parameter. Show that the value of $c$
+minimising $\frac{1}{2m}\sum_i (c - \yii{i})^2$ is $c = \bar y$, the mean of the
+targets. (Differentiate with respect to $c$ and set the derivative to zero.)
+Verify against the value $\bar y = 51.3333$ used in \cref{sec:end-to-end}.
+
+\ap Suppose you encode $\{\text{low}, \text{medium}, \text{high}\}$ as
+$\{1,2,3\}$ and fit a regression model. Give a concrete prediction the model
+might make that reveals the encoding to be inappropriate, and describe an input
+for which the model's output would be uninterpretable.
+
+\ap A colleague reports that their model achieves $94\%$ accuracy and proposes
+deployment. List four questions you would ask before agreeing, and say what a
+bad answer to each would look like.
+
+\exercisesection{Design Problems}
+
+\dpr A university wants to predict which first-year students are at risk of
+failing, so that tutors can offer support early. Specify $T$, $P$ and $E$; name
+the features you would use and at least one you would deliberately refuse to use,
+with your reason; state whether this is regression or classification; and
+describe how you would measure success six months after deployment. Then argue
+the other side: give the strongest case that this system should not be built.
+
+\dpr You are asked to build a model that predicts crop yield from weather and
+soil measurements, for smallholder farmers who will decide what to plant.
+Labelled data exists for three of the twelve districts in the region. Describe
+how you would proceed, what you would measure, and what you would say to a farmer
+in one of the other nine districts about how much to trust the prediction.
+
+\dpr Choose an application from \cref{tab:applications} and write its
+$\langle T, P, E\rangle$, then identify the baseline that any learned model must
+beat. Estimate --- with reasoning, not a guess --- how much better than that
+baseline the model must be for the system to be worth building.
+
+\dpr A team proposes replacing a rule-based fraud check with a learned model.
+The existing rules are auditable and are cited in regulatory filings. Write half
+a page for the decision-maker setting out what is gained, what is lost, and what
+you would need to see before recommending the change.
+
+\exercisesection{Programming Exercises}
+
+\pe Enter dataset D1 as two NumPy arrays and reproduce \cref{fig:regression},
+including the dashed prediction lines at $x = 17$.
+
+\pe Write \code{cost(x, y, w, b)} returning $J(w,b)$, with no Python loop over
+the examples. Reproduce every row of the cost table in the worked example. Then
+write a second version using an explicit loop and assert that the two agree to
+within $10^{-12}$.
+
+\pe Scan $w$ over the range $[2, 5]$ in steps of $0.01$ with $b$ fixed at
+$4.3308$, plot $J$ against $w$, and read off the minimising $w$ from the plot.
+How close is it to $3.2984$? What does the shape of the curve tell you about how
+hard this optimization is?
+
+\pe Split D1 into the first nine examples and the last three. Fit on the nine
+using the closed-form solution
+$w = \sum_i (\xii{i}-\bar x)(\yii{i}-\bar y) \big/ \sum_i (\xii{i}-\bar x)^2$
+and $b = \bar y - w\bar x$, and reproduce the held-out table in the worked
+example. Then split the other way --- train on the three largest, test on the
+nine smallest --- and comment on the difference.
+
+\exercisesection{Self-Test}
+
+\qz A program's performance on a task improves as it processes more data. Under
+Mitchell's definition, the data is: (a)~$T$; (b)~$P$; (c)~$E$; (d)~$\Hspace$.
+
+\qz Predicting the number of days until a machine fails is: (a)~classification;
+(b)~regression; (c)~clustering; (d)~reinforcement learning.
+
+\qz Grouping unlabelled documents by topic is: (a)~supervised;
+(b)~unsupervised; (c)~reinforcement; (d)~none of these.
+
+\qz In the notation of this book, $\xjj{4}{2}$ means: (a)~$x$ raised to a power;
+(b)~feature 2 of example 4; (c)~example 2 of feature 4; (d)~the fourth
+derivative.
+
+\qz A model has zero error on its training set and high error on new data. The
+most likely explanation is: (a)~the cost function is wrong; (b)~the hypothesis
+space is too small; (c)~the model has memorised the training set; (d)~the
+learning rate was too large.
+
+\qz A classifier for a condition affecting $1$ in $1000$ people reports $99.9\%$
+accuracy. The most useful next question is: (a)~what was the learning rate;
+(b)~how does it compare with always predicting ``healthy''; (c)~how many
+features were used; (d)~how long did training take.
+
+\qz Which is \emph{not} one of the four components of a supervised learning
+algorithm? (a)~a hypothesis space; (b)~a cost function; (c)~a test set;
+(d)~an optimizer.
+
+\qz A model trained on past hiring decisions reproduces a historical bias against
+a group. The best description is: (a)~a bug in the optimizer; (b)~overfitting;
+(c)~the model faithfully learning a property of its training data;
+(d)~an error in the cost function.
+
+\furtherreading
+
+\textcite{james2021} open with the same distinction between supervised and
+unsupervised learning; read §1 for context and §2.1--2.2 for the statistical
+framing of prediction, including the difference between prediction and
+inference, which is the formal version of \cref{sec:what-its-not}'s warning
+about causation. \textcite{bishop2006} §1.1 covers the same ground through the
+polynomial curve-fitting example, and is worth reading now and again after
+\cref{ch:ch07}, because it introduces overfitting in the first ten pages.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch02} takes the fourth component apart. We fix the
+hypothesis space to straight lines and ask, precisely, what makes one line better
+than another --- which turns out to be the entire content of the cost function.

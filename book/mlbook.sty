@@ -1,0 +1,382 @@
+% ---------------------------------------------------------------
+%  mlbook.sty --- shared style for the textbook
+%    "Machine Learning: From Linear Models to Reinforcement Learning"
+%
+%  Loaded by main.tex.  All styling lives here; never style inside a
+%  chapter file.
+%
+%  The colour palette and the maths shorthands are deliberately the same
+%  as the companion lecture slides (see ../cse815/cse815.sty), so text and
+%  figures move between the two without retyping.  If you change a macro
+%  name in one file, change it in the other.
+%
+%  Compile: pdflatex -shell-escape -> biber -> makeindex -> pdflatex x2
+%  -shell-escape is required: contour plots use pgfplots' gnuplot backend.
+% ---------------------------------------------------------------
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{mlbook}[2026/09/03 Machine Learning textbook style]
+
+% ---------------- 1. encoding and fonts ----------------
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{newpxtext}              % Palatino-style text
+\RequirePackage{newpxmath}              % matching maths font
+% Sans face for headings and box titles.  newpxtext defaults to qhv
+% (TeX Gyre Heros) and psnfss offers phv (Helvetica); neither ships with a
+% basic TeX Live install, so use Latin Modern Sans, which always does.
+\renewcommand*{\sfdefault}{lmss}
+\RequirePackage{inconsolata}            % monospace for code
+\RequirePackage[expansion=false]{microtype}
+\RequirePackage{setspace}
+\setstretch{1.15}
+
+% ---------------- 2. page geometry ----------------
+\RequirePackage[
+  b5paper,
+  top=2.5cm, bottom=2.8cm,
+  inner=2.8cm, outer=2.2cm,
+  headsep=0.8cm, footskip=1.2cm
+]{geometry}
+
+% ---------------- 3. colour palette ----------------
+\RequirePackage[dvipsnames,svgnames]{xcolor}
+\definecolor{MLBlue}{HTML}{123B63}      % structure, definitions
+\definecolor{MLTeal}{HTML}{1B7F79}      % key insights, worked examples
+\definecolor{MLAmber}{HTML}{C97B17}     % derivations, algorithms
+\definecolor{MLRose}{HTML}{9B2C4B}      % pitfalls
+\definecolor{MLGray}{HTML}{4A5560}      % notes, folios
+\definecolor{MLLight}{HTML}{EEF3F7}     % box background
+\definecolor{MLLightAmber}{HTML}{FDF4E6}
+\definecolor{MLLightRose}{HTML}{FBEEF2}
+\definecolor{MLLightTeal}{HTML}{E8F4F3}
+\definecolor{MLLightGray}{HTML}{F5F6F7}
+
+% ---------------- 4. mathematics ----------------
+\RequirePackage{amsmath}
+\let\Bbbk\relax                         % newpxmath already defines it
+\RequirePackage{amssymb}
+\let\openbox\relax                      % ditto, before amsthm
+\RequirePackage{amsthm}
+\RequirePackage{bm}
+
+% ---------------- 5. tables ----------------
+\RequirePackage{booktabs}
+\RequirePackage{tabularx}
+\RequirePackage{longtable}
+\RequirePackage{array}
+\RequirePackage{multirow}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+% ---------------- 6. graphics, TikZ, pgfplots ----------------
+\RequirePackage{graphicx}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds,matrix,
+                shapes.geometric,shapes.misc,decorations.pathreplacing,patterns}
+\RequirePackage{pgfplots}
+\pgfplotsset{compat=1.17}
+% House style for every axis in the book.
+\pgfplotsset{
+  mlaxis/.style={
+    width=0.72\linewidth, height=5.4cm,
+    grid=major, grid style={MLLight},
+    tick label style={font=\scriptsize},
+    label style={font=\small},
+    title style={font=\small},
+    legend style={font=\scriptsize, draw=none, fill=white, fill opacity=0.85,
+                  text opacity=1},
+  }
+}
+\RequirePackage{float}
+
+% ---------------- 7. code listings ----------------
+\RequirePackage{listings}
+\renewcommand{\lstlistingname}{Listing}
+\lstset{
+  extendedchars=true, inputencoding=utf8,
+  literate=
+    {—}{{---}}{1}{–}{{--}}{1}{…}{{...}}{1}
+    {α}{{$\alpha$}}{1}{λ}{{$\lambda$}}{1}{σ}{{$\sigma$}}{1}{μ}{{$\mu$}}{1}
+}
+
+\lstdefinestyle{pythonml}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{MLBlue!4},
+  frame=single, framerule=0.5pt, rulecolor=\color{MLBlue!30},
+  numbers=left, numberstyle=\tiny\color{MLGray}, numbersep=8pt,
+  breaklines=true, showstringspaces=false,
+  keywordstyle=\color{MLBlue}\bfseries,
+  commentstyle=\color{MLTeal}\itshape,
+  stringstyle=\color{MLRose},
+  emphstyle=\color{MLAmber}\bfseries,
+  emph={np,numpy,plt,array,dot,mean,shape,reshape},
+  morekeywords={as,lambda,True,False,None,self,with,assert},
+  captionpos=b, xleftmargin=14pt, xrightmargin=2pt,
+  aboveskip=8pt, belowskip=4pt,
+}
+
+\lstdefinestyle{tfkeras}{
+  style=pythonml,
+  backgroundcolor=\color{MLAmber!6},
+  rulecolor=\color{MLAmber!40},
+  emph={Sequential,Dense,Input,model,compile,fit,predict,Adam,relu,sigmoid,softmax},
+}
+
+\lstdefinestyle{pseudocode}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{MLGray!7},
+  frame=single, framerule=0.5pt, rulecolor=\color{MLGray!40},
+  numbers=left, numberstyle=\tiny\color{MLGray}, numbersep=8pt,
+  breaklines=true, showstringspaces=false,
+  captionpos=b, xleftmargin=14pt, aboveskip=8pt, belowskip=4pt,
+}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize\color{white},
+  backgroundcolor=\color{black!88},
+  frame=single, framerule=0.5pt, rulecolor=\color{black},
+  numbers=none, breaklines=true, showstringspaces=false,
+  captionpos=b, xleftmargin=14pt, aboveskip=8pt, belowskip=4pt,
+}
+
+% ---------------- 8. boxes ----------------
+\RequirePackage[most,breakable]{tcolorbox}
+\tcbuselibrary{skins,breakable,listings}
+
+% Chapter-opening learning objectives.  No argument.
+\newtcolorbox{chapterlearning}{
+  enhanced, breakable,
+  colback=MLBlue!5, colframe=MLBlue, colbacktitle=MLBlue, coltitle=white,
+  fonttitle=\bfseries\normalsize\sffamily, title={Learning Objectives},
+  left=8pt, right=8pt, top=6pt, bottom=8pt, arc=4pt, boxrule=1pt,
+}
+
+% Every other box takes one mandatory short title.
+\newtcolorbox{defbox}[1]{
+  enhanced, breakable,
+  colback=white, colframe=MLBlue!55, colbacktitle=MLBlue!10, coltitle=MLBlue,
+  fonttitle=\bfseries\small\sffamily,
+  title={Definition\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{keyinsight}[1]{
+  enhanced, breakable,
+  colback=MLLightTeal, colframe=MLTeal, colbacktitle=MLTeal, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Key Insight\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{pitfall}[1]{
+  enhanced, breakable,
+  colback=MLLightRose, colframe=MLRose, colbacktitle=MLRose, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Pitfall\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{derivation}[1]{
+  enhanced, breakable,
+  colback=MLLightAmber, colframe=MLAmber, colbacktitle=MLAmber, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Derivation\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{workedexample}[1]{
+  enhanced, breakable,
+  colback=MLLightTeal, colframe=MLTeal!75, colbacktitle=MLTeal!75, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Worked Example\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{algorithmbox}[1]{
+  enhanced, breakable,
+  colback=MLLightAmber, colframe=MLAmber!80, colbacktitle=MLAmber!80, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Algorithm\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{researchspotlight}[1]{
+  enhanced, breakable,
+  colback=MLLight, colframe=MLBlue, colbacktitle=MLBlue, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Research Spotlight\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{labbox}[1]{
+  enhanced, breakable,
+  colback=MLLightGray, colframe=MLGray, colbacktitle=MLGray, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={In the Lab\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+\newtcolorbox{ethicsnote}[1]{
+  enhanced, breakable,
+  colback=MLLightGray, colframe=MLGray!85, colbacktitle=MLGray!85, coltitle=white,
+  fonttitle=\bfseries\small\sffamily,
+  title={Ethics and Impact\quad\textbar\quad #1},
+  left=6pt, right=6pt, top=4pt, bottom=6pt, arc=4pt, boxrule=0.8pt,
+}
+
+% ---------------- 9. headings ----------------
+\RequirePackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\sffamily}
+  {\raggedleft\color{MLBlue!25}\fontsize{90}{90}\selectfont\thechapter}
+  {-24pt}
+  {\raggedright\color{MLBlue}\fontsize{22}{26}\selectfont\bfseries}
+  [\vspace{4pt}\color{MLBlue}\rule{\linewidth}{1.8pt}\vspace{4pt}]
+\titlespacing*{\chapter}{0pt}{-40pt}{28pt}
+
+\titleformat{\section}
+  {\normalfont\sffamily\Large\bfseries\color{MLBlue}}
+  {\thesection}{0.9em}{}
+  [\vspace{-4pt}\color{MLBlue!25}\rule{\linewidth}{0.5pt}]
+\titleformat{\subsection}
+  {\normalfont\sffamily\large\bfseries\color{MLBlue!85}}
+  {\thesubsection}{0.9em}{}
+\titleformat{\subsubsection}
+  {\normalfont\sffamily\normalsize\bfseries\color{MLBlue!75}}
+  {\thesubsubsection}{0.9em}{}
+
+% ---------------- 10. headers and footers ----------------
+\RequirePackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyhead[LE]{\small\sffamily\color{MLGray}\nouppercase{\leftmark}}
+\fancyhead[RO]{\small\sffamily\color{MLGray}\nouppercase{\rightmark}}
+\fancyfoot[LE,RO]{\small\sffamily\color{MLGray}\thepage}
+\fancypagestyle{plain}{%
+  \fancyhf{}\renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\small\sffamily\color{MLGray}\thepage}}
+
+% ---------------- 11. captions and lists ----------------
+\RequirePackage{caption}
+\RequirePackage{subcaption}
+\captionsetup{font=small, labelfont={bf,color=MLBlue}, margin=10pt,
+              justification=justified}
+\RequirePackage{enumitem}
+\setlist[itemize]{leftmargin=*, topsep=4pt, itemsep=2pt, parsep=0pt}
+\setlist[enumerate]{leftmargin=*, topsep=4pt, itemsep=2pt, parsep=0pt}
+\setlist[description]{leftmargin=0pt, topsep=4pt, itemsep=2pt}
+
+\RequirePackage{epigraph}
+\setlength{\epigraphwidth}{0.62\textwidth}
+\renewcommand{\epigraphflush}{flushright}
+\renewcommand{\epigraphrule}{0.4pt}
+
+% ---------------- 12. bibliography ----------------
+\RequirePackage[
+  style=authoryear, backend=biber,
+  maxcitenames=3, maxbibnames=99, giveninits=true,
+  uniquename=init, dashed=false, isbn=false, doi=true, url=false, sorting=nyt
+]{biblatex}
+
+% ---------------- 13. cross-references, index ----------------
+\RequirePackage[
+  colorlinks=true, linkcolor=MLBlue, citecolor=MLTeal, urlcolor=MLAmber,
+  bookmarksnumbered=true, bookmarksopen=true
+]{hyperref}
+\RequirePackage[capitalise,noabbrev,nameinlink]{cleveref}
+\RequirePackage{makeidx}
+\makeindex
+\RequirePackage{emptypage}
+
+% ---------------- 14. utility commands ----------------
+\newcommand{\term}[1]{\textbf{\textit{#1}}\index{#1}}   % defined term
+\newcommand{\tool}[1]{\textsf{#1}\index{#1}}            % software name
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\dataset}[1]{\texttt{#1}}
+
+% ---------------- 15. maths shorthands ----------------
+% Names shared with the lecture slides (../cse815/cse815.sty).
+\newcommand{\xii}[1]{x^{(#1)}}
+\newcommand{\yii}[1]{y^{(#1)}}
+\newcommand{\xjj}[2]{x^{(#1)}_{#2}}
+\newcommand{\fwb}{f_{w,b}}
+\newcommand{\fvwb}{f_{\vw,b}}
+\newcommand{\vw}{\mathbf{w}}
+\newcommand{\vx}{\mathbf{x}}
+\newcommand{\yhat}{\hat{y}}
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+% Book-only additions.
+\newcommand{\Real}[1]{\mathbb{R}^{#1}}
+\newcommand{\Xmat}{\mathbf{X}}
+\newcommand{\vy}{\mathbf{y}}
+\newcommand{\vb}{\mathbf{b}}
+\newcommand{\loss}{L}
+\newcommand{\grad}{\nabla}
+\newcommand{\Exp}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\gsig}{g}
+\newcommand{\Dset}{\mathcal{D}}
+\newcommand{\Xspace}{\mathcal{X}}
+\newcommand{\Yspace}{\mathcal{Y}}
+\newcommand{\Hspace}{\mathcal{H}}
+\newcommand{\aL}[2]{a^{[#1]}_{#2}}
+\newcommand{\Wl}[1]{\mathbf{W}^{[#1]}}
+\newcommand{\bl}[1]{\mathbf{b}^{[#1]}}
+\newcommand{\dd}{\mathrm{d}}
+
+% Long words that TeX declines to break, and that appear constantly here.
+\hyphenation{
+  di-men-sion-al-i-ty re-gu-lar-i-za-tion re-gu-lar-ized clas-si-fi-ca-tion
+  hy-per-pa-ram-e-ter back-prop-a-ga-tion re-in-force-ment un-su-per-vised
+  eigen-vec-tor eigen-val-ue nor-mal-i-za-tion op-ti-mi-za-tion
+}
+
+% ---------------- 16. exercises ----------------
+\newcounter{sqctr}[chapter]
+\newcounter{apctr}[chapter]
+\newcounter{dpctr}[chapter]
+\newcounter{pectr}[chapter]
+\newcounter{qzctr}[chapter]
+
+\newcommand{\sq}{\stepcounter{sqctr}%
+  \par\vspace{4pt}\noindent\textbf{SQ\,\thechapter.\thesqctr.}\enspace}
+\newcommand{\ap}{\stepcounter{apctr}%
+  \par\vspace{6pt}\noindent\textbf{AP\,\thechapter.\theapctr.}\enspace}
+\newcommand{\dpr}{\stepcounter{dpctr}%
+  \par\vspace{6pt}\noindent\textbf{DP\,\thechapter.\thedpctr.}\enspace}
+\newcommand{\pe}{\stepcounter{pectr}%
+  \par\vspace{6pt}\noindent\textbf{PE\,\thechapter.\thepectr.}\enspace}
+\newcommand{\qz}{\stepcounter{qzctr}%
+  \par\vspace{4pt}\noindent\textbf{QZ\,\thechapter.\theqzctr.}\enspace}
+
+\newcommand{\exercisesection}[1]{%
+  \par\vspace{10pt}%
+  \noindent{\sffamily\large\bfseries\color{MLBlue} #1}%
+  \par\vspace{4pt}%
+  \noindent{\color{MLBlue!25}\rule{\linewidth}{0.4pt}}%
+  \par\vspace{4pt}%
+}
+
+% A chapter's closing reading paragraph. Two books, no more.
+\newcommand{\furtherreading}{%
+  \par\vspace{10pt}%
+  \noindent{\sffamily\large\bfseries\color{MLBlue} Further Reading}%
+  \par\vspace{4pt}%
+  \noindent{\color{MLBlue!25}\rule{\linewidth}{0.4pt}}%
+  \par\vspace{4pt}%
+}
+
+% Contour plot of a cost surface, drawn by pgfplots' gnuplot backend.
+% #1 extra axis options, #2 comma-separated levels, #3 expression J(x,y).
+\newcommand{\costcontour}[3]{%
+  \addplot3[contour gnuplot={levels={#2},labels=false},
+            samples=60, thick, #1] {#3};%
+}
+
+\endinput

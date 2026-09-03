@@ -1,0 +1,96 @@
+%% preface.tex --- preface and reading guide
+
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+\markboth{Preface}{Preface}
+
+Machine learning is taught twice over. There is the version made of intuition and
+pictures, which is pleasant to listen to and impossible to reproduce, and there is
+the version made of derivations, which is reproducible and, presented badly,
+unreadable. This book tries to be one thing: the intuition, and then the algebra
+that makes the intuition precise, in that order, with nothing skipped in between.
+
+The rule I set myself while writing was that the reader should never meet the
+phrase \emph{it can be shown that}. Where a result is used, it is derived. Where a
+number is quoted --- the value of a cost function, the output of three iterations
+of an algorithm, an error rate on held-out data --- it was computed by a script
+that ships with the book, not estimated for the sake of a clean-looking page. If
+you work an example by hand and get a different answer, one of us is wrong, and
+the printed digits are precise enough to tell which.
+
+\section*{Who this book is for}
+
+Undergraduates meeting machine learning for the first time, and self-learners with
+the same preparation. I assume you can program in Python, that you have seen data
+structures and algorithms, and that you have had one course in probability and
+statistics. I do \emph{not} assume linear algebra or multivariable calculus.
+Appendix~\ref{ch:appA} builds the small amount of both that the book needs, and
+each chapter points into it at the moment the tool is first required, so you can
+learn the mathematics on demand rather than in a block at the start.
+
+\section*{How the book is organized}
+
+Parts I and II develop the whole machinery of supervised learning on the simplest
+possible models: linear regression, then logistic regression. Almost every idea in
+the rest of the book --- cost functions, gradient descent, overfitting,
+regularization, evaluation --- appears there first, where it can be drawn on a
+page and checked with a calculator. Part III adds neural networks, which is
+mostly a matter of stacking what Part II already established. Part IV is about
+making a learning system work: diagnosing it, improving it, and measuring it
+honestly. Parts V through VII cover unsupervised learning, recommender systems,
+and reinforcement learning. Part VIII treats attention, transformers, and large
+language models. Part IX is about everything that happens after the model is
+accurate: designing, building, shipping, and operating a system that contains one.
+
+Three reading paths through this material:
+
+\begin{description}
+  \item[A first course.] Chapters 1--17 in order, one chapter per lecture-sized
+    session, with the labs. Chapters 12, 18 and Part IX become reading and a
+    term project.
+  \item[Revision.] Each chapter's Learning Objectives, Key Insight and Pitfall
+    boxes, the chapter summary, then the exercises. If an exercise is hard, the
+    section it came from is the section to reread.
+  \item[Practitioner.] Chapters 1--7 and 10--11 for the vocabulary, then
+    Part IX, then back to whichever of Parts III--VIII your problem needs.
+\end{description}
+
+\section*{How to read a chapter}
+
+Every chapter opens with Learning Objectives and closes with a summary and five
+kinds of exercise: short questions, analytical problems that ask you to derive or
+compute, design problems with no single right answer, programming exercises, and
+multiple-choice items for self-testing. Boxes carry a fixed meaning throughout:
+
+\begin{description}
+  \item[Definition] the precise statement of a term, worth memorising.
+  \item[Key Insight] the one idea to carry out of a section.
+  \item[Derivation] algebra, step by step; read it with a pen.
+  \item[Worked Example] numbers, carried through by hand.
+  \item[Algorithm] pseudocode you could implement directly.
+  \item[Pitfall] a mistake that is common, quiet, and examinable.
+  \item[Research Spotlight] the paper an idea came from, in one page.
+  \item[In the Lab] the point at which to stop reading and write code.
+  \item[Ethics and Impact] the consequences of deploying what you just built.
+\end{description}
+
+The labs are not optional decoration. Machine learning is a subject in which it is
+entirely possible to follow every derivation and still be unable to fit a model,
+because the difficulties in practice --- a transposed array, a leaked test set, a
+step size off by a factor of ten --- are invisible in the algebra. Each lab
+implements a method twice, first as an explicit loop that matches the equations
+line for line, then in vectorized form, and checks that the two agree.
+
+\section*{Acknowledgements}
+
+This book grew out of lecture notes for a one-semester undergraduate course, and
+it owes an evident debt to the way Andrew Ng has taught this material to a very
+large number of people. Its statistical framing follows James, Witten, Hastie and
+Tibshirani; where it goes deeper it usually follows Bishop. The errors that remain
+are mine, and I would be glad to hear about them.
+
+\vspace{1cm}
+\noindent\textit{Rokan Uddin Faruqui}\\
+\noindent\textit{2026}
+
+\cleardoublepage

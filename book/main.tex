@@ -1,0 +1,145 @@
+%% main.tex --- master file for
+%%   "Machine Learning: From Linear Models to Reinforcement Learning"
+%%
+%% Compile from this directory:
+%%   pdflatex -shell-escape main.tex
+%%   biber main
+%%   makeindex main
+%%   pdflatex -shell-escape main.tex   (x2)
+%% or simply:  make
+
+\documentclass[11pt,b5paper,twoside,openright]{book}
+
+\usepackage{mlbook}
+\addbibresource{bibliography.bib}
+
+\hypersetup{
+  pdftitle={Machine Learning: From Linear Models to Reinforcement Learning},
+  pdfauthor={Rokan Uddin Faruqui},
+  pdfsubject={Machine Learning textbook},
+  pdfkeywords={machine learning, linear regression, logistic regression,
+               neural networks, clustering, recommender systems,
+               reinforcement learning, transformers, large language models,
+               ML systems, deployment, MLOps},
+}
+
+%======================================================================
+\begin{document}
+%======================================================================
+
+\frontmatter
+
+%---------------------------------------------------------------------
+% Title and copyright page
+%---------------------------------------------------------------------
+\thispagestyle{empty}
+\begin{center}
+  \vspace*{2.2cm}
+
+  {\color{MLBlue}\rule{\textwidth}{1.5pt}}
+  \vspace{0.5cm}
+
+  {\sffamily\Huge\bfseries\color{MLBlue} Machine Learning}
+
+  \vspace{0.35cm}
+
+  {\sffamily\Large\color{MLBlue!75}
+    From Linear Models to\\[4pt] Reinforcement Learning}
+
+  \vspace{0.35cm}
+  {\color{MLBlue}\rule{\textwidth}{1.5pt}}
+
+  \vspace{1.4cm}
+
+  {\sffamily\large\bfseries\scshape Rokan Uddin Faruqui}\\[5pt]
+  {\sffamily\small Professor, Department of Computer Science \& Engineering}\\[2pt]
+  {\sffamily\small University of Chittagong}
+
+  \vspace{1.2cm}
+
+  {\sffamily\small\color{MLGray}
+    A first course in machine learning, with full derivations,\\[3pt]
+    hand-worked numerical examples, and programming labs.\\[3pt]
+    Suitable for undergraduate study and for self-study.}
+
+  \vfill
+
+  \noindent{\color{MLBlue!30}\rule{\textwidth}{0.6pt}}
+  \vspace{0.35cm}
+
+  {\sffamily\small\color{MLGray}
+    \textit{First Edition, 2026.}\quad
+    Licensed under \textbf{CC~BY~4.0} ---
+    free to use, adapt, and distribute with attribution.\\[3pt]
+    \texttt{creativecommons.org/licenses/by/4.0}}
+
+  \vspace{0.4cm}
+\end{center}
+\cleardoublepage
+
+\input{preface}
+\input{notation}
+
+\tableofcontents
+
+%---------------------------------------------------------------------
+\mainmatter
+%---------------------------------------------------------------------
+
+\part{Foundations and Linear Regression}
+\input{ch01}
+\input{ch02}
+\input{ch03}
+\input{ch04}
+\input{ch05}
+
+\part{Classification and Generalization}
+\input{ch06}
+\input{ch07}
+
+\part{Neural Networks}
+\input{ch08}
+\input{ch09}
+
+\part{Making Learning Systems Work}
+\input{ch10}
+\input{ch11}
+\input{ch12}
+
+\part{Unsupervised Learning}
+\input{ch13}
+\input{ch14}
+
+\part{Recommenders and Dimensionality Reduction}
+\input{ch15}
+\input{ch16}
+
+\part{Reinforcement Learning}
+\input{ch17}
+
+\part{Transformers and Language Models}
+\input{ch18}
+\input{ch19}
+
+\part{Machine Learning Systems: Design, Development, Deployment}
+\input{ch20}
+\input{ch21}
+\input{ch22}
+
+%---------------------------------------------------------------------
+\appendix
+%---------------------------------------------------------------------
+\part{Appendices}
+\input{appendixA}
+\input{appendixB}
+\input{appendixC}
+\input{appendixD}
+\input{appendixE}
+
+%---------------------------------------------------------------------
+\backmatter
+%---------------------------------------------------------------------
+\printbibliography[heading=bibintoc, title={References}]
+\printindex
+
+\end{document}

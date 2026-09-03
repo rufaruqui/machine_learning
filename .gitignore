@@ -32,6 +32,8 @@ venv/
 *.vrb
 *.gnuplot
 *.table
+*_contourtmp*
+*.bbl-SAVE-ERROR
 
 # The textbook PDF is not tracked while the book is a work in progress.
 # Start tracking it once index.html links it.
