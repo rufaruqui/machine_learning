@@ -1,19 +1,28 @@
-# CSE 815 -- Week 1 lecture slides
-# Requires: pdflatex, pgfplots, tcolorbox (all in TeX Live)
+# CSE 815 -- lecture slides
+# Requires: latexmk, TeX Live (beamer, metropolis, pgfplots, tcolorbox), gnuplot.
+# -shell-escape is required: cost-surface contours use pgfplots' gnuplot backend.
 
-DECKS := W01_Part1 W01_Part2
+DECKS := $(basename $(wildcard W03*.tex))
 PDFS  := $(addsuffix .pdf,$(DECKS))
+
+LATEXMK := latexmk -pdf -shell-escape -interaction=nonstopmode -halt-on-error
 
 all: $(PDFS)
 
 %.pdf: %.tex cse815.sty
-	pdflatex -interaction=nonstopmode -halt-on-error $<
-	pdflatex -interaction=nonstopmode -halt-on-error $<
+	$(LATEXMK) $<
+
+# Rebuild everything and surface only the warnings that matter.
+check:
+	@$(MAKE) --no-print-directory distclean >/dev/null
+	@$(MAKE) --no-print-directory all 2>&1 | grep -Ei '^!|Overfull|Underfull' || echo "clean: no over/underfull boxes"
 
 clean:
-	rm -f *.aux *.log *.nav *.out *.snm *.toc *.vrb *.fdb_latexmk *.fls
+	latexmk -c $(DECKS) 2>/dev/null || true
+	rm -f *.aux *.log *.nav *.out *.snm *.toc *.vrb *.fdb_latexmk *.fls \
+	      *_contourtmp*.table *_contourtmp*.script *_contourtmp*.dat *.gnuplot
 
 distclean: clean
 	rm -f $(PDFS)
 
-.PHONY: all clean distclean
+.PHONY: all check clean distclean

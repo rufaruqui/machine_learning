@@ -1,0 +1,606 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 1, Week 3, Part 2
+%  Overfitting, and Regularization for Linear and Logistic
+%  Regression
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 3, Part 2]{Overfitting and Regularization}
+\subtitle{Why a Perfect Fit Is a Warning Sign, and What to Do About It}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 3 / Part 2]{Week 3 $\cdot$ Part 2}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{The question Week 2 left open}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Where we stand}
+        We can now fit
+        \[ f_{\vw,b}(\vx)=\vw\cdot\vx+b \quad\text{(a number)} \]
+        \[ f_{\vw,b}(\vx)=g(\vw\cdot\vx+b) \quad\text{(a class)} \]
+        and we can manufacture as many features as we like --- $x^2$, $x^3$, $x_1x_2$, \dots
+      \end{block}
+      \footnotesize
+      Week 2 ended with a warning: adding features always lowers the training cost. So the
+      training cost cannot tell us when to stop. Today we look at what actually goes wrong,
+      and at the standard remedy.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Underfitting, overfitting, generalization 
+          \item Overfitting in classification 
+          \item Three ways to address it 
+          \item The regularized cost and $\lambda$  
+          \item Regularized linear regression  
+          \item Regularized logistic regression  
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize This closes Module 1: everything here applies unchanged to the neural
+      networks of Module 2.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Problem of Overfitting}
+
+\begin{frame}{Three fits to the same seven flats}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Underfit} --- $f = w_1x+b$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.5cm,xmin=0.4,xmax=3.0,ymin=10,ymax=70,
+          xlabel={size},ylabel={price},grid=major,grid style={culight},
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=*,mark size=1.4pt,cublue,forget plot]
+            coordinates {(0.6,20)(0.9,26)(1.2,36)(1.5,38)(1.9,49)(2.3,50)(2.8,58)};
+          \addplot[curose,very thick,domain=0.5:2.9,forget plot]{12.2236+17.0924*x};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny $J_{\text{train}} = 3.19$}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Good fit} --- add $x^2$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.5cm,xmin=0.4,xmax=3.0,ymin=10,ymax=70,
+          xlabel={size},ylabel={price},grid=major,grid style={culight},
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=*,mark size=1.4pt,cublue,forget plot]
+            coordinates {(0.6,20)(0.9,26)(1.2,36)(1.5,38)(1.9,49)(2.3,50)(2.8,58)};
+          \addplot[cuteal,very thick,domain=0.5:2.9,samples=60,forget plot]
+            {2.8677+30.6696*x-4.0080*x^2};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny $J_{\text{train}} = 1.44$}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Overfit} --- up to $x^6$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.5cm,xmin=0.4,xmax=3.0,ymin=10,ymax=70,
+          xlabel={size},ylabel={price},grid=major,grid style={culight},
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=*,mark size=1.4pt,cublue,forget plot]
+            coordinates {(0.6,20)(0.9,26)(1.2,36)(1.5,38)(1.9,49)(2.3,50)(2.8,58)};
+          \addplot[cuamber,very thick,domain=0.58:2.82,samples=200,forget plot]
+            {790.0825-3765.3895*x+7153.0487*x^2-6792.7813*x^3+3441.0759*x^4-886.2694*x^5+91.0346*x^6};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny $J_{\text{train}} = 0.00$}
+    \end{column}
+  \end{columns}
+  \vspace{1mm}
+  \footnotesize
+  Seven points, seven parameters: the degree-$6$ curve passes through every one, so the
+  training cost is exactly zero --- and it predicts that a $2.6$k~sq~ft flat is worth
+  \emph{less} than a $2.1$k~sq~ft one.
+  \begin{keyidea}
+    The lowest training cost is the worst model. What we want is not a fit but
+    \textbf{generalization}: low cost on examples the model has never seen.
+  \end{keyidea}
+\end{frame}
+
+\begin{frame}{The vocabulary}
+  \footnotesize
+  \begin{center}
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}L{2.3cm}L{4.3cm}L{4.6cm}@{}}
+    \toprule
+    & \textbf{Underfitting} & \textbf{Overfitting}\\
+    \midrule
+    Also called      & high bias & high variance\\
+    Symptom          & poor on training \emph{and} on new data & excellent on training,
+                       poor on new data\\
+    What it means    & a strong preconception the data contradicts &
+                       the noise has been fitted as if it were signal\\
+    Cause            & too few features, too simple a form & too many features for the
+                       amount of data\\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Why ``variance'']
+        \footnotesize Re-collect the training data and refit. The degree-$6$ curve would come
+        out completely different every time; the straight line would barely move. High
+        variance means the fitted function depends violently on which examples you drew.
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{pitfall}
+        \footnotesize
+        You cannot detect overfitting from $J_{\text{train}}$ --- by construction it looks
+        best when the problem is worst. You need data the model did not train on. Module 2
+        builds this into a train / cross-validation / test procedure.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The same thing in classification}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Underfit}: $z=w_1x_1+w_2x_2+b$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.6cm,xmin=0,xmax=4,ymin=0,ymax=4,
+          xlabel={$x_1$},ylabel={$x_2$},axis on top,
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=o,mark size=1.6pt,cublue,thick,forget plot]
+            coordinates {(0.5,0.9)(0.9,1.4)(1.4,0.8)(0.6,2.0)(2.2,0.7)(1.1,2.2)(1.5,2.4)(2.0,1.75)};
+          \addplot[only marks,mark=x,mark size=2pt,curose,thick,forget plot]
+            coordinates {(2.6,2.6)(3.2,1.5)(1.8,3.4)(3.5,3.0)(2.9,1.2)(1.3,3.6)(2.4,1.0)};
+          \addplot[cublue,very thick,domain=0.05:3.25,forget plot]{3.9-1.2*x};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny 3 training points wrong}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Good fit}: add $x_1^2,x_2^2$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.6cm,xmin=0,xmax=4,ymin=0,ymax=4,
+          xlabel={$x_1$},ylabel={$x_2$},axis on top,
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=o,mark size=1.6pt,cublue,thick,forget plot]
+            coordinates {(0.5,0.9)(0.9,1.4)(1.4,0.8)(0.6,2.0)(2.2,0.7)(1.1,2.2)(1.5,2.4)(2.0,1.75)};
+          \addplot[only marks,mark=x,mark size=2pt,curose,thick,forget plot]
+            coordinates {(2.6,2.6)(3.2,1.5)(1.8,3.4)(3.5,3.0)(2.9,1.2)(1.3,3.6)(2.4,1.0)};
+          \addplot[cuteal,very thick,domain=0.05:3.15,samples=80,forget plot]
+            {3.8-0.30*x-0.30*x^2};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny 1 training point wrong}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering {\scriptsize \textbf{Overfit}: high-order terms}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=4.3cm,height=3.6cm,xmin=0,xmax=4,ymin=0,ymax=4,
+          xlabel={$x_1$},ylabel={$x_2$},axis on top,
+          tick label style={font=\tiny},label style={font=\tiny}]
+          \addplot[only marks,mark=o,mark size=1.6pt,cublue,thick,forget plot]
+            coordinates {(0.5,0.9)(0.9,1.4)(1.4,0.8)(0.6,2.0)(2.2,0.7)(1.1,2.2)(1.5,2.4)(2.0,1.75)};
+          \addplot[only marks,mark=x,mark size=2pt,curose,thick,forget plot]
+            coordinates {(2.6,2.6)(3.2,1.5)(1.8,3.4)(3.5,3.0)(2.9,1.2)(1.3,3.6)(2.4,1.0)};
+          \addplot[cuamber,very thick,domain=0.62:3.3,samples=200,forget plot]
+            {3.8-0.30*x-0.30*x^2+0.6*sin(deg(4.5*x))};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\tiny 0 training points wrong}
+    \end{column}
+  \end{columns}
+  \vspace{1mm}
+  \footnotesize
+  Same fifteen patients, three boundaries. Judged on the training set the right-hand model is
+  the best of the three --- and it is the one you would least want in a clinic. It has bent
+  itself around individual examples, so a new patient landing in one of its inlets is
+  classified by an accident of who happened to be in the training set.
+  \begin{keyidea}
+    Overfitting is not about regression or classification. It is about a model flexible enough
+    to memorise the examples instead of describing the pattern behind them.
+  \end{keyidea}
+\end{frame}
+
+% ===============================================================
+\section{Addressing Overfitting}
+
+\begin{frame}{Three remedies}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.32\textwidth}
+      \begin{block}{1. Collect more data}
+        The most effective fix when it is available. With enough examples even a
+        high-order polynomial cannot wiggle --- there is a point in the way of every
+        detour.
+        \par\vspace{1mm}
+        \textbf{Limit:} often impossible. There may only be $200$ patients.
+      \end{block}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{block}{2. Use fewer features}
+        Select a subset --- by domain knowledge, or systematically. Fewer parameters, less
+        room to memorise.
+        \par\vspace{1mm}
+        \textbf{Limit:} you throw away information. If all $100$ features carry a little
+        signal, discarding $90$ discards signal with the noise.
+      \end{block}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{block}{3. Regularization}
+        Keep every feature, but force the weights to stay small. A gentler version of
+        feature selection: the model may use a feature, but only if it earns its place.
+        \par\vspace{1mm}
+        \textbf{This is the subject of the rest of the lecture.}
+      \end{block}
+    \end{column}
+  \end{columns}
+  \vspace{1mm}
+  \begin{keyidea}
+    Why do small weights help? A large $w_j$ makes the prediction swing wildly for a small
+    change in $x_j$ --- that is exactly the wiggle. In the degree-$6$ fit two slides back,
+    $\sum_j w_j^2 \approx 1.2\times10^{8}$, with $|w_2| \approx 7153$. The wiggle and the
+    huge coefficients are the same phenomenon.
+  \end{keyidea}
+\end{frame}
+
+% ===============================================================
+\section{The Cost Function with Regularization}
+
+\begin{frame}{Penalising large weights}
+  \small
+  Add a term to the cost that grows when the weights do:
+  \[
+    J(\vw,b) \;=\; \underbrace{\frac{1}{2m}\sum_{i=1}^{m}\bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr)^2}
+      _{\text{fit the data}}
+    \;+\; \underbrace{\frac{\lambda}{2m}\sum_{j=1}^{n} w_j^{2}}_{\text{keep } \vw \text{ small}}
+  \]
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{itemize}
+        \item $\lambda \ge 0$ is the \textbf{regularization parameter}. You choose it; it is
+              not learned.
+        \item Dividing by the same $2m$ makes a good $\lambda$ less sensitive to the size of
+              the training set.
+        \item The sum runs $j=1,\dots,n$: \textbf{$b$ is not penalised}. Shrinking the
+              intercept towards zero says the output should be near zero by default, which is
+              a claim about the world, not about complexity. In practice it makes almost no
+              difference; convention is to leave it out.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[The trade-off]
+        \footnotesize
+        Minimising this cost balances two goals that pull in opposite directions:
+        \begin{itemize}
+          \item fit the training data,
+          \item keep every $w_j$ small.
+        \end{itemize}
+        $\lambda$ sets the exchange rate between them.
+      \end{defnbox}
+      \footnotesize
+      This penalty is called \textbf{L2} regularization, after the $\ell_2$ norm
+      $\|\vw\|_2^2=\sum_j w_j^2$. In statistics the resulting model is \emph{ridge
+      regression}.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{What $\lambda$ does, at the two extremes}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{$\lambda = 0$}
+        The penalty vanishes; we are back to the unregularized fit. The degree-$6$ curve
+        returns, with $J_{\text{train}}=0$ and coefficients in the thousands.
+        \hfill\textbf{Overfits.}
+      \end{block}
+      \begin{block}{$\lambda \to \infty$ (say $10^{10}$)}
+        The only way to keep $J$ small is $w_j \approx 0$ for every $j$, leaving
+        $f_{\vw,b}(\vx) \approx b$. The model predicts the same number for every input --- a
+        horizontal line. \hfill\textbf{Underfits.}
+      \end{block}
+      \begin{block}{In between}
+        Some intermediate $\lambda$ balances the two. Finding it is a search, like the search
+        for $\alpha$; Module 2 gives the principled procedure.
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering {\scriptsize The same degree-$6$ model, with and without a penalty}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.2cm,height=4.3cm,xmin=0.4,xmax=3.0,ymin=10,ymax=70,
+          xlabel={size (k sq ft)},ylabel={price (lakh)},grid=major,grid style={culight},
+          tick label style={font=\scriptsize},label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.97,0.03)},anchor=south east,draw=none,fill=white}]
+          \addplot[only marks,mark=*,mark size=1.5pt,cublue,forget plot]
+            coordinates {(0.6,20)(0.9,26)(1.2,36)(1.5,38)(1.9,49)(2.3,50)(2.8,58)};
+          \addplot[cuamber,very thick,domain=0.58:2.82,samples=200]
+            {790.0825-3765.3895*x+7153.0487*x^2-6792.7813*x^3+3441.0759*x^4-886.2694*x^5+91.0346*x^6};
+          \addlegendentry{$\lambda=0$}
+          \addplot[cuteal,very thick,domain=0.5:2.95,samples=120]
+            {19.9618+2.0628*x+3.3158*x^2+3.3678*x^3+1.4930*x^4-2.0563*x^5+0.4026*x^6};
+          \addlegendentry{$\lambda=1$}
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+  \vspace{0.5mm}
+  \footnotesize
+  Both curves use \emph{all six} powers of $x$. With $\lambda=1$ the fitted weights collapse
+  from $\sum_j w_j^2 \approx 1.2\times10^{8}$ to $33.2$, the largest from $7153$ to $3.37$,
+  and $J_{\text{train}}$ rises from $0$ to $2.67$. The features were never removed --- they
+  were merely made expensive.
+\end{frame}
+
+% ===============================================================
+\section{Regularized Linear Regression}
+
+\begin{frame}{The gradient, and the update}
+  \footnotesize
+  Differentiating the regularized cost adds one term, and only to the weights:
+  \[
+    \frac{\partial J}{\partial w_j}
+      = \frac{1}{m}\sum_{i=1}^{m}\bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr)\xjj{i}{j}
+        \;+\; \frac{\lambda}{m}w_j ,
+    \qquad
+    \frac{\partial J}{\partial b}
+      = \frac{1}{m}\sum_{i=1}^{m}\bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr) .
+  \]
+  \begin{defnbox}[Regularized gradient descent]
+    Repeat, simultaneously for $j=1,\dots,n$:
+    \[
+      w_j := w_j - \alpha\left[\frac{1}{m}\sum_{i=1}^{m}
+        \bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr)\xjj{i}{j} + \frac{\lambda}{m}w_j\right],
+      \qquad
+      b := b - \alpha\,\frac{1}{m}\sum_{i=1}^{m}\bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr)
+    \]
+  \end{defnbox}
+  \begin{pitfall}
+    The $b$ update is unchanged. Adding $\tfrac{\lambda}{m}b$ to it is the single most common
+    implementation error here, and it is silent --- the model still trains, just towards a
+    slightly wrong intercept.
+  \end{pitfall}
+\end{frame}
+
+\begin{frame}{What the extra term actually does}
+  \footnotesize
+  Collect the $w_j$ terms in the update:
+  \[
+    w_j := \underbrace{\left(1 - \alpha\frac{\lambda}{m}\right)}_{\text{shrink}} w_j
+           \;-\; \underbrace{\alpha\frac{1}{m}\sum_{i=1}^{m}
+             \bigl(f_{\vw,b}(\xii{i})-\yii{i}\bigr)\xjj{i}{j}}_{\text{the usual step}}
+  \]
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      Every iteration now does two things: it multiplies $w_j$ by a number slightly less than
+      one, then takes the ordinary gradient step.
+      \par\vspace{1mm}
+      With $\alpha=0.01$, $\lambda=1$, $m=50$:
+      \[ 1 - \alpha\frac{\lambda}{m} = 1 - \frac{0.01}{50} = 0.9998 \]
+      Tiny per step --- but $0.9998^{1000} = 0.8187$. Left alone for a thousand iterations, a
+      weight decays to $82\%$ of its value.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{keyidea}
+        \footnotesize
+        This is why L2 regularization is also called \textbf{weight decay}. Each weight leaks
+        away a little every iteration, and survives only if the data keeps pushing it back
+        up. A feature that does not help is quietly driven towards zero.
+      \end{keyidea}
+      \par\vspace{1mm}
+      The shrink factor must stay in $(0,1)$: if $\alpha\lambda/m > 1$ the sign of $w_j$ flips
+      each iteration and training diverges.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Regularized Logistic Regression}
+
+\begin{frame}{The same penalty, the same update}
+  \small
+  Add the identical term to the logistic cost of Part 1:
+  \[
+    J(\vw,b) = -\frac{1}{m}\sum_{i=1}^{m}
+      \Bigl[\yii{i}\log f^{(i)} + (1-\yii{i})\log\bigl(1-f^{(i)}\bigr)\Bigr]
+      \;+\; \frac{\lambda}{2m}\sum_{j=1}^{n}w_j^2 ,
+  \]
+  with $f^{(i)} = g(\vw\cdot\xii{i}+b)$. Differentiating gives
+  \[
+    \frac{\partial J}{\partial w_j}
+      = \frac{1}{m}\sum_{i=1}^{m}\bigl(f^{(i)}-\yii{i}\bigr)\xjj{i}{j} + \frac{\lambda}{m}w_j ,
+    \qquad
+    \frac{\partial J}{\partial b}
+      = \frac{1}{m}\sum_{i=1}^{m}\bigl(f^{(i)}-\yii{i}\bigr) .
+  \]
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{keyidea}
+        \footnotesize
+        Character for character the regularized linear-regression gradient. The only
+        difference, again, is the definition of $f$. One implementation of
+        \texttt{gradient(X, y, w, b, lam)} serves both models.
+      \end{keyidea}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{In code}
+        \texttt{dj\_dw = X.T @ err / m + lam * w / m}\\
+        \texttt{dj\_db = err.mean()\ \ \ \ \ \ \ \ \# no lam}
+      \end{block}
+      Geometrically, shrinking $\vw$ in a logistic model flattens the sigmoid along the
+      boundary --- predictions become less confident and the boundary straighter.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Choosing $\lambda$, and a note on L1}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Choosing $\lambda$}
+        Search on a multiplicative grid, as with $\alpha$:
+        \[ 0,\ 0.01,\ 0.03,\ 0.1,\ 0.3,\ 1,\ 3,\ 10,\ \dots \]
+        For each, train to convergence and measure the cost on data held out from training.
+        Pick the $\lambda$ with the lowest held-out cost --- \emph{never} the lowest training
+        cost, which always chooses $\lambda=0$.
+      \end{block}
+      \begin{pitfall}
+        Regularization penalises $w_j$, whose size depends on the units of feature $j$.
+        Without feature scaling the penalty falls unequally on features measured in
+        square feet and features measured in rooms. \textbf{Scale first, always.}
+      \end{pitfall}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{L1 --- a different penalty}
+        Replace $\sum_j w_j^2$ with $\sum_j |w_j|$ and the behaviour changes qualitatively:
+        weights are driven to \emph{exactly} zero rather than merely made small.
+        \begin{itemize}
+          \item \textbf{L2 (ridge):} shrinks everything, keeps everything.
+          \item \textbf{L1 (lasso):} performs feature selection as a side effect --- useful
+                when you need to know which features matter.
+        \end{itemize}
+        L2 is the default and the only one used in this course.
+      \end{block}
+      \begin{keyidea}
+        \footnotesize
+        Regularization does not make a bad model good. It buys back some of the flexibility
+        you spent on extra features.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary of Week 3, and of Module 1}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Concepts}
+        \begin{itemize}
+          \item Underfitting is high bias; overfitting is high variance. Zero training cost
+                is a symptom, not an achievement.
+          \item The goal is generalization, which $J_{\text{train}}$ cannot measure.
+          \item Remedies: more data, fewer features, or regularization.
+          \item L2 adds $\frac{\lambda}{2m}\sum_j w_j^2$; $b$ is left out.
+          \item The update becomes shrink-then-step --- weight decay.
+          \item Linear and logistic regression share one regularized gradient.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ J = \frac{1}{2m}\sum_i\bigl(f^{(i)}-\yii{i}\bigr)^2 + \frac{\lambda}{2m}\sum_{j=1}^{n}w_j^2 \]
+        \[ w_j := \Bigl(1-\alpha\tfrac{\lambda}{m}\Bigr)w_j - \tfrac{\alpha}{m}\sum_i\bigl(f^{(i)}-\yii{i}\bigr)\xjj{i}{j} \]
+      \end{block}
+      \begin{block}{Next: Module 2}
+        \footnotesize
+        Neural networks. Every idea from Module 1 --- the model/cost/gradient recipe, feature
+        scaling, the learning rate, overfitting, regularization --- carries over unchanged.
+        Only the model gets bigger.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Define underfitting and overfitting, and give the bias/variance name for each.
+          State one symptom that distinguishes them. \hfill\clo{6}
+    \item Seven data points are fitted by a degree-$6$ polynomial and $J_{\text{train}}=0$.
+          Explain why this happens and why it is not good news. \hfill\clo{6}
+    \item Explain the term ``high variance'' by describing what happens if the training set
+          is redrawn and the model refitted. \hfill\clo{5}
+    \item Why can overfitting not be detected from the training cost? What would you need
+          instead? \hfill\clo{5}
+    \item List the three remedies for overfitting given in this lecture, and state one
+          limitation of each. \hfill\clo{6}
+    \item Write the regularized cost for linear regression. Explain the role of $\lambda$ and
+          why the penalty is divided by $2m$. \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Why is $b$ excluded from the regularization term? \hfill\clo{4}
+    \item Describe the fitted model when $\lambda=0$ and when $\lambda=10^{10}$, and name the
+          failure mode in each case. \hfill\clo{6}
+    \item Derive $\partial J/\partial w_j$ for the regularized squared-error cost, and state
+          how the update rule changes. \hfill\clo{6}
+    \item Show that the regularized update can be written as
+          $w_j := (1-\alpha\lambda/m)w_j - \alpha\,\partial J_{\text{fit}}/\partial w_j$, and
+          explain the name ``weight decay''. For $\alpha=0.01$, $\lambda=1$, $m=50$, compute
+          the shrink factor and its value after $1000$ iterations. \hfill\clo{8}
+    \item Write the regularized cost and gradient for logistic regression, and state exactly
+          what differs from the linear case. \hfill\clo{6}
+    \item Why must features be scaled before regularization is applied? Illustrate with two
+          features measured in square feet and in number of rooms. \hfill\clo{6}
+    \item Contrast L1 and L2 penalties. When would you prefer L1? \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a $\lambda$ search.} You have $m=800$ examples and $n=60$ features.
+          Design a complete procedure for choosing $\lambda$: how you split the data, the grid
+          you search, what you measure, and the stopping rule. State what you would report to
+          justify the chosen value. \hfill\clo{12}
+    \item \textbf{Diagnose from symptoms alone.} For each case, decide underfitting or
+          overfitting and give two concrete next actions: (a) $J_{\text{train}}=0.02$,
+          $J_{\text{new}}=0.9$; (b) $J_{\text{train}}=0.55$, $J_{\text{new}}=0.58$, both far
+          above what a human achieves; (c) $J_{\text{train}}=0.31$, $J_{\text{new}}=0.33$, and
+          a human achieves $0.30$. \hfill\clo{12}
+    \item \textbf{Design under a data constraint.} A rural clinic can supply only $150$
+          labelled records but records $80$ measurements per patient. Propose a modelling
+          strategy, state which of the three remedies you rely on and why, and identify the
+          risk your strategy does not remove. \hfill\clo{12}
+    \item \textbf{Design a regularization unit test.} Write tests that would catch: $b$ being
+          penalised, the penalty being added to the cost but not the gradient, and $\lambda$
+          being applied before feature scaling. For each, give the input and the expected
+          observable difference. \hfill\clo{12}
+    \item \textbf{Argue the trade-off to a stakeholder.} A hospital director asks why you
+          deployed the model with $94\%$ training accuracy rather than the one with $100\%$.
+          Write the explanation you would give, in language that uses no equations.
+          \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S2.2} --- assessing model accuracy, the
+    bias--variance trade-off, and why training error falls as flexibility rises.}\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S6.2.1--6.2.2} --- ridge regression and the lasso:
+    the penalty, the role of the tuning parameter, and why the predictors must be
+    standardised.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S1.1} and \textbf{\S3.1.4} --- polynomial curve
+    fitting with a regularization term, and regularized least squares in matrix form.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 3): gradient descent for logistic regression; logistic regression with
+    scikit-learn; overfitting; regularization.\\
+    Practice quizzes: \emph{Gradient descent for logistic regression}; \emph{The problem of
+    overfitting}.
+  \end{center}
+\end{frame}
+
+\end{document}

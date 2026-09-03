@@ -3,7 +3,7 @@
 %  Module 1, Week 1, Part 1   
 %  Introduction to ML, Learning Paradigms, Linear Regression & Cost
 % =================================================================
-\documentclass[aspectratio=169,11pt]{beamer}
+\documentclass[aspectratio=169,10pt]{beamer}
 \usepackage{cse815}
 
 \title[CSE 815 -- Week 1, Part 1]{Introduction to Machine Learning}
@@ -213,10 +213,12 @@
           tick label style={font=\scriptsize},label style={font=\scriptsize}]
           \addplot[only marks,mark=*,mark size=1.6pt,cuteal]
             coordinates {(5,22)(7,26)(9,36)(10,33)(12,44)(13,49)(15,52)(16,61)(18,63)(20,72)(22,74)(24,84)};
-          \addplot[curose,very thick,domain=3:25]{3.6*x+3};
+          % Least-squares fit to the twelve points above; see
+          % ../book/verify/ch01_flat_prices.py for the computation.
+          \addplot[curose,very thick,domain=3:25]{3.2984*x+4.3308};
           \addplot[only marks,mark=diamond*,mark size=3pt,cuamber] coordinates {(17,0)};
-          \draw[dashed,cuamber,thick] (axis cs:17,0) -- (axis cs:17,64.2)
-                -- (axis cs:0,64.2);
+          \draw[dashed,cuamber,thick] (axis cs:17,0) -- (axis cs:17,60.4)
+                -- (axis cs:0,60.4);
         \end{axis}
       \end{tikzpicture}
     \end{column}
@@ -224,7 +226,7 @@
       \small
       \begin{itemize}
         \item Infinitely many possible outputs: $\mathcal{Y}=\R$.
-        \item ``A $1700$ sq.\,ft flat $\Rightarrow$ about $64$ lakh.''
+        \item ``A $1700$ sq.\,ft flat $\Rightarrow$ about $60$ lakh.''
         \item We fit a curve (here, a straight line) and read predictions off it.
       \end{itemize}
       \vspace{1mm}
@@ -520,13 +522,13 @@
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.5\textwidth}
       \centering
-      {\scriptsize Model space: $f_w(x)=wx$ on data $(1,1),(2,2),(3,3)$}
+      {\scriptsize Model space: $f_w(x)=wx$ on data $(1,1),(2,2),(3,3)$}\par
       \begin{tikzpicture}
         \begin{axis}[width=5.9cm,height=4.2cm,xlabel={$x$},ylabel={$y$},
           xmin=0,xmax=3.5,ymin=0,ymax=3.5,grid=major,grid style={culight},
           tick label style={font=\scriptsize},label style={font=\scriptsize},
           legend style={font=\tiny,at={(0.02,0.98)},anchor=north west,draw=none,fill=white}]
-          \addplot[only marks,mark=*,mark size=2pt,cublue] coordinates {(1,1)(2,2)(3,3)};
+          \addplot[only marks,mark=*,mark size=2pt,cublue,forget plot] coordinates {(1,1)(2,2)(3,3)};
           \addplot[cuteal,very thick,domain=0:3.4]{x};      \addlegendentry{$w=1$}
           \addplot[cuamber,very thick,domain=0:3.4]{0.5*x}; \addlegendentry{$w=0.5$}
           \addplot[curose,very thick,domain=0:3.4]{0};      \addlegendentry{$w=0$}
@@ -535,7 +537,7 @@
     \end{column}
     \begin{column}{0.5\textwidth}
       \centering
-      {\scriptsize Cost space: $J(w)$ as $w$ varies}
+      {\scriptsize Cost space: $J(w)$ as $w$ varies}\par
       \begin{tikzpicture}
         \begin{axis}[width=5.9cm,height=4.2cm,xlabel={$w$},ylabel={$J(w)$},
           xmin=-0.6,xmax=2.6,ymin=0,ymax=3.2,grid=major,grid style={culight},
@@ -613,18 +615,18 @@
   \begin{enumerate}
     \item State Mitchell's definition of machine learning. For an ML system that
           learns to detect Bangla handwritten digits, identify $T$, $P$ and $E$
-          explicitly. \hfill\clo{5}
+          explicitly.  
     \item Distinguish between supervised and unsupervised learning. Give one task
-          from agriculture that fits each, and justify your placement. \hfill\clo{5}
+          from agriculture that fits each, and justify your placement. 
     \item Explain the difference between regression and classification. Why is
           predicting a house's price a regression problem while predicting whether
-          it will sell within a month is classification? \hfill\clo{4}
+          it will sell within a month is classification? 
     \item Write the squared-error cost function for univariate linear regression
           and explain the role of each of the three parts: the square, the factor
-          $1/m$, and the factor $1/2$. \hfill\clo{6}
+          $1/m$, and the factor $1/2$.  
     \item For the training set $(1,1),(2,2),(3,3)$ and the model $f_w(x)=wx$,
           derive a closed-form expression for $J(w)$ and use it to find the
-          minimising $w$ analytically. \hfill\clo{6}
+          minimising $w$ analytically.  
   \end{enumerate}
 \end{frame}
 
@@ -633,12 +635,12 @@
   \begin{enumerate}\setcounter{enumi}{5}
     \item Argue why the sum of \emph{signed} errors,
           $\sum_i(\hat y^{(i)}-y^{(i)})$, is unusable as a cost function.
-          Support your argument with a concrete two-point data set. \hfill\clo{4}
+          Support your argument with a concrete two-point data set.  
     \item ``Linear regression can only fit straight lines.'' Evaluate this
-          statement and justify your verdict. \hfill\clo{4}
+          statement and justify your verdict.  
     \item Two students fit the same data. Student A reports $J=4.2$ using the
           $\tfrac{1}{2m}$ convention; student B reports $J=8.4$ using $\tfrac1m$.
-          Have they found different lines? Justify. \hfill\clo{4}
+          Have they found different lines? Justify.  
   \end{enumerate}
 \end{frame}
 
@@ -649,22 +651,22 @@
           system that predicts daily water demand for each ward. Design the
           formulation: specify $\mathcal{X}$ (what features you would record),
           $\mathcal{Y}$, the paradigm, and the performance measure $P$. State two
-          assumptions your design relies on. \hfill\clo{10}
+          assumptions your design relies on.  
     \item \textbf{Choosing a cost function.} A start-up predicts delivery times.
           Being $10$ minutes \emph{late} is far worse for them than being $10$
           minutes \emph{early}. Design a modified cost function that encodes this
           asymmetry, write it mathematically, and state one property (positivity,
           differentiability, convexity) that your design preserves or breaks.
-          \hfill\clo{10}
+           
     \item \textbf{Auditing a metric.} A hospital's ML screening tool reports
           $97\%$ accuracy on a data set where $3\%$ of patients have the disease.
           Explain why the stakeholders should not be satisfied, and design a
           better evaluation protocol --- what would you measure and what data
-          split would you use? \hfill\clo{8}
+          split would you use? 
     \item \textbf{Data design.} You must build the training set for a system that
           grades short answers in Bangla. Describe how you would collect
           $(\xii{i},\yii{i})$ pairs, and identify two ways your collection
-          procedure could bias the learned model. \hfill\clo{8}
+          procedure could bias the learned model. 
   \end{enumerate}
 \end{frame}
 
