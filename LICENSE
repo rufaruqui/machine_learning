@@ -1,0 +1,68 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+==========================================================
+
+Copyright (c) 2026 Rokan Uddin Faruqui
+Department of Computer Science & Engineering, University of Chittagong
+
+These course materials -- the lecture slides in cse815/, the lab notebooks in
+cse816/, the textbook in book/, the course page index.html, and the syllabus
+plan.md -- are licensed under the Creative Commons Attribution 4.0
+International License.
+
+  Full legal code:  https://creativecommons.org/licenses/by/4.0/legalcode
+  Human-readable summary:  https://creativecommons.org/licenses/by/4.0/
+
+YOU ARE FREE TO:
+
+  Share  -- copy and redistribute the material in any medium or format.
+  Adapt  -- remix, transform, and build upon the material for any purpose,
+            including commercially.
+
+The licensor cannot revoke these freedoms as long as you follow the licence
+terms.
+
+UNDER THE FOLLOWING TERMS:
+
+  Attribution -- You must give appropriate credit, provide a link to the
+  licence, and indicate if changes were made. You may do so in any reasonable
+  manner, but not in any way that suggests the licensor endorses you or your
+  use.
+
+  No additional restrictions -- You may not apply legal terms or technological
+  measures that legally restrict others from doing anything the licence
+  permits.
+
+NOTICES:
+
+  You do not have to comply with the licence for elements of the material in
+  the public domain or where your use is permitted by an applicable exception
+  or limitation.
+
+  No warranties are given. The licence may not give you all of the permissions
+  necessary for your intended use. For example, other rights such as
+  publicity, privacy, or moral rights may limit how you use the material.
+
+SUGGESTED ATTRIBUTION:
+
+  Based on "Machine Learning" course materials by Rokan Uddin Faruqui,
+  Department of CSE, University of Chittagong, used under CC BY 4.0.
+  https://github.com/rufaruqui/machine_learning
+
+MATERIAL NOT COVERED BY THIS LICENCE
+------------------------------------
+
+1. Reference textbooks. The books this course reads from -- James, Witten,
+   Hastie & Tibshirani, "An Introduction to Statistical Learning", and Bishop,
+   "Pattern Recognition and Machine Learning" -- are the property of their
+   respective authors and publishers. They are NOT distributed in this
+   repository and no licence to them is granted here. Both are available free
+   of charge from their authors' official pages.
+
+2. University crest. The file cse815/cu_logo.png is the crest of the
+   University of Chittagong. It is included for use within these materials
+   only and is not licensed for reuse under CC BY 4.0. Remove or replace it
+   when adapting these materials for another institution; the style file
+   cse815/cse815.sty is written so that the decks build without it.
+
+3. Third-party names. Course codes, institutional names, and any trademarks
+   referred to remain the property of their owners.
