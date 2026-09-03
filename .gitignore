@@ -1,0 +1,44 @@
+# --- macOS -------------------------------------------------------------
+.DS_Store
+**/.DS_Store
+
+# --- Jupyter -----------------------------------------------------------
+**/.ipynb_checkpoints/
+
+# --- Python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- LaTeX build artefacts ---------------------------------------------
+# Compiled slide PDFs ARE tracked deliberately: index.html links them.
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.log
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.gnuplot
+*.table
+
+# The textbook PDF is not tracked while the book is a work in progress.
+# Start tracking it once index.html links it.
+book/main.pdf
+
+# --- Reference material, not ours to redistribute ----------------------
+text_books/
+
+# --- Local tooling -----------------------------------------------------
+CLAUDE.md
