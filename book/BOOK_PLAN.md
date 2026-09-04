@@ -5,7 +5,7 @@
 self-learners with the same background. Assumes data structures, algorithms, introductory
 probability and statistics, and working Python. Assumes **no** linear algebra beyond a first
 statistics course — the matrix calculus the book needs is built up in Appendix A.
-**Format:** Professional B5 textbook, ~800–880 pages, pdfLaTeX
+**Format:** Professional B5 textbook, ~600–700 pages, pdfLaTeX
 **Design goal:** A student who reads this book and works its exercises can pass a first ML course
 without attending a lecture, and can then build, ship, and operate a model.
 
@@ -118,6 +118,18 @@ the slides do not: `\Xmat`, `\loss` (per-example loss, vs. `J` for cost), `\grad
 
 A two-page notation table in the front matter lists every symbol with its first-use chapter.
 
+### A note on the page budgets
+
+The per-chapter page counts below were estimates made before any chapter existed. The five
+written so far came in at 24, 22, 20, 18 and 22 B5 pages against estimates of 30, 34, 38, 36 and
+34 — roughly **60% of estimate**, and settling near 21 pages per chapter once the template
+stabilised.
+The remaining estimates have *not* been revised downward individually, since the later chapters
+(neural networks, transformers, the systems part) are genuinely denser; but the whole-book figure
+above has been, from ~850 pages to ~650. Treat a chapter's number as an upper bound, not a target:
+a chapter is done when its outline is covered and its exercise quotas are met, not when it reaches
+a page count.
+
 ### Exercise Numbering Scheme
 
 - **SQ** N.k — Short Question (definitions, one-line reasoning) — 8–12 per chapter
@@ -151,9 +163,9 @@ reading list, so exam preparation stays two books wide.
 |---|---|---|---|---|
 | **I — Foundations and Linear Regression** | 1 | What Machine Learning Is | 24 | **DONE** |
 | | 2 | Linear Regression with One Variable | 22 | **DONE** |
-| | 3 | Gradient Descent | 38 | PLANNED |
-| | 4 | Multiple Linear Regression and Vectorization | 36 | PLANNED |
-| | 5 | Making Gradient Descent Work | 34 | PLANNED |
+| | 3 | Gradient Descent | 20 | **DONE** |
+| | 4 | Multiple Linear Regression and Vectorization | 18 | **DONE** |
+| | 5 | Making Gradient Descent Work | 22 | **DONE** |
 | **II — Classification and Generalization** | 6 | Logistic Regression | 40 | PLANNED |
 | | 7 | Overfitting and Regularization | 36 | PLANNED |
 | **III — Neural Networks** | 8 | Neural Networks: Representation and Forward Propagation | 40 | PLANNED |
@@ -218,7 +230,7 @@ Boxes: `derivation` of `J` from the residual vector; `workedexample` `J` at thre
 `pitfall` "minimising `J` is not the same as a good model".
 Reading: ISLR §3.1; Bishop §1.1, §3.1.1.
 
-### Ch 3 — Gradient Descent
+### Ch 3 — Gradient Descent  *(done)*
 The descent idea and the update rule · simultaneous update, and the bug you get without it ·
 derivative intuition in one dimension · the learning rate: too small, too large, and the
 divergence threshold **derived** as `2/λ_max` for a quadratic cost, not asserted · gradient descent
@@ -228,7 +240,7 @@ Boxes: `derivation` ×2; `algorithmbox`; `workedexample` three iterations by han
 non-simultaneous update; `researchspotlight` Robbins & Monro (1951).
 Reading: ISLR §3.1; Bishop §3.1.3, §5.2.4.
 
-### Ch 4 — Multiple Linear Regression and Vectorization
+### Ch 4 — Multiple Linear Regression and Vectorization  *(done)*
 From one feature to *n* · the design matrix · model in vector form · vectorization: the loop, the
 dot product, and the measured speed-up · gradient descent for *n* features in vector form · the
 normal equation, derived, with its `O(n³)` cost and its singular cases · multicollinearity.
@@ -237,7 +249,7 @@ Boxes: `derivation` ×2; `workedexample` a 2-feature fit both ways agreeing to s
 `XᵀX` with duplicated features.
 Reading: ISLR §3.2; Bishop §3.1.
 
-### Ch 5 — Making Gradient Descent Work
+### Ch 5 — Making Gradient Descent Work  *(done)*
 Feature scaling and the elongated-contour picture · convergence checks, and how each can lie ·
 choosing the step size by the ×3 ladder · feature engineering as encoded domain knowledge ·
 polynomial regression as linear regression on transformed features · a first informal sighting of
@@ -620,7 +632,7 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
 | M | Deliverable | Contents |
 |---|---|---|
 | **M0** | Scaffolding | `mlbook.sty`, `main.tex`, `preface.tex`, `notation.tex`, `Makefile`, `bibliography.bib`, `verify/`, chapter stubs. Builds. **DONE** |
-| **M1** | Part I (Ch 1–5) | Pattern-setting part; the chapter template is frozen here. Ch 1–2 **DONE**. |
+| **M1** | Part I (Ch 1–5) | **COMPLETE.** Pattern-setting part; the chapter template is frozen here. |
 | **M2** | Part II (Ch 6–7) | Completes the linear-model core. |
 | **M3** | Appendices A–B | Written early; Ch 8 onward leans on them. |
 | **M4** | Part III (Ch 8–9) | Heaviest derivations. |

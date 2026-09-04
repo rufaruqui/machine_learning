@@ -1,15 +1,790 @@
 %% ch04.tex --- Multiple Linear Regression and Vectorization
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch04_multiple_features.py.
 
 \chapter{Multiple Linear Regression and Vectorization}
 \label{ch:ch04}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{Civilisation advances by extending the number of important operations
+which we can perform without thinking about them.}%
+{---\ Alfred North Whitehead}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Use the notation of multiple features correctly, including the design
+        matrix and the distinction between $\xii{i}$ and $\xjj{i}{j}$.
+  \item Write the model, the cost and the gradient in vector and matrix form,
+        and say what shape every quantity has.
+  \item Explain what vectorization does and does not change, and estimate the
+        speed-up it buys.
+  \item Derive $\partial J/\partial w_j$ for $n$ features and implement gradient
+        descent without a loop over examples or features.
+  \item Derive the normal equation from the orthogonality of the residual, and
+        state its computational cost.
+  \item Choose between gradient descent and the normal equation for a given
+        problem, with reasons.
+  \item Recognise when $\Xmat^{\mathsf{T}}\Xmat$ is singular or nearly so, say
+        what each situation means, and know what a solver returns anyway.
+  \item Explain why a fitted coefficient in a multi-feature model is not the
+        effect of that feature.
+\end{enumerate}
+\end{chapterlearning}
+
+\section{More Than One Feature}
+\label{sec:more-features}
+
+Real prediction problems rarely offer a single input. The apartment price of
+\cref{ch:ch01} depends on floor area, but also on the age of the building, the
+number of rooms, the floor it is on, and the distance to the nearest station.
+Nothing about \cref{ch:ch02,ch:ch03} required the input to be one number; it
+merely made the pictures drawable. We now drop that restriction.
+
+Write $n$ for the number of features. The $i$-th training example is now a
+vector, and we need a second index to reach inside it.
+
+\begin{defbox}{Notation for multiple features}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lL{8.2cm}@{}}
+\toprule
+$m$ & number of training examples\\
+$n$ & number of features\\
+$\vx^{(i)}$ & the $i$-th example, a vector in $\Real{n}$\\
+$\xjj{i}{j}$ & feature $j$ of example $i$ --- a single number\\
+$\Xmat$ & the \term{design matrix}: $m\times n$, one row per example, one
+          column per feature\\
+$\vy$ & the vector of targets, in $\Real{m}$\\
+$\vw$ & the weight vector, in $\Real{n}$; $b$ remains a single number\\
+\bottomrule
+\end{tabular}
+\end{center}
+Rows are examples and columns are features. This convention is universal in
+machine learning libraries and is worth committing to memory, because half of
+all shape errors come from silently transposing it.
+\end{defbox}
+
+The running example for this chapter is five apartments described by two
+features: floor area in hundreds of square feet, and the age of the building in
+years. It is dataset~D2 of \cref{ch:appD}.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}crrr@{}}
+\toprule
+$i$ & area $\xjj{i}{1}$ & age $\xjj{i}{2}$ & price $\yii{i}$\\
+\midrule
+$1$ & $8$  & $20$ & $30$\\
+$2$ & $12$ & $10$ & $46$\\
+$3$ & $15$ & $12$ & $55$\\
+$4$ & $18$ & $5$  & $72$\\
+$5$ & $22$ & $8$  & $84$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent So $m=5$, $n=2$, $\vx^{(3)} = (15, 12)$ and $\xjj{3}{2} = 12$.
+
+\begin{defbox}{Multiple linear regression}
+With $n$ features the model is
+\[
+  f_{\vw,b}(\vx) \;=\; w_1x_1 + w_2x_2 + \dots + w_nx_n + b
+                \;=\; \vw\cdot\vx + b ,
+\]
+with $n+1$ parameters: the weight vector $\vw\in\Real{n}$ and the bias $b$.
+Geometrically it is a hyperplane in $n+1$ dimensions --- a line when $n=1$, a
+plane when $n=2$.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[width=0.78\linewidth, height=6.0cm,
+      view={125}{22},
+      xlabel={area}, ylabel={age}, zlabel={price},
+      tick label style={font=\tiny}, label style={font=\small},
+      colormap={ml}{color=(MLLight) color=(MLTeal)},
+      samples=2, domain=7:23, y domain=3:21,
+      zmin=15, zmax=95]
+      \addplot3[surf,shader=interp,opacity=0.55,forget plot]
+        {7.093085 + 3.620567*x - 0.363780*y};
+      \addplot3[only marks,mark=*,mark size=2pt,MLRose] coordinates {
+        (8,20,30)(12,10,46)(15,12,55)(18,5,72)(22,8,84)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Two features, one target. The model is a plane; the five training
+  examples sit near but not on it. The cost is still the mean squared vertical
+  gap, and gradient descent still walks downhill --- in a three-dimensional
+  parameter space now, which we can no longer draw.}
+  \label{fig:plane}
+\end{figure}
+
+\section{The Model in Vector Form}
+\label{sec:vector-form}
+
+The sum $w_1x_1 + \dots + w_nx_n$ is a dot product, and writing it as one is not
+mere shorthand: it is what makes the next section's speed-up possible and the
+one after that's derivation short.
+
+For all $m$ predictions at once, stack the examples as the rows of $\Xmat$:
+\[
+  \hat{\vy} \;=\; \Xmat\vw + b\mathbf{1},
+  \qquad
+  \underbrace{\Xmat}_{m\times n}\ \underbrace{\vw}_{n\times 1}
+  \;\to\;\underbrace{\hat{\vy}}_{m\times 1}.
+\]
+Checking shapes this way, every time, prevents most of the errors you will
+otherwise make.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}]
+    \matrix (X) [matrix of math nodes, left delimiter=(, right delimiter=),
+                 row sep=1pt, column sep=6pt, nodes={minimum width=1.1cm}]
+    {
+      8  & 20\\
+      12 & 10\\
+      15 & 12\\
+      18 & 5\\
+      22 & 8\\
+    };
+    \node[above=1pt of X, font=\scriptsize\bfseries] {$\Xmat$ \ ($5\times 2$)};
+    \draw[decorate,decoration={brace,amplitude=5pt},MLTeal]
+      ($(X.south west)+(-0.30,0)$) -- ($(X.north west)+(-0.30,0)$)
+      node[midway,left=9pt,MLTeal,align=right] {$m=5$\\ examples};
+    \draw[decorate,decoration={brace,amplitude=4pt,mirror},MLAmber]
+      ($(X.south west)+(0,-0.25)$) -- ($(X.south east)+(0,-0.25)$)
+      node[midway,below=4pt,MLAmber] {$n=2$ features};
+    \node[right=1.4cm of X] (w)
+      {$\begin{pmatrix} w_1\\ w_2\end{pmatrix}$};
+    \node[right=0.3cm of w] (plus) {$+\;b\mathbf{1}\;=$};
+    \node[right=0.2cm of plus] (yh)
+      {$\begin{pmatrix}\hat y^{(1)}\\ \hat y^{(2)}\\ \hat y^{(3)}\\
+                       \hat y^{(4)}\\ \hat y^{(5)}\end{pmatrix}$};
+    \node[above=1pt of w, font=\scriptsize\bfseries] {$\vw$};
+    \node[above=1pt of yh, font=\scriptsize\bfseries] {$\hat{\vy}$};
+  \end{tikzpicture}
+  \caption{One matrix--vector product computes every prediction. Rows are
+  examples; columns are features. The bias is added to all $m$ entries by
+  broadcasting.}
+  \label{fig:design-matrix}
+\end{figure}
+
+It is often convenient to absorb $b$ into $\vw$ by prepending a column of ones
+to $\Xmat$ and a component $w_0 = b$ to the weight vector. Then
+$\hat{\vy} = \Xmat\bm{\theta}$ with $\bm{\theta}\in\Real{n+1}$, and the bias
+needs no special treatment. We use this in \cref{sec:normal-equation}; the code
+in between keeps $b$ separate, because that is what most libraries do.
+
+\section{Vectorization}
+\label{sec:vectorization}
+
+Consider three ways to compute one prediction.
+
+\begin{lstlisting}[style=pythonml,caption={The same dot product, three ways.
+Only the third is acceptable at scale.}]
+# 1. explicit loop -- correct, and unusably slow
+f = 0.0
+for j in range(n):
+    f += w[j] * x[j]
+f += b
+
+# 2. the same loop, written as a comprehension -- no faster
+f = sum(w[j] * x[j] for j in range(n)) + b
+
+# 3. vectorized -- one call into a compiled kernel
+f = np.dot(w, x) + b          # or:  w @ x + b
+\end{lstlisting}
+
+All three compute the same number. The third is faster by a factor that is worth
+measuring rather than guessing:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+vector length $N$ & Python loop & \code{numpy} & speed-up\\
+\midrule
+$1{,}000$     & $0.13$ ms   & $0.0010$ ms & $136\times$\\
+$100{,}000$   & $13.29$ ms  & $0.0029$ ms & $4521\times$\\
+$1{,}000{,}000$ & $139.88$ ms & $0.1661$ ms & $842\times$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent (Measured on the machine used to prepare this book; your factors will
+differ, but not by so much that the conclusion changes. The results agree to
+within $2\times 10^{-9}$, the accumulated difference between summing in a
+different order.)
+
+Notice that the speed-up is not monotone in $N$. At $N = 100{,}000$ both vectors
+fit in fast cache and the vectorized version is at its most impressive; by
+$N = 10^6$ it is limited by how fast memory can be read, and the advantage
+falls back. Performance work is full of such non-monotonicities, which is
+precisely why the numbers above were measured and not estimated.
+
+Four things account for the difference, and none of them is a better algorithm:
+
+\begin{enumerate}
+  \item \textbf{No interpreter overhead.} The Python loop executes several
+        bytecode instructions and allocates an object per element. The
+        vectorized call enters compiled code once.
+  \item \textbf{SIMD instructions.} A modern core multiplies four or eight
+        double-precision numbers per instruction. A loop written element by
+        element cannot use them.
+  \item \textbf{Memory locality.} Contiguous arrays are prefetched; Python lists
+        of boxed floats are scattered across the heap.
+  \item \textbf{Parallelism.} Larger matrix operations are handed to a
+        multi-threaded BLAS library, and on a GPU to thousands of cores at once.
+\end{enumerate}
+
+\begin{keyinsight}{Vectorization is not an optimization of the algorithm}
+The vectorized code performs the same arithmetic, in the same quantity, to the
+same accuracy. What changes is who executes it. This is why vectorizing is
+almost always worth doing and almost never changes an answer --- and why, if
+vectorizing your code \emph{does} change an answer by more than rounding, you
+have a bug, not a speed-up.
+\end{keyinsight}
+
+\begin{pitfall}{Shapes: $(m,)$ is not $(m,1)$}
+The commonest failure in a first vectorized implementation is not slowness but
+silent broadcasting. In NumPy, an array of shape $(m,)$ and one of shape
+$(m,1)$ are different objects, and subtracting the second from the first
+produces an $(m,m)$ matrix rather than an error:
+
+\begin{lstlisting}[style=pythonml]
+y     = np.array([30., 46., 55., 72., 84.])  # (5,)
+y_hat = (X @ w + b).reshape(-1, 1)           # (5,1) oops
+r     = y_hat - y                            # (5,5)!
+J     = (r ** 2).sum() / (2 * m)             # wrong
+\end{lstlisting}
+
+Line 2 introduces the mistake; line 3 is where it does its damage, subtracting
+a $(5,)$ array from a $(5,1)$ one to produce a $(5,5)$ matrix of every
+difference against every other. The cost on line 4 comes out finite, positive
+and meaningless, and gradient descent runs happily on it. Print \code{.shape} at every step while developing, and assert
+the shapes you expect:
+\code{assert r.shape == (m,)}.
+\end{pitfall}
+
+\section{Gradient Descent for \texorpdfstring{$n$}{n} Features}
+\label{sec:gd-multi}
+
+The cost is unchanged in form:
+\[
+  J(\vw, b) \;=\; \frac{1}{2m}\sum_{i=1}^{m}
+    \bigl(f_{\vw,b}(\vx^{(i)}) - \yii{i}\bigr)^{2} .
+\]
+
+\begin{derivation}{The gradient with respect to each weight}
+Differentiate with respect to one weight $w_j$. Only the $j$-th term of the dot
+product depends on it, so the inner derivative is $\xjj{i}{j}$:
+\[
+  \frac{\partial J}{\partial w_j}
+    = \frac{1}{m}\sum_{i=1}^{m}
+      \bigl(f_{\vw,b}(\vx^{(i)}) - \yii{i}\bigr)\,\xjj{i}{j},
+  \qquad j = 1,\dots,n,
+\]
+and, as before, $\partial J/\partial b$ is the same expression with the weight
+$\xjj{i}{j}$ replaced by $1$. Compare \cref{sec:gd-linreg}: the univariate
+formula is the case $n=1$, and nothing else has changed.
+
+Collecting the $n$ partial derivatives into a vector and writing
+$\mathbf{r} = \Xmat\vw + b\mathbf{1} - \vy$ for the residual vector,
+\begin{equation}
+  \grad_{\vw} J \;=\; \frac{1}{m}\,\Xmat^{\mathsf{T}}\mathbf{r},
+  \qquad
+  \frac{\partial J}{\partial b} \;=\; \frac{1}{m}\,\mathbf{1}^{\mathsf{T}}\mathbf{r},
+  \label{eq:vector-gradient}
+\end{equation}
+because the $j$-th component of $\Xmat^{\mathsf{T}}\mathbf{r}$ is exactly
+$\sum_i \xjj{i}{j} r^{(i)}$ --- the $j$-th column of $\Xmat$ dotted with the
+residuals.
+\end{derivation}
+
+\Cref{eq:vector-gradient} is one of the most useful formulas in this book. Two
+matrix products compute all $n+1$ derivatives: $\Xmat\vw$ forward to get the
+residuals, $\Xmat^{\mathsf{T}}\mathbf{r}$ backward to get the gradient. That
+forward-then-backward structure is not a coincidence, and \cref{ch:ch09} names
+it backpropagation.
+
+\begin{algorithmbox}{Batch gradient descent for multiple linear regression}
+\textbf{Input:} $\Xmat$ ($m\times n$), $\vy$ ($m$), learning rate $\alpha$,
+iterations $N$.
+
+\begin{enumerate}\setlength{\itemsep}{1pt}
+  \item $\vw \leftarrow \mathbf{0}$, \quad $b \leftarrow 0$.
+  \item \textbf{for} $k = 1,\dots,N$:
+  \begin{enumerate}\setlength{\itemsep}{1pt}
+    \item $\mathbf{r} \leftarrow \Xmat\vw + b\mathbf{1} - \vy$
+          \hfill \emph{($O(mn)$)}
+    \item $\mathbf{g} \leftarrow \frac{1}{m}\Xmat^{\mathsf{T}}\mathbf{r}$,
+          \quad $g_b \leftarrow \frac{1}{m}\sum_i r^{(i)}$
+          \hfill \emph{($O(mn)$)}
+    \item $\vw \leftarrow \vw - \alpha\mathbf{g}$,
+          \quad $b \leftarrow b - \alpha g_b$ \hfill \emph{(simultaneously)}
+  \end{enumerate}
+\end{enumerate}
+
+\textbf{Cost:} $O(mn)$ per iteration, $O(mnN)$ in total --- linear in the number
+of features.
+\end{algorithmbox}
+
+\begin{lstlisting}[style=pythonml,caption={The whole algorithm. There is no loop
+over examples and no loop over features.}]
+def gradient_descent(X, y, alpha, iters):
+    m, n = X.shape
+    w, b = np.zeros(n), 0.0
+    for _ in range(iters):
+        r  = X @ w + b - y                 # (m,)  residuals
+        gw = (X.T @ r) / m                 # (n,)  all n gradients at once
+        gb = r.mean()                      # scalar
+        w, b = w - alpha * gw, b - alpha * gb    # simultaneous
+    return w, b
+\end{lstlisting}
+
+\section{The Normal Equation}
+\label{sec:normal-equation}
+
+For this model the exact solution is again available, and the derivation is
+shorter in matrix form than the one-variable version of \cref{sec:closed-form}
+--- and more illuminating, because it is the projection argument of
+\cref{sec:projection} with $n+1$ spanning vectors instead of two.
+
+\begin{derivation}{The normal equation}
+Absorb the bias: let $\Xmat$ now include a leading column of ones, so
+$\bm{\theta}\in\Real{n+1}$ and $\hat{\vy} = \Xmat\bm{\theta}$. As
+$\bm{\theta}$ ranges over $\Real{n+1}$, $\hat{\vy}$ sweeps the column space of
+$\Xmat$ --- the subspace of $\Real{m}$ spanned by the columns.
+
+Minimising $J = \frac{1}{2m}\|\Xmat\bm{\theta}-\vy\|^2$ means finding the point
+of that subspace closest to $\vy$, which is its orthogonal projection. The
+residual $\mathbf{r} = \Xmat\bm{\theta}-\vy$ must therefore be perpendicular to
+\emph{every} column of $\Xmat$, which is $n+1$ equations written at once as
+\begin{equation}
+  \Xmat^{\mathsf{T}}\bigl(\Xmat\bm{\theta} - \vy\bigr) = \mathbf{0}
+  \qquad\Longleftrightarrow\qquad
+  \Xmat^{\mathsf{T}}\Xmat\,\bm{\theta} = \Xmat^{\mathsf{T}}\vy ,
+  \label{eq:normal-equations}
+\end{equation}
+the \term{normal equations} --- ``normal'' in the sense of perpendicular. When
+$\Xmat^{\mathsf{T}}\Xmat$ is invertible,
+\begin{equation}
+  \bm{\theta}^\star
+    = \bigl(\Xmat^{\mathsf{T}}\Xmat\bigr)^{-1}\Xmat^{\mathsf{T}}\vy .
+  \label{eq:normal-equation}
+\end{equation}
+Setting $\grad J = \frac1m \Xmat^{\mathsf{T}}\mathbf{r} = \mathbf{0}$ in
+\cref{eq:vector-gradient} gives the same equations, as it must: the stationarity
+condition and the perpendicularity condition are one statement.
+\end{derivation}
+
+\begin{workedexample}{Dataset D2, both ways}
+With the bias column, $\Xmat$ is $5\times 3$ and
+\[
+  \Xmat^{\mathsf{T}}\Xmat =
+  \begin{pmatrix}
+    5    & 75   & 55\\
+    75   & 1241 & 726\\
+    55   & 726  & 733
+  \end{pmatrix},
+  \qquad
+  \Xmat^{\mathsf{T}}\vy =
+  \begin{pmatrix} 287\\ 4761\\ 2752 \end{pmatrix}.
+\]
+The top-left entry is $m$; the rest of the first row and column are the feature
+sums; the interior is the matrix of feature cross-products. Solving the
+$3\times3$ system:
+\[
+  b = 7.093085,
+  \qquad
+  w_1 = 3.620567,
+  \qquad
+  w_2 = -0.363780 ,
+\]
+with $J = 0.889051$. The signs are as one would hope: price rises with area and
+falls with age.
+
+\textbf{The same answer by gradient descent.} Running the algorithm of
+\cref{sec:gd-multi} on standardised features (\cref{ch:ch05} explains why that
+is necessary here), for increasing budgets:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+iterations & $b$ & $w_1$ & $w_2$ & $J$\\
+\midrule
+$10$      & $28.589218$ & $2.712345$ & $-1.226892$ & $5.786337$\\
+$100$     & $7.219119$  & $3.615619$ & $-0.368491$ & $0.889157$\\
+$1{,}000$ & $7.093085$  & $3.620567$ & $-0.363780$ & $0.889051$\\
+\midrule
+normal eq.& $7.093085$  & $3.620567$ & $-0.363780$ & $0.889051$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+After a thousand iterations the two agree to within $1.4\times 10^{-13}$ --- the
+limit of double precision, not of the algorithm. Two entirely different methods,
+one answer: this is the check to run whenever you implement either.
+
+\textbf{Is the second feature worth having?} Fitting area alone gives
+$b = -1.5655$, $w_1 = 3.9310$ and $J = 1.4648$. Adding age reduces the cost to
+$0.8891$, a $39\%$ reduction. Note that $w_1$ also changed, from $3.93$ to
+$3.62$: the coefficient on area is not a property of area alone.
+\end{workedexample}
+
+\subsection{What it costs}
+
+Forming $\Xmat^{\mathsf{T}}\Xmat$ takes $O(mn^2)$ operations and solving the
+resulting system takes $O(n^3)$. The cubic term is what eventually stops you:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrr@{}}
+\toprule
+$n$ & time to solve & ratio to $n/2$\\
+\midrule
+$200$   & $0.108$ ms   & ---\\
+$400$   & $0.491$ ms   & $4.5\times$\\
+$800$   & $2.306$ ms   & $4.7\times$\\
+$1{,}600$ & $16.440$ ms & $7.1\times$\\
+$3{,}200$ & $129.086$ ms & $7.9\times$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each doubling of $n$ should multiply the time by $2^3 = 8$, and the measured
+ratios approach that once the matrices outgrow the processor's cache. Extrapolate:
+at $n = 100{,}000$ features --- an ordinary size for text --- the same solve would
+take roughly $10^{4.5}$ times as long as at $n=3{,}200$, which is several days.
+Gradient descent, at $O(mn)$ per iteration, is unbothered.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{5.1cm}L{5.1cm}@{}}
+\toprule
+\textbf{Normal equation} & \textbf{Gradient descent}\\
+\midrule
+No learning rate to choose. & $\alpha$ must be chosen, and badly chosen it
+  fails.\\
+No iterations, no stopping rule. & Needs a budget and a stopping rule.\\
+No feature scaling required. & Feature scaling matters a great deal
+  (\cref{ch:ch05}).\\
+$O(n^3)$: impractical beyond roughly $10^4$ features. & $O(mn)$ per iteration:
+  fine at any $n$.\\
+Fails outright if $\Xmat^{\mathsf{T}}\Xmat$ is singular. & Unbothered by
+  singularity; returns \emph{a} minimiser.\\
+Exists only for linear regression with squared error. & Works for every model in
+  this book.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The practical rule: with a few thousand features or fewer and a squared-error
+linear model, use the normal equation --- it is exact and needs no tuning.
+Otherwise, or as soon as the model stops being linear, use gradient descent.
+
+\section{When \texorpdfstring{$\Xmat^{\mathsf{T}}\Xmat$}{X'X} Is Not Invertible}
+\label{sec:singular}
+
+\Cref{eq:normal-equation} assumes an inverse exists. Two situations in which it
+does not are common enough to recognise on sight.
+
+\textbf{Redundant features.} Suppose someone records floor area twice, once in
+square feet and once in square metres, or --- as happens more often --- a feature
+is accidentally duplicated by a join. Then one column of $\Xmat$ is a multiple of
+another, the columns are linearly dependent, and $\Xmat^{\mathsf{T}}\Xmat$ is
+singular. Duplicating the area column of D2 gives a $4\times 4$ matrix
+$\Xmat^{\mathsf{T}}\Xmat$ with determinant exactly $0$ and rank $3$.
+
+\textbf{More features than examples.} If $n \ge m$ then $\Xmat$ has at most $m$
+independent columns, so $\Xmat^{\mathsf{T}}\Xmat$ ($n\times n$) cannot have full
+rank. There are then infinitely many parameter vectors achieving $J = 0$, all of
+them fitting the training data perfectly and most of them useless ---
+\cref{ch:ch07}'s overfitting in its purest form.
+
+\begin{pitfall}{Your solver will not tell you}
+Calling \code{np.linalg.inv} on a singular matrix raises an error, but almost
+nobody calls it: the usual routines, \code{np.linalg.lstsq} and
+\code{sklearn.linear\_model.LinearRegression}, use the pseudo-inverse and return
+an answer without complaint. For the duplicated-area version of D2 the solver
+returns
+\[
+  b = 7.0931,\quad w_1 = 1.8103,\quad w_2 = -0.3638,\quad w_3 = 1.8103,
+\]
+where $w_1$ and $w_3$ are the coefficients on the two identical columns. It has
+split the original coefficient exactly in half: $1.8103 + 1.8103 = 3.620567$,
+the value from the non-degenerate fit. This is the \emph{minimum-norm} solution
+--- of the infinitely many equally good answers, the one with the smallest
+$\|\bm{\theta}\|$.
+
+The predictions are perfect and identical to before. The coefficients are
+arbitrary. Anyone reading them as ``the effect of area'' would be reading half
+of it, twice, and would draw the wrong conclusion. Check for duplicated and
+derived columns before fitting, and check the rank of $\Xmat$ when a coefficient
+surprises you.
+\end{pitfall}
+
+The remedies, in order of preference: remove the redundant feature; collect more
+examples if $n \ge m$; or add regularization, which makes
+$\Xmat^{\mathsf{T}}\Xmat + \lambda I$ invertible for any $\lambda>0$ and is the
+subject of \cref{ch:ch07}.
+
+\section{Multicollinearity, and Reading Coefficients}
+\label{sec:multicollinearity}
+
+Exact dependence between features is easy to spot. Near-dependence is not, and it
+is far more common: floor area and number of rooms, income and years of
+education, height and weight all move together without being multiples of one
+another.
+
+Replace D2's age column with a feature that is almost exactly three times the
+area, differing only in the second decimal place. The matrix
+$\Xmat^{\mathsf{T}}\Xmat$ is now invertible, so everything appears to work, and
+its \term{condition number} --- the ratio of its largest eigenvalue to its
+smallest --- is $1.3\times 10^{8}$. The fitted coefficients are
+
+\[
+  b = 0.401, \qquad w_1 = 306.963, \qquad w_2 = -101.050 .
+\]
+
+These are absurd. The sensible single-feature answer was $w_1 = 3.93$; the model
+has found a pair of enormous coefficients that nearly cancel, since
+$306.963 - 3\times 101.050 \approx 3.81$. The predictions are perfectly
+reasonable; only the individual coefficients are nonsense.
+
+Worse, they are unstable. Add $0.1$ to a single target value --- a rounding
+difference in one price --- and refit:
+\[
+  b = 0.491, \qquad w_1 = 303.920, \qquad w_2 = -100.037 .
+\]
+$w_1$ has moved by $3.04$, which is nearly the size of the entire meaningful
+coefficient from the single-feature fit. A dataset that differs by one part in
+a thousand yields a materially different model.
+
+\begin{pitfall}{A coefficient is not the effect of a feature}
+The standard gloss --- ``$w_j$ is the change in $y$ per unit change in $x_j$,
+holding the other features fixed'' --- is mathematically correct and practically
+treacherous, because it presumes the other features \emph{can} be held fixed. If
+$x_2$ is always about $3x_1$, then no apartment exists with $x_1$ increased and
+$x_2$ unchanged, and the coefficient describes a comparison the data never made.
+
+Symptoms of multicollinearity: coefficients far larger than the target's scale;
+signs that contradict domain knowledge; coefficients that swing wildly when a
+single example is added or removed. Diagnose it with the condition number of
+$\Xmat^{\mathsf{T}}\Xmat$ or a correlation matrix of the features. Treat it by
+removing one of the pair, combining them into a single feature, or regularizing
+(\cref{ch:ch07}). And be clear about your goal: if you only need predictions,
+multicollinearity is nearly harmless; if you intend to \emph{interpret} the
+coefficients, it is fatal.
+\end{pitfall}
+
+One more warning about reading coefficients, which does not require any
+degeneracy at all. In the honest D2 fit, $w_1 = 3.62$ and $w_2 = -0.36$. It is
+tempting to conclude that area matters ten times as much as age. It does not
+follow: $w_1$ is measured per hundred square feet and $w_2$ per year, and the two
+are not comparable any more than kilograms and kilometres are. Comparing the
+importance of features requires putting them on a common scale first, which is
+the first thing \cref{ch:ch05} does.
+
+\begin{labbox}{Lab 4 --- Vectorized multiple regression}
+Load dataset D2 and implement \code{predict}, \code{cost} and
+\code{gradient\_descent} with no loop over examples or features. Confirm
+$J = 0.889051$ at the fitted parameters. Implement the normal equation with
+\code{np.linalg.solve} --- not \code{inv} --- and check that the two methods
+agree to at least ten decimal places. Time your loop-based and vectorized cost
+functions on a random problem with $m = 10^5$ and $n = 100$, and report the
+ratio. Finally, duplicate the area column, refit, and confirm that the
+coefficient splits in half while the predictions do not move.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item Multiple Features
-  \item Vectorization
-  \item Gradient Descent for Multiple Features
-  \item The Normal Equation
-  \item Multicollinearity
+  \item With $n$ features the model is $f_{\vw,b}(\vx) = \vw\cdot\vx + b$. The
+        design matrix $\Xmat$ is $m\times n$: rows are examples, columns are
+        features.
+  \item All $m$ predictions are one matrix--vector product,
+        $\hat{\vy} = \Xmat\vw + b\mathbf{1}$. Checking shapes at every step
+        prevents most implementation errors; $(m,)$ and $(m,1)$ are different,
+        and mixing them broadcasts silently instead of failing.
+  \item Vectorization performs identical arithmetic in compiled, SIMD,
+        cache-friendly, sometimes parallel code. Measured speed-ups here ranged
+        from $136\times$ to $4521\times$. It changes the implementation, never
+        the algorithm or the answer.
+  \item $\partial J/\partial w_j = \frac1m\sum_i r^{(i)}\xjj{i}{j}$, or in
+        vector form $\grad_{\vw}J = \frac1m\Xmat^{\mathsf{T}}\mathbf{r}$: one
+        product forward for the residuals, one backward for the gradient. The
+        update rule of \cref{ch:ch03} is otherwise unchanged.
+  \item The normal equations $\Xmat^{\mathsf{T}}\Xmat\bm{\theta} =
+        \Xmat^{\mathsf{T}}\vy$ state that the residual is perpendicular to every
+        column of $\Xmat$ --- the projection picture of \cref{ch:ch02} in $n+1$
+        dimensions. They cost $O(n^3)$ to solve.
+  \item Use the normal equation for a linear model with up to a few thousand
+        features; use gradient descent otherwise, and always once the model
+        stops being linear.
+  \item $\Xmat^{\mathsf{T}}\Xmat$ is singular when features are redundant or
+        $n \ge m$. Solvers return the minimum-norm answer rather than an error,
+        so the failure is silent and shows up only in the coefficients.
+  \item Near-collinear features give huge, unstable, uninterpretable
+        coefficients while leaving predictions intact. Coefficients of different
+        units are not comparable in size.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq For a dataset with $m = 400$ examples and $n = 12$ features, give the shape
+of $\Xmat$, $\vw$, $\vy$ and $\Xmat^{\mathsf{T}}\Xmat$.
+
+\sq What is the difference between $\vx^{(3)}$, $\xjj{3}{2}$ and $x_2$?
+
+\sq Write the multiple linear regression model in both summation and vector
+notation.
+
+\sq Give two reasons a vectorized dot product is faster than the equivalent
+Python loop.
+
+\sq Does vectorizing a computation change its result? Explain your answer,
+including any exception.
+
+\sq Write $\grad_{\vw}J$ in matrix form and state the shape of each factor.
+
+\sq State the normal equations and explain what the word ``normal'' refers to.
+
+\sq Give the computational cost of the normal equation and of one iteration of
+gradient descent, in terms of $m$ and $n$.
+
+\sq Name two situations in which $\Xmat^{\mathsf{T}}\Xmat$ has no inverse, and
+say what a typical solver does in each case.
+
+\sq Why can two fitted coefficients not be compared by magnitude?
+
+\exercisesection{Analytical Problems}
+
+\ap For dataset D2, verify by hand that the $(2,3)$ entry of
+$\Xmat^{\mathsf{T}}\Xmat$ is $726$ and that the second entry of
+$\Xmat^{\mathsf{T}}\vy$ is $4761$. State in words what each of these sums
+computes.
+
+\ap Show that the $j$-th component of $\Xmat^{\mathsf{T}}\mathbf{r}$ equals
+$\sum_{i=1}^{m} \xjj{i}{j}\,r^{(i)}$, and hence that
+\cref{eq:vector-gradient} agrees with the component-wise derivative.
+
+\ap Starting from $J = \frac{1}{2m}\|\Xmat\bm{\theta}-\vy\|^2$, expand the norm
+and differentiate with respect to $\bm{\theta}$ to obtain
+\cref{eq:normal-equations} directly, without the projection argument.
+
+\ap Suppose feature $1$ is measured in metres and is then re-expressed in
+centimetres. How do $w_1$, $b$, the fitted predictions and $J$ change? Now
+suppose instead that the \emph{target} is re-expressed in cents rather than
+dollars. Answer the same four questions.
+
+\ap Show that if two columns of $\Xmat$ are identical, then for any solution
+$\bm{\theta}$ there are infinitely many others with the same cost, obtained by
+moving weight from one column to the other. Which of them does the pseudo-inverse
+return, and why?
+
+\ap A dataset has $m = 50$ examples and $n = 60$ features. Explain why a
+zero-cost fit exists, why it is worthless, and what the smallest change to the
+setup would be that makes the problem well posed.
+
+\exercisesection{Design Problems}
+
+\dpr You are given $80$ candidate features for a price model, many derived from
+one another (area, area per room, log area, rooms, rooms per floor). Describe how
+you would decide which to include, what diagnostics you would compute before
+fitting, and how your answer would differ if the goal were prediction rather than
+explanation.
+
+\dpr A stakeholder asks: ``the model says each extra year of age reduces the
+price by \$364 --- should we renovate?'' Write the reply, covering what the
+coefficient does and does not license them to conclude, and what evidence would
+actually answer their question.
+
+\dpr Your training set has $m = 10^{7}$ examples and $n = 300$ features and does
+not fit in memory. Choose between the normal equation and gradient descent,
+justify the choice on cost grounds, and describe how you would compute what your
+chosen method needs without ever holding $\Xmat$ in memory at once.
+
+\dpr Design a set of automatic checks to run on $\Xmat$ before any model is
+fitted --- rank, condition number, duplicated columns, constant columns, scale
+--- and say for each what threshold would trigger a warning and what the warning
+should tell the user to do.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement \code{cost(X, y, w, b)} for the multi-feature model with no
+explicit loop, and verify $J = 0.889051$ on D2 at the fitted parameters. Write a
+loop-based version and \code{assert np.allclose} between them.
+
+\pe Reproduce the timing table of \cref{sec:vectorization} on your own machine
+for $N \in \{10^3, 10^5, 10^6\}$. Do you see the same non-monotone speed-up?
+Explain what your numbers suggest about your machine's cache.
+
+\pe Implement gradient descent from \cref{sec:gd-multi} and the normal equation
+from \cref{sec:normal-equation}, and plot the maximum absolute difference between
+their parameter vectors as a function of the number of iterations, on a
+logarithmic axis. How many iterations are needed for agreement to six decimal
+places?
+
+\pe Generate a dataset with two nearly-collinear features and fit it $100$ times,
+each time perturbing a single target by a small random amount. Plot the
+distribution of $w_1$. Repeat with the collinearity removed and compare the two
+distributions. This is the experiment behind \cref{sec:multicollinearity}.
+
+\exercisesection{Self-Test}
+
+\qz In the design matrix $\Xmat$, the rows correspond to: (a)~features;
+(b)~examples; (c)~parameters; (d)~predictions.
+
+\qz $\xjj{4}{2}$ denotes: (a)~example $2$ of feature $4$; (b)~feature $2$ of
+example $4$; (c)~$x_4$ squared; (d)~the fourth parameter.
+
+\qz Vectorizing a correct loop-based implementation should change the result by:
+(a)~nothing at all; (b)~at most rounding error; (c)~a factor of $m$;
+(d)~an unpredictable amount.
+
+\qz The vector of all $n$ weight gradients equals: (a)~$\Xmat\mathbf{r}/m$;
+(b)~$\Xmat^{\mathsf{T}}\mathbf{r}/m$; (c)~$\mathbf{r}^{\mathsf{T}}\Xmat/n$;
+(d)~$\Xmat^{\mathsf{T}}\Xmat\bm{\theta}$.
+
+\qz The normal equations express the fact that the residual is: (a)~zero;
+(b)~minimal in absolute value; (c)~perpendicular to every column of $\Xmat$;
+(d)~normally distributed.
+
+\qz Solving the normal equations costs about: (a)~$O(mn)$; (b)~$O(n^2)$;
+(c)~$O(n^3)$; (d)~$O(m^3)$.
+
+\qz If two columns of $\Xmat$ are identical, \code{np.linalg.lstsq}:
+(a)~raises an error; (b)~returns the minimum-norm solution; (c)~returns
+infinity; (d)~drops one column automatically.
+
+\qz Near-collinear features chiefly damage: (a)~the predictions;
+(b)~the interpretability and stability of the coefficients; (c)~the cost
+function; (d)~the learning rate.
+
+\furtherreading
+
+\textcite{james2021} §3.2 is the natural companion to this chapter: it develops
+multiple linear regression, the interpretation of coefficients as partial
+effects, and --- in §3.3.3 --- collinearity and the variance inflation factor,
+which is the standard diagnostic for \cref{sec:multicollinearity}.
+\textcite{bishop2006} §3.1 gives the same material in matrix form with the
+geometry of \cref{sec:normal-equation} drawn explicitly, and introduces the
+pseudo-inverse in the context of the singular case.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch05} takes up the loose ends this chapter left
+behind. Why did the worked example have to standardise the features before
+gradient descent would work at all? How should $\alpha$ be chosen? And what do
+you do when the relationship is not a straight line?

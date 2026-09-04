@@ -1,16 +1,899 @@
 %% ch03.tex --- Gradient Descent
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch03_gradient_descent.py.
 
 \chapter{Gradient Descent}
 \label{ch:ch03}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{An algorithm must be seen to be believed.}{---\ Donald E.\ Knuth}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item State the gradient descent update rule and explain why the derivative
+        gives both the direction and the size of the step.
+  \item Perform the update \emph{simultaneously}, and say what different
+        algorithm you get if you do not.
+  \item Derive $\partial J/\partial w$ and $\partial J/\partial b$ for the
+        squared-error cost, and implement the resulting algorithm.
+  \item Diagnose a learning rate that is too small or too large from a plot of
+        $J$ against iteration, and derive the exact threshold at which gradient
+        descent on a quadratic cost begins to diverge.
+  \item Carry out gradient descent by hand for two iterations and check your
+        arithmetic against a printed table.
+  \item Explain why the squared-error cost of a linear model is convex, and
+        what that guarantees.
+  \item Choose a stopping rule, and explain why a small change in $J$ is weak
+        evidence of convergence.
+  \item Distinguish batch, stochastic and mini-batch gradient descent, and say
+        when each is appropriate.
+\end{enumerate}
+\end{chapterlearning}
+
+\section{The Problem: Minimising Without Solving}
+\label{sec:minimising}
+
+\Cref{ch:ch02} ended by minimising $J$ exactly. Set both partial derivatives to
+zero, solve the resulting pair of equations, and out comes the best line in one
+step. Why, then, an entire chapter on an iterative method that only approaches
+the answer?
+
+Because the closed form is a happy accident of this particular model. It exists
+because $J$ is a quadratic in the parameters, so its derivatives are linear and
+the stationarity equations are a linear system. Change almost anything --- use
+the logistic model of \cref{ch:ch06}, stack layers as in \cref{ch:ch09}, add a
+non-quadratic penalty --- and setting the derivatives to zero produces equations
+that nobody can solve symbolically. Even for linear regression, the closed form
+requires inverting a matrix whose size is the number of features, which becomes
+impractical well before the interesting problems begin (\cref{ch:ch04}).
+
+So we need a method that works with much less. Assume the only two things we can
+ever do are:
 
 \begin{itemize}
-  \item The Descent Idea
-  \item The Update Rule
-  \item The Learning Rate
-  \item Gradient Descent for Linear Regression
-  \item Convexity
-  \item Batch, Stochastic, and Mini-Batch
+  \item evaluate $J$ at a point $(w,b)$, and
+  \item evaluate its derivatives at that point.
 \end{itemize}
+
+\noindent We cannot see the whole surface of \cref{fig:bowl}; we can only stand
+at one point of it and feel which way is downhill. The algorithm of this chapter
+is the obvious response to that situation, and it is, with refinements, how
+essentially every model in this book is trained.
+
+\begin{keyinsight}{The bargain}
+Gradient descent trades exactness for generality. It never solves anything, and
+it never arrives --- it only gets closer. In exchange it needs nothing from the
+cost function except that we can differentiate it, which is why the same twenty
+lines of code train a straight line and a neural network.
+\end{keyinsight}
+
+\section{Derivative Intuition in One Dimension}
+\label{sec:derivative-intuition}
+
+Fix $b$ and consider $J$ as a function of $w$ alone, so that the picture is the
+parabola of \cref{sec:cost-one-param}. Take the three-point set of that section,
+for which
+\[
+  J(w) = \tfrac{14}{6}(w-1)^2,
+  \qquad
+  \frac{\dd J}{\dd w} = \tfrac{14}{3}(w-1),
+\]
+with its minimum at $w = 1$. Stand at some $w$ and ask which way to move.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.72\linewidth, height=5.4cm,
+      xlabel={$w$}, ylabel={$J(w)$},
+      xmin=-0.6, xmax=2.6, ymin=-0.6, ymax=5.4,
+      legend style={font=\tiny, at={(0.5,0.98)}, anchor=north}]
+      \addplot[MLBlue,very thick,domain=-0.6:2.6,samples=90]{14/6*(x-1)^2};
+      \addlegendentry{$J(w)$}
+      % tangent at w = 2 : slope +14/3
+      \addplot[MLRose,thick,dashed,domain=1.35:2.55,forget plot]
+        {2.3333 + 4.6667*(x-2)};
+      % tangent at w = 0 : slope -14/3
+      \addplot[MLTeal,thick,dashed,domain=-0.55:0.65,forget plot]
+        {2.3333 - 4.6667*(x-0)};
+      \addplot[only marks,mark=*,mark size=2pt,MLRose,forget plot]
+        coordinates {(2,2.3333)};
+      \addplot[only marks,mark=*,mark size=2pt,MLTeal,forget plot]
+        coordinates {(0,2.3333)};
+      \draw[-{Stealth},MLRose,thick]  (axis cs:2,1.75) -- (axis cs:1.533,1.75);
+      \draw[-{Stealth},MLTeal,thick]  (axis cs:0,1.75) -- (axis cs:0.467,1.75);
+      \node[font=\tiny,MLRose,anchor=south east] at (axis cs:2.5,3.0)
+        {$J'>0$: move left};
+      \node[font=\tiny,MLTeal,anchor=south west] at (axis cs:-0.55,3.0)
+        {$J'<0$: move right};
+      \node[font=\tiny,MLBlue,anchor=north] at (axis cs:1,-0.05) {$J'=0$};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The derivative points \emph{away} from the minimum, so we move
+  against it. At $w=2$ the slope is $+4.667$ and we step left; at $w=0$ it is
+  $-4.667$ and we step right. Both steps have length $\alpha\cdot 4.667$, and
+  both land closer to $w=1$.}
+  \label{fig:tangents}
+\end{figure}
+
+At $w = 2$ the derivative is $+4.667$: the function is increasing to the right,
+so decreasing to the left, so we should decrease $w$. At $w = 0$ it is $-4.667$
+and we should increase $w$. In both cases we move in the direction
+\emph{opposite} to the sign of the derivative, which is captured by subtracting
+it:
+\[
+  w \;:=\; w - \alpha\,\frac{\dd J}{\dd w}.
+\]
+With $\alpha = 0.1$, the point at $w = 2$ moves to $2 - 0.1(4.667) = 1.533$ and
+the point at $w = 0$ moves to $0 + 0.1(4.667) = 0.467$. Both are closer to the
+minimum than they were.
+
+Notice what else the derivative supplied. Its \emph{magnitude} is large where
+the parabola is steep and small near the bottom, so the steps are large when far
+away and shrink automatically as the minimum is approached. At $w = 1.6$ the
+derivative is only $2.8$ and the step is correspondingly shorter. Nothing in the
+algorithm has to detect proximity to the minimum: the gradient does it.
+
+\begin{keyinsight}{What one derivative buys}
+A single number, $\dd J/\dd w$, tells you which way to move (its sign) and
+roughly how far (its magnitude). This is the entire content of gradient descent.
+Everything else in this chapter is bookkeeping over several parameters, or
+care about the constant $\alpha$.
+\end{keyinsight}
+
+\section{The Update Rule}
+\label{sec:update-rule}
+
+With two parameters, the same reasoning applies to each in turn, using partial
+derivatives.
+
+\begin{defbox}{Gradient descent}
+Given a differentiable cost $J(w,b)$, a \term{learning rate} $\alpha>0$ and a
+starting point, repeat until convergence:
+\[
+  \begin{aligned}
+    w &:= w - \alpha\,\frac{\partial J}{\partial w}(w,b),\\[2pt]
+    b &:= b - \alpha\,\frac{\partial J}{\partial b}(w,b),
+  \end{aligned}
+\]
+where both right-hand sides are evaluated at the \emph{current} $(w,b)$ and the
+two assignments take effect together. The symbol $:=$ denotes assignment, not
+an assertion of equality.
+\end{defbox}
+
+That last requirement --- both gradients evaluated before either parameter
+changes --- is called the \term{simultaneous update}, and it is the first thing
+that goes wrong in a hand-written implementation. The correct order is: compute
+both partial derivatives into temporary variables, then assign.
+
+\begin{lstlisting}[style=pythonml,caption={Simultaneous update: compute both
+gradients before assigning either parameter.}]
+tmp_w = w - alpha * dJ_dw(w, b)     # both use the OLD w and b
+tmp_b = b - alpha * dJ_db(w, b)
+w, b = tmp_w, tmp_b                 # now assign
+\end{lstlisting}
+
+\begin{pitfall}{The non-simultaneous update is a different algorithm}
+Update $w$ first, and then compute $b$'s gradient at the \emph{new} $w$, and you
+are no longer doing gradient descent. You are doing something else --- a
+coordinate-wise method related to Gauss--Seidel iteration.
+
+What makes this dangerous is that it does not announce itself. On the four-point
+set with $\alpha=0.1$ the two versions run like this:
+
+\begin{center}
+\small
+\begin{tabular}{@{}rcccc@{}}
+\toprule
+& \multicolumn{2}{c}{simultaneous (correct)} & \multicolumn{2}{c}{sequential (wrong)}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+step & $(w,b)$ & $J$ & $(w,b)$ & $J$\\
+\midrule
+$1$ & $(1.0750,\ 0.3500)$ & $0.3042$ & $(1.0750,\ 0.0813)$ & $0.4646$\\
+$2$ & $(1.2563,\ 0.3963)$ & $0.0995$ & $(1.3234,\ 0.0923)$ & $0.0777$\\
+$3$ & $(1.2900,\ 0.3926)$ & $0.0920$ & $(1.3828,\ 0.0873)$ & $0.0555$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The cost falls in both, and after three steps the buggy version has the
+\emph{lower} cost. Watching $J$ decrease will therefore never reveal this
+mistake. What you have lost is everything you can prove: the convergence
+guarantee, the stability threshold of \cref{sec:learning-rate}, and any
+correspondence between your code and the mathematics you derived. On a
+problem where the two disagree --- and there are many --- you would have no way
+to tell which of your reasoning and your program was at fault.
+\end{pitfall}
+
+\section{The Learning Rate}
+\label{sec:learning-rate}
+
+The learning rate $\alpha$ is the one number gradient descent cannot choose for
+itself, and choosing it badly is the most common reason a first implementation
+appears not to work.
+
+\subsection{Too small}
+
+If $\alpha$ is small, every step is short and progress is slow. It is not
+\emph{wrong} --- the cost still decreases monotonically, and given enough
+iterations it arrives --- it is merely expensive. With $\alpha = 0.01$ on the
+four-point set, the cost is still $0.076$ after $120$ iterations, on its way to
+a minimum of $0.025$.
+
+\subsection{Too large}
+
+If $\alpha$ is large, each step overshoots the minimum and lands on the far
+side. If it overshoots by less than it started with, the process still
+converges, in a zig-zag. If it overshoots by more, the distance grows every
+step, $J$ increases without bound, and the parameters overflow to infinity in a
+few dozen iterations.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.8cm, ymode=log,
+        xlabel={iteration}, ylabel={$J$},
+        xmin=0, xmax=120, ymin=0.02, ymax=10,
+        legend style={font=\tiny, at={(0.98,0.98)}, anchor=north east}]
+        \addplot[MLTeal,thick] coordinates {
+          (1,6.5252)(2,5.4964)(3,4.6322)(4,3.9063)(6,2.7843)(8,1.9925)
+          (11,1.2195)(15,0.6543)(20,0.3278)(27,0.1615)(36,0.1050)
+          (48,0.0901)(64,0.0855)(85,0.0817)(120,0.0761)};
+        \addlegendentry{$\alpha=0.01$}
+        \addplot[MLBlue,thick] coordinates {
+          (1,0.3042)(2,0.0995)(3,0.0920)(4,0.0898)(6,0.0860)(8,0.0825)
+          (11,0.0775)(15,0.0715)(20,0.0650)(27,0.0574)(36,0.0497)
+          (48,0.0422)(64,0.0356)(85,0.0306)(120,0.0270)};
+        \addlegendentry{$\alpha=0.1$}
+        \addplot[MLAmber,thick] coordinates {
+          (1,5.4549)(2,3.8457)(3,2.7171)(4,1.9253)(6,0.9794)(8,0.5124)
+          (11,0.2129)(15,0.0886)(20,0.0504)(27,0.0375)(36,0.0316)
+          (48,0.0279)(64,0.0260)(85,0.0252)(120,0.0250)};
+        \addlegendentry{$\alpha=0.22$}
+        \addplot[MLGray,dashed,domain=0:120,forget plot]{0.025};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Three step sizes that all converge.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.8cm, ymode=log,
+        xlabel={iteration}, ylabel={$J$},
+        xmin=0, xmax=20, ymin=1, ymax=1000,
+        legend style={font=\tiny, at={(0.02,0.98)}, anchor=north west}]
+        \addplot[MLRose,thick,mark=*,mark size=1pt] coordinates {
+          (0,7.75)(2,10.79)(4,15.06)(6,21.03)(8,29.38)(10,41.08)
+          (12,57.44)(14,80.34)(16,112.4)(18,157.2)(20,219.9)};
+        \addlegendentry{$\alpha=0.25$}
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize One that does not: $\alpha>\alpha^\star$.\par}
+  \end{minipage}
+  \caption{Cost against iteration on the four-point set, from $(0,0)$. The
+  dashed line on the left is the minimum $J=0.025$. Note that $\alpha=0.22$
+  starts \emph{worse} than $\alpha=0.1$ --- its first step overshoots badly ---
+  and yet reaches the minimum first. Bigger is not always slower to settle.}
+  \label{fig:alpha-sweep}
+\end{figure}
+
+That last observation is worth pausing on, because it contradicts the intuition
+students usually arrive with. At $\alpha = 0.22$ the cost after one iteration is
+$5.45$, eighteen times worse than the $0.30$ achieved by $\alpha = 0.1$. Yet by
+iteration $120$ the aggressive run has reached $0.0250$ while the cautious one
+is still at $0.0270$ and falling slowly. Early behaviour is a poor guide.
+
+\subsection{Exactly how large is too large}
+
+For a quadratic cost we can answer this precisely rather than by trial.
+
+\begin{derivation}{The divergence threshold}
+Write $\bm{\theta} = (w,b)$ and let $\bm{\theta}^\star$ be the minimiser. Any
+quadratic cost can be written
+\[
+  J(\bm{\theta}) = J^\star
+    + \tfrac12(\bm{\theta}-\bm{\theta}^\star)^{\mathsf{T}}
+      H\,(\bm{\theta}-\bm{\theta}^\star),
+\]
+where $H$ is the (constant) matrix of second derivatives. For the squared-error
+cost of a linear model,
+\[
+  H = \frac1m\begin{pmatrix}\sum_i (\xii{i})^2 & \sum_i \xii{i}\\[2pt]
+                            \sum_i \xii{i} & m\end{pmatrix}.
+\]
+The gradient is $\grad J = H(\bm{\theta}-\bm{\theta}^\star)$, so writing
+$\mathbf{e} = \bm{\theta}-\bm{\theta}^\star$ for the error, one step of gradient
+descent gives
+\[
+  \mathbf{e} \;\mapsto\; \mathbf{e} - \alpha H\mathbf{e}
+              \;=\; (I - \alpha H)\,\mathbf{e}.
+\]
+Decompose $\mathbf{e}$ along the eigenvectors of $H$. Along the eigenvector with
+eigenvalue $\lambda$, the error is multiplied by $(1-\alpha\lambda)$ every step,
+so that component shrinks precisely when $|1-\alpha\lambda| < 1$, that is when
+$0 < \alpha < 2/\lambda$. All components shrink together only if this holds for
+the largest eigenvalue:
+\begin{equation}
+  \alpha \;<\; \alpha^\star \;=\; \frac{2}{\lambda_{\max}(H)} .
+  \label{eq:alpha-star}
+\end{equation}
+\end{derivation}
+
+For the four-point set,
+\[
+  H = \begin{pmatrix}7.5 & 2.5\\ 2.5 & 1\end{pmatrix},
+  \qquad
+  \lambda = 0.1497 \text{ and } 8.3503,
+  \qquad
+  \alpha^\star = \frac{2}{8.3503} = 0.2395,
+\]
+which is exactly what \cref{fig:alpha-sweep} shows: $0.22$ converges and $0.25$
+does not. The threshold is a property of the \emph{data}, not of the algorithm.
+Rescale the feature and it changes; this is one of several reasons
+\cref{ch:ch05} rescales features before doing anything else.
+
+\begin{keyinsight}{Both eigenvalues matter, differently}
+$\lambda_{\max}$ limits how large $\alpha$ may be. $\lambda_{\min}$ determines
+how slowly the last component of the error decays, at rate
+$(1-\alpha\lambda_{\min})$ per step. The ratio $\lambda_{\max}/\lambda_{\min}$
+--- here $8.3503/0.1497 \approx 56$ --- is therefore what governs the total
+number of iterations, and it is the same quantity that makes the contours
+elliptical rather than circular.
+\end{keyinsight}
+
+\subsection{Choosing $\alpha$ in practice}
+
+You will rarely compute $\lambda_{\max}$. The practical procedure is to try a
+ladder of values differing by a factor of about three,
+\[
+  \dots,\; 0.001,\; 0.003,\; 0.01,\; 0.03,\; 0.1,\; 0.3,\; \dots
+\]
+running each for a few dozen iterations and plotting $J$. Discard any value for
+which $J$ increases; among the rest, take the largest. \Cref{ch:ch05} makes this
+routine, and \cref{ch:ch09} replaces it with methods that adapt $\alpha$ on
+their own.
+
+\section{Gradient Descent for Linear Regression}
+\label{sec:gd-linreg}
+
+Everything so far applies to any differentiable cost. Now specialise.
+
+\begin{derivation}{The two partial derivatives}
+With $\fwb(x) = wx+b$ and
+$J(w,b) = \frac{1}{2m}\sum_{i=1}^{m}(\fwb(\xii{i})-\yii{i})^2$, differentiate
+term by term using the chain rule. For $w$:
+\[
+  \begin{aligned}
+    \frac{\partial J}{\partial w}
+      &= \frac{1}{2m}\sum_{i=1}^{m} 2\bigl(w\xii{i}+b-\yii{i}\bigr)
+          \cdot\frac{\partial}{\partial w}\bigl(w\xii{i}+b-\yii{i}\bigr)\\[2pt]
+      &= \frac{1}{m}\sum_{i=1}^{m}\bigl(\fwb(\xii{i})-\yii{i}\bigr)\,\xii{i}.
+  \end{aligned}
+\]
+For $b$ the inner derivative is $1$ instead of $\xii{i}$:
+\[
+  \frac{\partial J}{\partial b}
+    = \frac{1}{2m}\sum_{i=1}^{m} 2\bigl(w\xii{i}+b-\yii{i}\bigr)\cdot 1
+    = \frac{1}{m}\sum_{i=1}^{m}\bigl(\fwb(\xii{i})-\yii{i}\bigr).
+\]
+This is where the $\tfrac12$ of \cref{ch:ch02} pays for itself: the $2$ from the
+chain rule cancels it exactly, leaving no stray constants.
+\end{derivation}
+
+Both gradients are averages of the residual $r^{(i)} = \fwb(\xii{i})-\yii{i}$:
+weighted by $\xii{i}$ for $w$, unweighted for $b$. That structure is worth
+remembering, because it survives every generalisation in this book. In
+\cref{ch:ch04} the weighting becomes $\xjj{i}{j}$ for parameter $w_j$; in
+\cref{ch:ch06} the residual is computed from a sigmoid instead of a line and
+\emph{the formula does not otherwise change}; in \cref{ch:ch09} the same
+expression appears at the output layer of a network.
+
+\begin{algorithmbox}{Batch gradient descent for univariate linear regression}
+\textbf{Input:} training set $\{(\xii{i},\yii{i})\}_{i=1}^m$, learning rate
+$\alpha$, iteration budget $N$.\\
+\textbf{Output:} parameters $w,b$.
+
+\begin{enumerate}\setlength{\itemsep}{1pt}
+  \item $w \leftarrow 0$, \quad $b \leftarrow 0$.
+  \item \textbf{for} $k = 1,\dots,N$:
+  \begin{enumerate}\setlength{\itemsep}{1pt}
+    \item $g_w \leftarrow \dfrac{1}{m}\sum_{i=1}^{m}(w\xii{i}+b-\yii{i})\,\xii{i}$
+    \item $g_b \leftarrow \dfrac{1}{m}\sum_{i=1}^{m}(w\xii{i}+b-\yii{i})$
+    \item $w \leftarrow w - \alpha g_w$, \quad $b \leftarrow b - \alpha g_b$
+          \hfill \emph{(simultaneously)}
+  \end{enumerate}
+  \item \textbf{return} $w, b$.
+\end{enumerate}
+
+\textbf{Cost per iteration:} $O(m)$ --- every example is visited once.
+\textbf{``Batch''} refers to this: each update uses the whole training set.
+\end{algorithmbox}
+
+\section{Running It}
+\label{sec:running-gd}
+
+\begin{workedexample}{Two iterations by hand on the four-point set}
+Data $(1,1),(2,3),(3,4),(4,6)$, so $m=4$. Start at $w=b=0$ with $\alpha = 0.1$.
+
+\textbf{Iteration 1.} With $w=b=0$ every prediction is $0$, so the residuals are
+$\hat y^{(i)} - \yii{i} = (-1,\,-3,\,-4,\,-6)$. Then
+\[
+  g_w = \tfrac14\bigl[(-1)(1)+(-3)(2)+(-4)(3)+(-6)(4)\bigr]
+      = \tfrac{-43}{4} = -10.75,
+\]
+\[
+  g_b = \tfrac14\bigl[-1-3-4-6\bigr] = \tfrac{-14}{4} = -3.5 .
+\]
+Both gradients are negative, so both parameters increase:
+\[
+  w := 0 - 0.1(-10.75) = 1.0750,
+  \qquad
+  b := 0 - 0.1(-3.5) = 0.3500 .
+\]
+The cost has fallen from $J(0,0) = 7.7500$ to $J(1.075,0.35) = 0.3042$.
+
+\textbf{Iteration 2.} Predictions are now $1.425, 2.500, 3.575, 4.650$, so the
+residuals are $(+0.425,\, -0.500,\, -0.425,\, -1.350)$, and
+\[
+  \begin{aligned}
+    g_w &= \tfrac14\bigl[0.425 - 1.000 - 1.275 - 5.400\bigr] = -1.8125,\\[2pt]
+    g_b &= \tfrac14\bigl[0.425 - 0.500 - 0.425 - 1.350\bigr] = -0.4625 ,
+  \end{aligned}
+\]
+giving $w := 1.2563$, $b := 0.3963$ and $J = 0.0995$.
+
+\textbf{The run continues:}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+$k$ & $w$ & $b$ & $\partial J/\partial w$ & $\partial J/\partial b$ & $J$\\
+\midrule
+$0$    & $0.0000$ & $ 0.0000$ &            &           & $7.7500$\\
+$1$    & $1.0750$ & $ 0.3500$ & $-10.7500$ & $-3.5000$ & $0.3042$\\
+$2$    & $1.2563$ & $ 0.3963$ & $ -1.8125$ & $-0.4625$ & $0.0995$\\
+$3$    & $1.2900$ & $ 0.3926$ & $ -0.3375$ & $+0.0369$ & $0.0920$\\
+$4$    & $1.2994$ & $ 0.3808$ & $ -0.0936$ & $+0.1176$ & $0.0898$\\
+$5$    & $1.3046$ & $ 0.3679$ & $ -0.0528$ & $+0.1292$ & $0.0879$\\
+$10$   & $1.3262$ & $ 0.3049$ &            &           & $0.0791$\\
+$50$   & $1.4503$ & $-0.0597$ &            &           & $0.0412$\\
+$100$  & $1.5296$ & $-0.2929$ &            &           & $0.0286$\\
+$500$  & $1.5998$ & $-0.4995$ &            &           & $0.0250$\\
+\midrule
+\multicolumn{2}{@{}l}{optimum (\cref{ch:ch02})} &&&& \\
+       & $1.6000$ & $-0.5000$ &            &           & $0.0250$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two features of this table deserve comment. First, $b$'s gradient changes sign
+between iterations $2$ and $3$: $b$ overshot upward on the first step and must
+now come back down. Individual parameters may move away from their optima; only
+$J$ is guaranteed to fall. Second, look at how the work is distributed.
+Ninety-six per cent of the reduction in $J$ happens in the first two iterations;
+the remaining five hundred are spent creeping along a nearly flat valley floor
+while $b$ travels from $+0.40$ to $-0.50$.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[width=0.66\linewidth, height=5.4cm,
+      xlabel={$w$}, ylabel={$b$},
+      tick label style={font=\scriptsize}, label style={font=\small},
+      view={0}{90}, domain=0.2:3.0, y domain=-3:2,
+      colormap={ml}{color=(MLBlue) color=(MLTeal) color=(MLAmber)}]
+      \costcontour{}{0.1,0.25,0.6,1.2,2.2,3.6}
+        {(30*x^2 + 20*x*y + 4*y^2 - 86*x - 28*y + 62)/8}
+      \addplot3[MLRose,thick,mark=*,mark size=1.1pt] coordinates {
+        (0.000,0.000,0)(1.075,0.350,0)(1.256,0.396,0)(1.290,0.393,0)
+        (1.299,0.381,0)(1.305,0.368,0)(1.309,0.355,0)(1.318,0.330,0)
+        (1.326,0.305,0)(1.338,0.269,0)(1.350,0.235,0)(1.365,0.192,0)
+        (1.382,0.142,0)(1.398,0.095,0)(1.426,0.012,0)(1.450,-0.060,0)
+        (1.471,-0.121,0)};
+      \addplot3[only marks,mark=star,mark size=3pt,MLBlue]
+        coordinates {(1.6,-0.5,0)};
+      \node[font=\tiny,MLGray,anchor=north west] at (axis cs:0.25,0.1,0)
+        {start};
+      \node[font=\tiny,MLBlue,anchor=west] at (axis cs:1.68,-0.5,0)
+        {optimum};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The same run, drawn on the contour map of \cref{fig:contours}. The
+  first step crosses most of the parameter space; every subsequent step is short
+  and nearly parallel to the valley floor. Steps are perpendicular to the
+  contours they start on, which is why an elongated valley is traversed so
+  inefficiently --- the direction of steepest descent is not the direction of
+  the minimum.}
+  \label{fig:gd-path}
+\end{figure}
+
+\Cref{fig:gd-path} is the geometric explanation of the table. The negative
+gradient points along the steepest descent from wherever you stand, which on a
+long narrow valley means almost straight across it rather than along it. The
+algorithm therefore makes rapid progress in one direction, then crawls. This is
+not a defect of the implementation; it is what steepest descent does on
+elliptical contours, and the only cures are to reshape the ellipses
+(\cref{ch:ch05}) or to use a method with a memory of previous steps
+(\cref{ch:ch09}).
+
+\section{Convexity: Why This Always Works Here}
+\label{sec:convexity}
+
+Gradient descent finds a point where the gradient vanishes. In general that is
+no guarantee of anything: a function may have many local minima, and which one
+you reach depends on where you started. For the squared-error cost of a linear
+model, this worry does not arise.
+
+\begin{derivation}{The cost is convex}
+A twice-differentiable function is \term{convex} when its matrix of second
+derivatives is positive semi-definite everywhere. Differentiating the gradients
+of \cref{sec:gd-linreg} once more:
+\[
+  H = \begin{pmatrix}
+        \partial^2 J/\partial w^2 & \partial^2 J/\partial w\,\partial b\\
+        \partial^2 J/\partial b\,\partial w & \partial^2 J/\partial b^2
+      \end{pmatrix}
+    = \frac1m\begin{pmatrix}\sum_i (\xii{i})^2 & \sum_i \xii{i}\\
+                            \sum_i \xii{i} & m\end{pmatrix},
+\]
+which does not depend on $(w,b)$ at all. For any vector $\mathbf{u} = (u_1,u_2)$,
+\[
+  \mathbf{u}^{\mathsf{T}} H \mathbf{u}
+    = \frac1m\sum_{i=1}^{m}\bigl(u_1\xii{i} + u_2\bigr)^2 \;\ge\; 0,
+\]
+because it is a sum of squares. So $H$ is positive semi-definite and $J$ is
+convex; it is strictly convex, with a unique minimum, unless every $\xii{i}$ is
+identical. For the four-point set, $H = \left(\begin{smallmatrix}7.5 & 2.5\\ 2.5
+& 1\end{smallmatrix}\right)$, with trace $8.5>0$, determinant $1.25>0$ and
+eigenvalues $0.1497$ and $8.3503$, both positive.
+\end{derivation}
+
+\begin{keyinsight}{What convexity guarantees, and what it does not}
+For a convex cost with $\alpha < \alpha^\star$, gradient descent converges to the
+global minimum from any starting point. There are no local minima to be trapped
+in, no saddle points, no dependence on initialization, and no reason to run it
+several times from different starts.
+
+None of that survives \cref{ch:ch09}. A neural network's cost is not convex, its
+minima are many, and where you start matters. What does survive is the update
+rule, unchanged --- which is why it is worth understanding thoroughly in the
+setting where it provably works.
+\end{keyinsight}
+
+\section{When to Stop}
+\label{sec:stopping}
+
+The definition says ``repeat until convergence'', which is not something a
+program can execute. Three rules are in common use:
+
+\begin{enumerate}
+  \item \textbf{A fixed iteration budget.} Simple, predictable, and used more
+        often than textbooks admit.
+  \item \textbf{A small change in cost:} stop when
+        $|J_{k-1} - J_k| < \varepsilon$.
+  \item \textbf{A small gradient:} stop when $\|\grad J\| < \varepsilon$. This
+        is the condition that actually characterises a minimum, and it is the
+        most defensible of the three.
+\end{enumerate}
+
+The second is the most popular and the least trustworthy, because a small change
+in $J$ means the algorithm is moving slowly, which is not the same as having
+arrived.
+
+\begin{pitfall}{A flat curve is not a converged run}
+Apply rule 2 to the run in \cref{sec:running-gd}, at four thresholds:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+$\varepsilon$ & stops at iteration & reported $J$ & true minimum\\
+\midrule
+$10^{-2}$ & $3$   & $0.0920$ & $0.0250$\\
+$10^{-3}$ & $27$  & $0.0574$ & $0.0250$\\
+$10^{-4}$ & $104$ & $0.0282$ & $0.0250$\\
+$10^{-6}$ & $256$ & $0.0250$ & $0.0250$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At $\varepsilon = 10^{-2}$ the rule halts after three iterations, reporting a
+cost nearly four times the minimum, and it does so because the run genuinely has
+slowed --- the valley floor of \cref{fig:gd-path} is almost flat in the
+direction of travel. Nothing about the curve looks wrong. Always plot $J$
+against iteration on a \emph{logarithmic} vertical axis, where the difference
+between $0.09$ and $0.025$ is plainly visible, and prefer a gradient-norm test
+when you can afford it.
+\end{pitfall}
+
+\section{Batch, Stochastic and Mini-Batch}
+\label{sec:sgd}
+
+Each iteration of the algorithm as stated costs $O(m)$, because both gradients
+are averages over the whole training set. When $m$ is ten million, a single
+parameter update requires ten million multiply-adds --- and hundreds of updates
+are needed. The three standard variants trade accuracy of the gradient against
+its cost.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{2.6cm}L{2.9cm}L{5.3cm}@{}}
+\toprule
+\textbf{Variant} & \textbf{Examples per update} & \textbf{Character}\\
+\midrule
+Batch & all $m$ &
+  Exact gradient; smooth monotone decrease in $J$; one update per pass over the
+  data.\\
+Stochastic (SGD) & $1$ &
+  Very noisy gradient; $J$ fluctuates and never settles; $m$ updates per pass,
+  so early progress is dramatic.\\
+Mini-batch & $32$ to $512$, typically &
+  A compromise, and what is almost always used in practice; vectorizes well on
+  the hardware of \cref{ch:ch04}.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The key observation, due originally to \textcite{robbins1951} in a different
+context, is that the gradient computed from a single random example is
+\emph{unbiased}: its expectation over the choice of example is the true
+gradient. The steps are wrong individually and right on average, and averaging
+happens automatically as the iterations accumulate.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[width=0.66\linewidth, height=5.2cm,
+      xlabel={$w$}, ylabel={$b$},
+      tick label style={font=\scriptsize}, label style={font=\small},
+      view={0}{90}, domain=0.2:3.0, y domain=-3:2,
+      colormap={ml}{color=(MLBlue) color=(MLTeal) color=(MLAmber)}]
+      \costcontour{}{0.1,0.25,0.6,1.2,2.2,3.6}
+        {(30*x^2 + 20*x*y + 4*y^2 - 86*x - 28*y + 62)/8}
+      \addplot3[MLRose,thick,mark=*,mark size=1pt] coordinates {
+        (0.000,0.000,0)(0.620,0.240,0)(1.291,0.446,0)(1.349,0.455,0)
+        (1.238,0.395,0)(1.369,0.404,0)(1.286,0.374,0)(1.254,0.364,0)
+        (1.339,0.356,0)(1.397,0.345,0)(1.321,0.320,0)(1.319,0.313,0)
+        (1.302,0.289,0)(1.367,0.278,0)(1.322,0.265,0)(1.311,0.245,0)
+        (1.410,0.267,0)};
+      \addplot3[only marks,mark=star,mark size=3pt,MLBlue]
+        coordinates {(1.6,-0.5,0)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Stochastic gradient descent on the four-point set, $\alpha=0.05$, one
+  example per step. Compare \cref{fig:gd-path}: the same general journey, taken
+  by a drunk. The noise is not a defect to be eliminated --- on a non-convex
+  cost it helps the search escape poor regions --- but it does mean SGD never
+  settles at the minimum, only wanders near it.}
+  \label{fig:sgd-path}
+\end{figure}
+
+\begin{researchspotlight}{Robbins \& Monro (1951) --- A Stochastic Approximation Method}
+\textbf{The problem.} Find the root of a function $M(\theta)$ --- equivalently,
+the minimum of its integral --- when $M$ cannot be evaluated exactly, only
+observed with random noise. This arises constantly in experimental work: each
+measurement of a response is contaminated, and measurements are expensive.
+
+\textbf{The idea.} Iterate $\theta_{k+1} = \theta_k - a_k Y_k$, where $Y_k$ is a
+single noisy observation at $\theta_k$ and $a_k$ is a step size that shrinks over
+time. Do not average many observations at each point; take one, step, and let
+the iteration do the averaging.
+
+\textbf{The result.} The sequence converges in probability to the true root
+provided the step sizes satisfy $\sum_k a_k = \infty$ and $\sum_k a_k^2 <
+\infty$: large enough in total to reach any starting distance, small enough in
+square to damp the noise. The canonical choice is $a_k \propto 1/k$.
+
+\textbf{Why it is here.} Replace ``noisy observation of the gradient'' with
+``gradient computed from one training example'' and this is stochastic gradient
+descent, forty years early. The conditions on $a_k$ are the theoretical basis of
+learning-rate schedules, and the reason a constant $\alpha$ leaves SGD wandering
+rather than converging, exactly as in \cref{fig:sgd-path}.
+\parencite{robbins1951}
+\end{researchspotlight}
+
+\begin{labbox}{Lab 3 --- Gradient descent from scratch}
+Implement \code{gradient\_descent(x, y, alpha, iters)} returning the history of
+$(w, b, J)$, using a simultaneous update. Reproduce the iteration table of
+\cref{sec:running-gd} exactly --- your iteration 1 must give
+$(1.0750,\,0.3500)$ with $J = 0.3042$. Then plot $J$ against iteration for
+$\alpha \in \{0.01, 0.1, 0.22, 0.25\}$ and confirm that the last diverges, and
+that the threshold $\alpha^\star = 0.2395$ predicted by
+\cref{eq:alpha-star} is where the behaviour changes. Finally, deliberately
+introduce the non-simultaneous bug and check that you reproduce the wrong
+column of the pitfall table --- knowing what the bug looks like is the only
+reliable way to notice it later.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item Gradient descent minimises a cost using only its value and derivatives,
+        which is all that is available for most models. It trades exactness for
+        generality.
+  \item The update is $w := w - \alpha\,\partial J/\partial w$ for each
+        parameter, with all parameters updated \emph{simultaneously}. The
+        derivative supplies both direction (its sign) and step length (its
+        magnitude), so steps shorten automatically near a minimum.
+  \item A sequential update is a different algorithm. It may still reduce $J$,
+        so monitoring the cost will not reveal the mistake.
+  \item Too small an $\alpha$ is slow; too large diverges. For a quadratic cost
+        the exact threshold is $\alpha^\star = 2/\lambda_{\max}(H)$, a property
+        of the data. The ratio $\lambda_{\max}/\lambda_{\min}$ governs how many
+        iterations are needed.
+  \item For squared error, $\partial J/\partial w = \frac1m\sum_i r^{(i)}\xii{i}$
+        and $\partial J/\partial b = \frac1m\sum_i r^{(i)}$: averages of the
+        residual, weighted and unweighted. The $\tfrac12$ in $J$ cancels the $2$
+        from the chain rule.
+  \item The cost of a linear model is convex, because its Hessian is a sum of
+        squares. Gradient descent therefore reaches the global minimum from any
+        start. Neither statement survives into neural networks; the update rule
+        does.
+  \item Steps are perpendicular to the contours, so elongated valleys are
+        crossed quickly and traversed slowly. Most of the reduction in $J$
+        happens in the first few iterations; most of the iterations happen
+        afterwards.
+  \item Stopping when $J$ stops changing much can halt far from the minimum.
+        Prefer a gradient-norm test, and always plot $J$ on a logarithmic axis.
+  \item Batch, stochastic and mini-batch differ only in how many examples each
+        update uses. The single-example gradient is noisy but unbiased;
+        mini-batch is the practical default.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Write the gradient descent update rule for a cost $J(w,b)$, and say what
+$:=$ means.
+
+\sq Why is the derivative \emph{subtracted} rather than added?
+
+\sq Explain, without using the word ``gradient'', why gradient descent takes
+shorter steps as it approaches a minimum.
+
+\sq What is a simultaneous update, and why does it matter?
+
+\sq Give one symptom of a learning rate that is too small and two symptoms of
+one that is too large.
+
+\sq State the divergence threshold for gradient descent on a quadratic cost, and
+say which property of the data determines it.
+
+\sq Write $\partial J/\partial w$ and $\partial J/\partial b$ for the
+squared-error cost of a linear model, and identify the common structure.
+
+\sq What does it mean for a function to be convex, and what does convexity
+guarantee about gradient descent?
+
+\sq Give two stopping rules, and say which is more trustworthy and why.
+
+\sq Distinguish batch, stochastic and mini-batch gradient descent by the number
+of examples per update, and give the cost per update of each.
+
+\exercisesection{Analytical Problems}
+
+\ap For the three-point set $(1,1),(2,2),(3,3)$ with $b$ fixed at $0$, start at
+$w = 3$ with $\alpha = 0.15$ and carry out three iterations by hand, reporting
+$w$ and $J(w)$ at each step. Does the sequence overshoot the minimum? Compute
+$\alpha^\star$ for this problem and check your answer is consistent with it.
+
+\ap Carry out iteration $3$ of the worked example in \cref{sec:running-gd} by
+hand, starting from $(1.2563, 0.3963)$, and confirm the printed values
+$g_w = -0.3375$, $g_b = +0.0369$ and $J = 0.0920$. Explain in one sentence why
+$g_b$ has changed sign since iteration $1$.
+
+\ap Show that for the squared-error cost of a linear model, the gradient can be
+written $\grad J = H(\bm{\theta} - \bm{\theta}^\star)$ with $H$ the Hessian and
+$\bm{\theta}^\star$ the minimiser. Hence show that one step of gradient descent
+multiplies the error by $(I - \alpha H)$.
+
+\ap A dataset has $\sum_i (\xii{i})^2 = 500$, $\sum_i \xii{i} = 60$ and $m = 10$.
+Compute $H$, its eigenvalues, and $\alpha^\star$. If the feature is then divided
+by $10$, recompute all three. What does this tell you about choosing $\alpha$
+before scaling features?
+
+\ap Suppose $J(w) = \tfrac12 \lambda w^2$ for some $\lambda > 0$. Show that
+gradient descent from $w_0$ gives $w_k = (1-\alpha\lambda)^k w_0$, and hence
+determine the value of $\alpha$ that converges fastest. What happens at exactly
+that value, and at twice it?
+
+\ap Prove that if $J$ is convex and $\alpha$ small enough that each step
+decreases $J$, then the sequence $J_0, J_1, J_2, \dots$ is monotone decreasing
+and bounded below, and hence converges. Does it follow that the parameters
+converge?
+
+\exercisesection{Design Problems}
+
+\dpr You are given a training run in which $J$ decreases for $200$ iterations and
+then increases sharply. List the possible causes in order of likelihood, and for
+each say what you would change and what you would expect to see if that cause
+was the right one.
+
+\dpr A colleague's model trains for six hours. They propose increasing $\alpha$
+tenfold to save time. Set out what you would check before agreeing, what
+evidence would persuade you, and what cheaper interventions you would try
+first --- referring to \cref{ch:ch05} where appropriate.
+
+\dpr Design a stopping rule for a training job that must finish within a fixed
+wall-clock budget while producing the best model it can. State what it monitors,
+what it stores, and how it behaves if the budget expires mid-run.
+
+\dpr Your team trains on ten million examples. Argue for batch, stochastic, or
+mini-batch gradient descent, naming the batch size you would choose and the
+evidence you would collect to justify it. What would change your mind?
+
+\exercisesection{Programming Exercises}
+
+\pe Implement batch gradient descent for the univariate model and reproduce the
+iteration table of \cref{sec:running-gd} to four decimal places.
+
+\pe Plot $J$ against iteration on a logarithmic axis, on the four-point set, for
+each of the step sizes $0.01$, $0.05$, $0.1$, $0.22$, $0.24$ and $0.25$. Find
+empirically the largest $\alpha$ that still converges, to two decimal places,
+and compare it with $\alpha^\star = 0.2395$.
+
+\pe Record the parameter path and overlay it on a contour plot of $J$, as in
+\cref{fig:gd-path}. Then rescale the feature by subtracting its mean and
+dividing by its standard deviation, refit, and overlay the new path on the new
+contours. Comment on the number of iterations required in each case. (This is
+\cref{ch:ch05} in advance.)
+
+\pe Implement stochastic gradient descent and plot $J$ against the number of
+examples processed, for both batch and stochastic versions on the same axes.
+Which reaches $J < 0.03$ after fewer example-visits? Then implement a decaying
+learning rate $\alpha_k = \alpha_0/(1+k/100)$ and show that SGD now settles
+rather than wandering.
+
+\exercisesection{Self-Test}
+
+\qz In the update $w := w - \alpha\,\partial J/\partial w$, the role of the
+derivative's sign is to determine: (a)~the step length; (b)~the direction;
+(c)~the stopping point; (d)~the convexity.
+
+\qz Gradient descent with too large a learning rate typically shows:
+(a)~$J$ decreasing very slowly; (b)~$J$ increasing or oscillating;
+(c)~$J$ constant; (d)~a negative $J$.
+
+\qz The divergence threshold $2/\lambda_{\max}$ depends on: (a)~the starting
+point; (b)~the training data; (c)~the number of iterations; (d)~the initial
+cost.
+
+\qz The gradient $\partial J/\partial b$ for squared error equals: (a)~the sum
+of the residuals; (b)~the mean of the residuals; (c)~the mean residual weighted
+by $x$; (d)~zero.
+
+\qz Updating $w$ and then computing $b$'s gradient with the new $w$: (a)~is
+equivalent to the simultaneous update; (b)~always diverges; (c)~is a different
+algorithm that may still reduce $J$; (d)~halves the learning rate.
+
+\qz The cost of a linear model with squared error is convex because its Hessian:
+(a)~is diagonal; (b)~is a sum of squares and so positive semi-definite;
+(c)~depends on $(w,b)$; (d)~has determinant zero.
+
+\qz Gradient descent steps are: (a)~parallel to the contours; (b)~perpendicular
+to the contours; (c)~directed at the minimum; (d)~random.
+
+\qz Compared with batch gradient descent, one step of stochastic gradient
+descent is: (a)~more accurate and more expensive; (b)~less accurate and cheaper;
+(c)~equally accurate and cheaper; (d)~biased and cheaper.
+
+\furtherreading
+
+\textcite{james2021} treat linear regression through the closed form and say
+little about optimization, so for this chapter the primary reference is
+§3.1 for context only. \textcite{bishop2006} §3.1.3 introduces sequential
+(stochastic) gradient descent for exactly this cost function and connects it to
+the Robbins--Monro conditions, and §5.2.4 discusses learning rates and the
+geometry of ill-conditioned error surfaces --- the analytical version of
+\cref{fig:gd-path}.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch04} lets the model see more than one feature.
+The update rule survives untouched; the notation, the arithmetic cost, and the
+opportunity for a hundredfold speed-up all change.

@@ -1,15 +1,852 @@
 %% ch05.tex --- Making Gradient Descent Work
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch05_scaling.py.
 
 \chapter{Making Gradient Descent Work}
 \label{ch:ch05}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{With four parameters I can fit an elephant, and with five I can make
+him wiggle his trunk.}{---\ John von Neumann}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Explain why features on different scales make gradient descent slow, in
+        terms of the cost surface and its condition number.
+  \item Apply mean normalization, min--max scaling and standardisation, and say
+        which part of each does the useful work.
+  \item Predict the effect of scaling on the number of iterations required, and
+        state what scaling does \emph{not} change.
+  \item Choose a learning rate with the $\times 3$ ladder and read the result.
+  \item Diagnose a training run from the shape of its learning curve.
+  \item State the rule for computing scaling statistics, and say exactly when
+        breaking it changes the model.
+  \item Construct engineered features from domain knowledge, and explain why a
+        model linear in its parameters can fit a curve.
+  \item Fit a polynomial regression, and recognise the point at which added
+        flexibility stops helping.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch04} ended with a loose end. Its worked example fitted five apartments
+by gradient descent, but only after standardising the two features, with a
+parenthetical promise that this chapter would explain why. The explanation turns
+out to be worth a chapter, because the same idea --- that the \emph{shape} of the
+cost surface, not just its minimum, determines what happens --- runs through
+everything that follows.
+
+\section{The Problem, Measured}
+\label{sec:scaling-problem}
+
+Dataset~D2 has two features on comparable-looking ranges: area from $8$ to $22$,
+age from $5$ to $20$. Nothing about them looks troublesome. Yet the Hessian of
+its cost has eigenvalues
+\[
+  \lambda_{\min} = 0.01315,
+  \qquad
+  \lambda_{\max} = 352.2,
+\]
+a ratio of $26{,}775$. By \cref{eq:alpha-star} the largest usable learning rate
+is $\alpha^\star = 2/\lambda_{\max} = 0.005678$, and by the reasoning of
+\cref{sec:learning-rate} the slowest component of the error decays by a factor
+of only $1 - \alpha\lambda_{\min} \approx 0.99993$ per iteration. That is the
+whole difficulty in two numbers: steps must be tiny because of the largest
+eigenvalue, and progress is glacial because of the smallest.
+
+\begin{defbox}{Condition number}
+The \term{condition number} of the cost is
+$\kappa = \lambda_{\max}/\lambda_{\min}$, the ratio of the largest to the
+smallest eigenvalue of its Hessian. It is the axis ratio of the elliptical
+contours, squared\footnote{The contours are ellipses whose axis lengths go as
+$1/\sqrt{\lambda}$, so the axis ratio is $\sqrt{\kappa}$.}, and the number of
+gradient descent iterations required grows roughly in proportion to it.
+\end{defbox}
+
+\section{Feature Scaling}
+\label{sec:feature-scaling}
+
+The cure is to change the units of the features. Three transformations are in
+common use, all applied one feature (one column of $\Xmat$) at a time.
+
+\begin{defbox}{Three scalings}
+For feature $j$ with values $\xjj{1}{j},\dots,\xjj{m}{j}$, mean $\mu_j$,
+standard deviation $\sigma_j$, minimum $\ell_j$ and maximum $h_j$:
+\[
+  \underbrace{x_j \mapsto \frac{x_j}{h_j}}_{\text{divide by the maximum}},
+  \qquad
+  \underbrace{x_j \mapsto \frac{x_j - \mu_j}{h_j - \ell_j}}_{\text{mean normalization}},
+  \qquad
+  \underbrace{x_j \mapsto \frac{x_j - \mu_j}{\sigma_j}}_{\text{standardisation, or $z$-scoring}} .
+\]
+The first two put every feature on a range of roughly unit width; the last gives
+every feature mean $0$ and variance $1$. All three are affine, so all three are
+undone by the model's own parameters --- a point \cref{sec:scaling-payoff}
+makes precise.
+\end{defbox}
+
+Applied to D2, they do markedly different amounts of good:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+scaling & $\lambda_{\min}$ & $\lambda_{\max}$ & $\kappa$ & $\alpha^\star$\\
+\midrule
+raw                & $0.01315$ & $352.21$ & $26{,}775.0$ & $0.005678$\\
+divide by maximum  & $0.00579$ & $1.7719$ & $306.1$      & $1.128759$\\
+mean normalized    & $0.02176$ & $1.0000$ & $46.0$       & $2.000000$\\
+standardised       & $0.18754$ & $1.8125$ & $9.7$        & $1.103474$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Read the second row carefully, because it contradicts the advice usually given.
+Dividing by the maximum puts both features on $[0,1]$ --- it does exactly what
+``get your features onto similar ranges'' asks --- and yet leaves the condition
+number at $306$, thirty times worse than standardisation. Matching the ranges is
+not the operation that matters most.
+
+\subsection{What actually does the work}
+
+What matters most is \emph{centring}. The design matrix carries a column of ones
+for the bias, and if a feature never comes near zero, that column and the feature
+column point in nearly the same direction: they are close to linearly dependent,
+which is precisely the near-singularity of \cref{sec:multicollinearity}. Area
+runs from $8$ to $22$, so the area column is roughly $15$ times the ones column
+plus a small variation --- and $\lambda_{\min} = 0.013$ is the result.
+
+Subtracting the mean removes the dependency exactly. Once every feature has mean
+zero, each feature column is orthogonal to the ones column, the Hessian becomes
+block diagonal, and the bias direction decouples from the rest.
+
+\begin{derivation}{What is left after centring}
+Centre and standardise every feature. Then $\Xmat^{\mathsf{T}}\mathbf{1} =
+\mathbf{0}$ and each feature has unit variance, so
+\[
+  H = \frac1m \begin{pmatrix} m & \mathbf{0}^{\mathsf{T}}\\
+                              \mathbf{0} & \Xmat^{\mathsf{T}}\Xmat\end{pmatrix}
+    = \begin{pmatrix} 1 & \mathbf{0}^{\mathsf{T}}\\
+                      \mathbf{0} & R\end{pmatrix},
+\]
+where $R$ is the \emph{correlation matrix} of the features. For two features
+with correlation $\rho$, $R = \left(\begin{smallmatrix}1&\rho\\ \rho&1
+\end{smallmatrix}\right)$, whose eigenvalues are $1+|\rho|$ and $1-|\rho|$.
+
+For D2 the two features have $\rho = -0.8125$: in this small sample the larger
+apartments happen also to be the newer ones. Hence the eigenvalues $1.8125$ and
+$0.1875$, and $\kappa = 9.67$, exactly the last row of the table.
+\end{derivation}
+
+That derivation also marks the limit of what scaling can achieve. After
+standardisation the condition number is set entirely by the correlations between
+features, and no amount of rescaling individual columns will change a
+correlation. Removing that last factor of ten requires either decorrelating the
+features (\cref{ch:ch16}) or adding a penalty that bounds the parameters
+(\cref{ch:ch07}).
+
+\subsection{The picture}
+
+Two features and a bias give a three-dimensional parameter space that cannot be
+drawn, so return to the four-point set of \cref{ch:ch02}, where there is only
+$(w,b)$. Its feature is $x = 1,2,3,4$, with mean $2.5$ and standard deviation
+$1.1180$.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=\linewidth, height=4.3cm,
+        xlabel={$w$}, ylabel={$b$},
+        tick label style={font=\scriptsize}, label style={font=\small},
+        view={0}{90}, domain=0.2:3.0, y domain=-3:2,
+        colormap={ml}{color=(MLBlue) color=(MLTeal) color=(MLAmber)}]
+        \costcontour{}{0.1,0.25,0.6,1.2,2.2,3.6}
+          {(30*x^2 + 20*x*y + 4*y^2 - 86*x - 28*y + 62)/8}
+        \addplot3[MLRose,thick,mark=*,mark size=0.9pt] coordinates {
+          (0.000,0.000,0)(1.287,0.419,0)(1.293,0.403,0)(1.298,0.386,0)
+          (1.304,0.371,0)(1.309,0.355,0)(1.314,0.340,0)(1.325,0.310,0)
+          (1.334,0.281,0)(1.348,0.240,0)(1.362,0.201,0)(1.378,0.152,0)
+          (1.397,0.095,0)(1.415,0.044,0)(1.446,-0.046,0)};
+        \addplot3[only marks,mark=star,mark size=2.6pt,MLBlue]
+          coordinates {(1.6,-0.5,0)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Raw: $\kappa = 55.8$, \textbf{222 iterations}.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[width=\linewidth, height=4.3cm,
+        xlabel={$w$}, ylabel={$b$},
+        tick label style={font=\scriptsize}, label style={font=\small},
+        view={0}{90}, domain=-0.6:4.2, y domain=1.1:5.9,
+        colormap={ml}{color=(MLBlue) color=(MLTeal) color=(MLAmber)}]
+        \costcontour{}{0.1,0.25,0.6,1.2,2.2,3.6}
+          {(4*x^2 + 4*y^2 - 14.3108*x - 28*y + 62)/8}
+        \addplot3[MLRose,thick,mark=*,mark size=0.9pt] coordinates {
+          (0.000,0.000,0)(1.789,3.500,0)};
+        \addplot3[only marks,mark=star,mark size=2.6pt,MLBlue]
+          coordinates {(1.789,3.5,0)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Standardised: $\kappa = 1.0$, \textbf{1 iteration}.\par}
+  \end{minipage}
+  \caption{The same four points and the same step-size rule
+  ($\alpha = 1/\lambda_{\max}$). Left: elliptical contours, and a descent that
+  crawls along the valley floor. Right: standardising $x$ makes the contours
+  exact circles, so the negative gradient points straight at the minimum and one
+  step arrives. The optimum has \emph{moved}, from $(1.6,-0.5)$ to
+  $(1.7889,\,3.5)$, because the parameters now multiply different units.}
+  \label{fig:scaling-contours}
+\end{figure}
+
+The circular case is not a coincidence of this dataset. With one standardised
+feature, $\sum_i z^{(i)} = 0$ and $\frac1m\sum_i (z^{(i)})^2 = 1$, so
+$H = I$ exactly, whatever the data was. Gradient descent on a perfectly circular
+bowl with $\alpha = 1$ lands on the minimum in a single step from any starting
+point.
+
+\section{The Payoff, and What It Is Not}
+\label{sec:scaling-payoff}
+
+Back to D2, and the question \cref{ch:ch04} left open. Running gradient descent
+under each scaling at $90\%$ of that scaling's own stability limit, and counting
+iterations until the cost is within $1\%$ of its minimum:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+scaling & $\alpha$ used & iterations\\
+\midrule
+raw               & $0.005111$ & $26{,}605$\\
+divide by maximum & $1.015883$ & $521$\\
+mean normalized   & $1.800000$ & $89$\\
+standardised      & $0.993126$ & $23$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Twenty-three iterations against twenty-six thousand: a factor of $1150$, from
+three lines of arithmetic applied before training starts. That is the answer to
+\cref{ch:ch04}'s question. Its worked example did not standardise because the
+answer would otherwise be wrong; it standardised because the run would otherwise
+have taken a thousand times longer to become right.
+
+\begin{keyinsight}{Scaling changes the optimization, not the model}
+Every scaling in this chapter is affine, and the model can absorb any affine
+change of variables into its own parameters: if $z = (x-\mu)/\sigma$ then
+$w_z z + b_z$ is the same function of $x$ as $w x + b$ with
+$w = w_z/\sigma$ and $b = b_z - w_z\mu/\sigma$. Fitted to convergence, an
+unregularized least-squares model gives \emph{identical predictions} whether you
+scale or not --- in the experiment of \cref{sec:scaling-practice}, identical to
+$1.4\times 10^{-14}$.
+
+So scaling is not a modelling improvement, and a model that fits badly will not
+fit better for being scaled. It is an improvement to the \emph{path} the
+optimizer takes to the same destination. The exceptions --- the cases where
+scaling does change the answer --- are exactly the ones in
+\cref{sec:scaling-practice}, and they are worth knowing precisely because the
+general rule is otherwise so clean.
+\end{keyinsight}
+
+Note also that the fitted parameters do change, as \cref{fig:scaling-contours}
+shows: $w$ moved from $1.6$ to $1.7889$. It must, because it now measures the
+change in $y$ per standard deviation of $x$ rather than per unit of $x$. If you
+scale, you must either report coefficients in scaled units and say so, or map
+them back with the formulas above.
+
+\section{Choosing the Learning Rate}
+\label{sec:alpha-ladder}
+
+\Cref{sec:learning-rate} gave the theory: $\alpha < 2/\lambda_{\max}$. In
+practice nobody computes $\lambda_{\max}$, and the working procedure is a
+search over a coarse grid.
+
+\begin{algorithmbox}{Standardise, then find $\alpha$ by the $\times 3$ ladder}
+\begin{enumerate}\setlength{\itemsep}{1pt}
+  \item For each feature $j$, compute $\mu_j$ and $\sigma_j$ \emph{on the
+        training set only}, and store them.
+  \item Replace each $\xjj{i}{j}$ by $(\xjj{i}{j}-\mu_j)/\sigma_j$.
+  \item For $\alpha \in \{0.001,\,0.003,\,0.01,\,0.03,\,0.1,\,0.3,\,1\}$: run a
+        few hundred iterations and record the cost curve.
+  \item Discard every $\alpha$ whose cost rises or oscillates upward.
+  \item Among the rest, take the largest --- or, cautiously, the one below it.
+  \item Train properly at that $\alpha$, applying the stored $\mu_j,\sigma_j$ to
+        every future input.
+\end{enumerate}
+\end{algorithmbox}
+
+Two hundred iterations of that ladder on D2, before and after standardisation:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{\qquad}lr@{}}
+\toprule
+\multicolumn{2}{c}{\textbf{raw features}} &
+\multicolumn{2}{c}{\textbf{standardised}}\\
+$\alpha$ & $J$ after $200$ & $\alpha$ & $J$ after $200$\\
+\midrule
+$0.00001$ & $518.10$   & $0.003$ & $524.306$\\
+$0.00003$ & $96.62$    & $0.01$  & $35.956$\\
+$0.0001$  & $22.11$    & $0.03$  & $2.0916$\\
+$0.0003$  & $1.8275$   & $0.1$   & $0.894917$\\
+$0.001$   & $1.2054$   & $0.3$   & $\mathbf{0.889051}$\\
+$0.003$   & $1.2021$   & $1.0$   & $\mathbf{0.889051}$\\
+$0.01$    & diverged   & $3.0$   & diverged\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The two columns tell different stories. On the right, $\alpha = 0.3$ reaches the
+exact minimum $0.889051$ within two hundred iterations, and the ladder has
+plainly found it. On the left, the best surviving value, $\alpha = 0.003$, still
+reports $1.2021$ --- thirty-five per cent above the minimum --- and the next rung
+up diverges. There is no good rung. A ladder run on unscaled features can leave
+you concluding that the model fits poorly when in fact the optimizer has not
+finished.
+
+\section{Reading the Learning Curve}
+\label{sec:learning-curve}
+
+\Cref{sec:stopping} covered when to stop. The complementary skill is diagnosing
+what went wrong from the shape of $J$ against iteration, plotted --- as that
+section insisted --- on a logarithmic vertical axis.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{4.0cm}L{7.0cm}@{}}
+\toprule
+\textbf{What you see} & \textbf{What it means}\\
+\midrule
+Smooth decrease, still falling at the last iteration &
+  Working; $\alpha$ may be too small, or the budget too short. Try the next rung
+  up, or more iterations.\\
+Smooth decrease, flat for the last third &
+  Converged, or stuck on a valley floor. Check the gradient norm, not the cost
+  (\cref{sec:stopping}).\\
+Decrease with visible oscillation &
+  $\alpha$ near the stability limit. Usually still converging, sometimes fastest
+  of all; drop one rung if it worries you.\\
+Increase, or oscillation that grows &
+  $\alpha > \alpha^\star$. Drop two rungs.\\
+Immediate \code{nan} or \code{inf} &
+  Divergence to overflow, or unscaled features with a large $\alpha$, or a bug
+  in the gradient. Check the gradient against a finite-difference estimate.\\
+Falls, then rises steadily &
+  Not an optimization problem at all if the rising curve is the \emph{validation}
+  cost --- that is overfitting (\cref{ch:ch07}).\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Scaling in Practice}
+\label{sec:scaling-practice}
+
+The rule is short: \textbf{compute $\mu_j$ and $\sigma_j$ on the training set,
+and apply those same numbers to validation data, to test data, and to every
+input the deployed model ever sees.} Never recompute them on the data you are
+predicting.
+
+The first reason is practical and unanswerable: at prediction time there may be
+only one input, which has no standard deviation. Whatever you scale by must have
+been decided in advance.
+
+The second reason is the one usually given --- that using test-set statistics
+leaks information from the test set into training. That is true, but it is worth
+being precise about how much damage it does, because the honest answer is
+sometimes none at all.
+
+\begin{workedexample}{When does the choice of statistics change the model?}
+Two features, sixty training examples, twenty test examples. Fit twice: once
+scaling by training statistics, once by statistics computed over all eighty
+examples.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+model & train stats & all-data stats & max $|\text{difference}|$\\
+\midrule
+least squares, converged & $1.656872$ & $1.656872$ & $1.4\times10^{-14}$\\
+ridge, $\lambda = 1$     & $1.584349$ & $1.580819$ & $0.059$\\
+ridge, $\lambda = 10$    & $2.852947$ & $3.064429$ & $0.429$\\
+gradient descent, $20$ iterations & $1.631928$ & $1.615459$ & $0.097$\\
+gradient descent, $200$ iterations & $1.656872$ & $1.656872$ & $0.000$\\
+\bottomrule
+\end{tabular}
+\end{center}
+(Test RMSE in the first two columns; the last column is the largest difference
+between the two vectors of predictions.)
+
+For ordinary least squares fitted to convergence, the two are the same model to
+machine precision --- as the Key Insight above promised, since the scaling is
+affine and the fit absorbs it. Add a penalty that depends on the size of the
+coefficients (\cref{ch:ch07}), and the two diverge, because the penalty is
+measured in scaled units and the units now depend on the test set. Stop the
+optimizer early instead of running it to convergence, and they diverge again,
+for the same reason: the path depends on the scaling even though the destination
+does not.
+\end{workedexample}
+
+\begin{pitfall}{Fit the scaler on the training set, always}
+The exception above is a trap, not a licence. Almost every model you will
+actually deploy is regularized, or early-stopped, or uses distances
+(\cref{ch:ch13}), or feeds a pipeline where something further downstream is
+scale-dependent. In all of those, statistics computed over the full dataset make
+the test score optimistic and the deployed model different from the one you
+evaluated.
+
+The rule costs nothing to follow and removes an entire category of
+irreproducible result, so follow it unconditionally. In \tool{scikit-learn} this
+means \code{scaler.fit(X\_train)} followed by \code{scaler.transform(X\_test)},
+never \code{fit\_transform} on both --- or, better, a \code{Pipeline}, which
+makes the mistake impossible to express.
+\end{pitfall}
+
+\section{Feature Engineering}
+\label{sec:feature-engineering}
+
+So far the features have been whatever the data happened to contain. Often the
+most valuable thing you can do to a model is give it a feature nobody recorded.
+
+\begin{workedexample}{Frontage and depth, or area?}
+Six building plots are recorded by frontage and depth, and sold for a price:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+frontage & depth & area $=$ f\,$\times$\,d & price\\
+\midrule
+$20$ & $50$ & $1000$ & $51$\\
+$30$ & $40$ & $1200$ & $59$\\
+$25$ & $60$ & $1500$ & $76$\\
+$40$ & $30$ & $1200$ & $61$\\
+$35$ & $45$ & $1575$ & $78$\\
+$45$ & $50$ & $2250$ & $113$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A linear model in frontage and depth cannot express a product, and it shows:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+features & $J$\\
+\midrule
+frontage, depth        & $2.5190$\\
+area alone             & $0.3576$\\
+frontage, depth, area  & $0.1523$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+One engineered feature, replacing two recorded ones, cuts the cost by a factor
+of seven --- and does it with \emph{fewer} parameters. No change of algorithm,
+no extra data, no tuning: just the observation that land is sold by the square
+foot, which any estate agent could have told you.
+\end{workedexample}
+
+Engineered features that repay the effort, in rough order of frequency:
 
 \begin{itemize}
-  \item Feature Scaling
-  \item Checking for Convergence
-  \item Choosing the Learning Rate
-  \item Feature Engineering
-  \item Polynomial Regression
+  \item \textbf{Products}, when two quantities act together: frontage $\times$
+        depth, price $\times$ quantity, dose $\times$ duration.
+  \item \textbf{Ratios}, when the meaningful quantity is relative: price per
+        square foot, errors per thousand requests, debt to income.
+  \item \textbf{Differences}, especially of dates: age at purchase rather than
+        date of birth and date of purchase.
+  \item \textbf{Aggregates over a history}: a customer's mean order value, the
+        number of failed logins in the past hour.
+  \item \textbf{Decompositions of a timestamp}: hour of day, day of week, whether
+        it is a holiday. A raw timestamp is nearly useless as a number; its parts
+        are informative.
 \end{itemize}
+
+\begin{keyinsight}{Linear in the parameters, not in the features}
+``Linear regression'' constrains how the model depends on $\vw$ and $b$, not on
+the data. Nothing stops a feature from being $x_1x_2$, or $\sqrt{x}$, or
+$\log(1+x)$, or the day of the week extracted from a date. The model remains
+linear in the parameters, so every derivation in \cref{ch:ch02,ch:ch03,ch:ch04}
+--- the convexity, the closed form, the gradient --- continues to hold exactly.
+This one observation is what makes the humble linear model as widely useful as it
+is, and it is the bridge to the next section.
+\end{keyinsight}
+
+\section{Polynomial Regression}
+\label{sec:polynomial}
+
+The same trick fits curves. Given a single feature $x$, construct
+$x, x^2, x^3, \dots$ as separate features and fit a linear model to them:
+\[
+  f(x) \;=\; w_1x + w_2x^2 + w_3x^3 + b .
+\]
+This is a cubic in $x$ and a linear model in $(w_1,w_2,w_3,b)$, so it is fitted
+by exactly the machinery already built.
+
+\begin{workedexample}{Ten points on a curve}
+Dataset~T5, ten points on a curve:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{10}{r}@{}}
+\toprule
+$x$ & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$ & $9$ & $10$\\
+$y$ & $2.1$ & $3.4$ & $5.6$ & $9.1$ & $13.2$ & $19.4$ & $25.9$ & $34.2$
+    & $43.6$ & $54.5$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+model & $J$ & $\kappa(\Xmat^{\mathsf{T}}\Xmat)$\\
+\midrule
+degree $1$ (a straight line) & $9.523067$ & $1.9\times10^{2}$\\
+degree $2$                   & $0.019067$ & $4.1\times10^{4}$\\
+degree $3$                   & $0.008885$ & $1.2\times10^{7}$\\
+degree $4$                   & $0.008885$ & $4.4\times10^{9}$\\
+degree $9$                   & $0.000000$ & $7.3\times10^{21}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The straight line is hopeless and the quadratic is excellent: adding $x^2$ drops
+the cost by a factor of $500$. The cubic buys a further factor of two, the
+quartic buys nothing at all, and the ninth-degree fit achieves exactly zero.
+\end{workedexample}
+
+Two things in that table deserve attention, and they point in opposite
+directions.
+
+\subsection{Powers make scaling compulsory}
+
+The condition number rises by roughly two orders of magnitude per degree, and the
+reason is visible in the feature ranges:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+feature & minimum & maximum & ratio\\
+\midrule
+$x$   & $1$ & $10$      & $10$\\
+$x^2$ & $1$ & $100$     & $100$\\
+$x^3$ & $1$ & $1000$    & $1000$\\
+$x^4$ & $1$ & $10{,}000$ & $10{,}000$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A model with $x$ and $x^3$ as features has one input ranging over a decade and
+another over three, which is the situation of \cref{sec:scaling-problem} made
+deliberately worse. Standardisation is not optional here; without it, gradient
+descent on a cubic fit is unusable, and by degree $9$ the condition number of
+$10^{21}$ exceeds what double precision can represent faithfully, so even the
+direct solver is returning something it cannot vouch for.
+
+\subsection{Where the flexibility goes wrong}
+
+The degree-$9$ fit passes exactly through all ten points, so $J = 0$. By the cost
+function --- the only thing the algorithm can see --- it is the best model in the
+table by an infinite margin. \Cref{fig:polynomial} shows what it actually is.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.78\linewidth, height=5.6cm,
+      xlabel={$x$}, ylabel={$y$},
+      xmin=0.4, xmax=10.8, ymin=-22, ymax=95,
+      legend style={font=\tiny, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[MLAmber,thick,dashed] coordinates {
+        (0.60,-7.189)(1.60,-1.416)(2.60,4.357)(3.60,10.131)(4.60,15.904)
+        (5.60,21.677)(6.60,27.451)(7.60,33.224)(8.60,38.997)(9.60,44.771)
+        (10.60,50.544)};
+      \addlegendentry{degree 1, $J=9.52$}
+      \addplot[MLBlue,very thick] coordinates {
+        (0.60,2.267)(1.10,2.363)(1.60,2.760)(2.10,3.457)(2.60,4.453)
+        (3.10,5.750)(3.60,7.347)(4.10,9.243)(4.60,11.440)(5.10,13.937)
+        (5.60,16.733)(6.10,19.830)(6.60,23.227)(7.10,26.923)(7.60,30.920)
+        (8.10,35.217)(8.60,39.813)(9.10,44.710)(9.60,49.907)(10.10,55.403)
+        (10.60,61.200)};
+      \addlegendentry{degree 2, $J=0.019$}
+      \addplot[MLRose,thick] coordinates {
+        (0.60,-19.716)(0.85,-2.623)(1.10,3.814)(1.35,5.141)(1.60,4.558)
+        (1.85,3.716)(2.10,3.306)(2.35,3.476)(2.60,4.110)(2.85,5.010)
+        (3.10,5.994)(3.35,6.944)(3.60,7.814)(3.85,8.623)(4.10,9.424)
+        (4.35,10.289)(4.60,11.277)(4.85,12.428)(5.10,13.747)(5.35,15.215)
+        (5.60,16.789)(5.85,18.417)(6.10,20.054)(6.35,21.673)(6.60,23.277)
+        (6.85,24.897)(7.10,26.591)(7.35,28.427)(7.60,30.467)(7.85,32.737)
+        (8.10,35.207)(8.35,37.771)(8.60,40.261)(8.85,42.472)(9.10,44.263)
+        (9.35,45.710)(9.60,47.366)(9.85,50.650)(10.10,58.394)(10.35,75.602)
+        (10.60,110.445)};
+      \addlegendentry{degree 9, $J=0$}
+      \addplot[only marks,mark=*,mark size=1.6pt,MLGray,forget plot]
+        coordinates {(1,2.1)(2,3.4)(3,5.6)(4,9.1)(5,13.2)(6,19.4)(7,25.9)
+                     (8,34.2)(9,43.6)(10,54.5)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Three fits to the same ten points. The degree-$9$ curve has zero
+  training cost --- it passes exactly through every point --- and is plainly the
+  worst description of the data. Between $x=1$ and $x=2$ it dips and rises where
+  the data does neither, and just outside the range of the data it leaves
+  altogether.}
+  \label{fig:polynomial}
+\end{figure}
+
+Asked to predict slightly outside the observed range, the two models part
+company completely:
+
+\begin{center}
+\small
+\begin{tabular}{@{}rrr@{}}
+\toprule
+$x$ & degree $2$ & degree $9$\\
+\midrule
+$1.5$  & $2.657$  & $4.887$\\
+$5.5$  & $16.150$ & $16.150$\\
+$9.5$  & $48.843$ & $46.613$\\
+$10.5$ & $60.017$ & $93.699$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At $x = 10.5$, half a unit beyond the last observation, the degree-$9$ model
+predicts $93.7$ against the quadratic's $60.0$. Its largest coefficient has
+magnitude $506$, on data whose values never exceed $55$: enormous coefficients
+that very nearly cancel, which is the signature we first met in
+\cref{sec:multicollinearity} and will meet again, named, in \cref{ch:ch07}.
+
+\begin{pitfall}{Zero training cost is a warning, not an achievement}
+Every model in the table above was fitted correctly, by a method that provably
+finds the global minimum of the cost it was given. The cost was minimised; the
+model still got worse. The training cost measures agreement with data the model
+has already seen, and past some point the only way to improve it is to
+contort the model into shapes the data does not support.
+
+The remedy is the one \cref{ch:ch01} insisted on and this chapter has quietly
+been ignoring: evaluate on data the model was not fitted to. \Cref{ch:ch07} makes
+that systematic, gives the phenomenon its name --- overfitting --- and supplies
+the standard defence.
+\end{pitfall}
+
+Powers are not the only useful transformation, and often not the best one. If a
+quantity grows quickly, $\log(1+x)$ compresses it; if it saturates, $\sqrt{x}$
+often fits better than a quadratic and cannot turn back downward; if it is
+periodic, $\sin$ and $\cos$ of the phase are the natural features. Choose the
+transformation from what you know about the quantity, not by increasing the
+degree until the cost stops falling.
+
+\begin{labbox}{Lab 5 --- Scaling, learning rates, and curves}
+Implement \code{zscore(X)} returning the scaled matrix together with $\mu$ and
+$\sigma$, and a \code{transform} that applies stored statistics to new data.
+Reproduce the conditioning table of \cref{sec:feature-scaling} for D2 --- your
+raw condition number must be $26{,}775$ and your standardised one $9.7$ --- and
+the iteration counts of \cref{sec:scaling-payoff}. Run the $\times 3$ ladder on
+both versions and confirm that no rung works well on the raw features. Then fit
+polynomials of degree $1$ to $9$ to T5, on standardised powers, and plot all
+three curves of \cref{fig:polynomial}. Finally, hold out the last two points,
+refit each degree on the first eight, and report the error on the two held out:
+this is \cref{ch:ch10} arriving early, and the ordering of the results will
+surprise you if the rest of the chapter has not.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item The condition number $\kappa = \lambda_{\max}/\lambda_{\min}$ of the cost
+        governs how many iterations gradient descent needs. For raw D2 it is
+        $26{,}775$; standardised, $9.7$.
+  \item Centring matters more than range-matching. Dividing by the maximum puts
+        features on $[0,1]$ and still leaves $\kappa = 306$, because an uncentred
+        feature column is nearly parallel to the bias column.
+  \item After standardisation the Hessian is the correlation matrix of the
+        features bordered by a $1$, so what remains is set by correlations
+        between features --- which scaling cannot fix, and
+        \cref{ch:ch07,ch:ch16} can.
+  \item The payoff is large: $26{,}605$ iterations against $23$ on D2. With a
+        single standardised feature the contours are exact circles and one step
+        of length $\alpha = 1$ reaches the minimum.
+  \item Scaling changes the optimization, not the model. Fitted to convergence
+        without regularization, scaled and unscaled models predict identically to
+        machine precision. Fitted parameters do change, and must be reported in
+        the units they were fitted in.
+  \item Choose $\alpha$ with a $\times 3$ ladder, discarding any rung whose cost
+        rises and taking the largest that survives. On badly scaled data no rung
+        may be satisfactory, which is itself the diagnosis.
+  \item Compute scaling statistics on the training set and apply them everywhere
+        else. Breaking this changes the model whenever a penalty, an early stop,
+        or a distance is involved --- which is nearly always.
+  \item Linear regression is linear in its parameters, not its features. Products,
+        ratios, differences and powers are all admissible features, and every
+        result derived so far survives.
+  \item Polynomial features make scaling compulsory, since $x^k$ ranges over $k$
+        decades. Enough degrees will drive the training cost to zero while making
+        the model worse --- the subject of \cref{ch:ch07}.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Define the condition number of a cost function and say what it predicts.
+
+\sq Write the formulas for mean normalization and for standardisation, and give
+the range or the moments each produces.
+
+\sq Why does dividing every feature by its maximum leave the condition number
+much larger than standardisation does?
+
+\sq Explain why an uncentred feature column is nearly parallel to the bias
+column, and what that does to $\lambda_{\min}$.
+
+\sq After standardisation, what determines the remaining condition number, and
+what can be done about it?
+
+\sq Does feature scaling change the predictions of a converged, unregularized
+linear model? Does it change the fitted parameters?
+
+\sq State the $\times 3$ ladder procedure in three sentences.
+
+\sq Give the rule for computing scaling statistics, and one practical reason it
+cannot be broken even in principle.
+
+\sq Name three kinds of engineered feature and give an example of each.
+
+\sq In what sense is polynomial regression a linear model?
+
+\exercisesection{Analytical Problems}
+
+\ap A single feature is standardised to $z = (x-\mu)/\sigma$, and a model
+$f(z) = w_z z + b_z$ is fitted. Derive the parameters $w, b$ of the equivalent
+model $f(x) = wx + b$, and verify your formulas against the four-point set, where
+$(w_z, b_z) = (1.7889, 3.5)$, $\mu = 2.5$ and $\sigma = 1.1180$ correspond to
+$(w,b) = (1.6,-0.5)$.
+
+\ap Show that after centring every feature, $\Xmat^{\mathsf{T}}\mathbf{1} =
+\mathbf{0}$, and hence that the Hessian of the cost is block diagonal with the
+bias in a block of its own. What is that block's single eigenvalue?
+
+\ap For two standardised features with correlation $\rho$, show that the
+eigenvalues of the correlation matrix are $1\pm|\rho|$, and hence that
+$\kappa = (1+|\rho|)/(1-|\rho|)$. At what value of $|\rho|$ does $\kappa$ reach
+$100$?
+
+\ap A feature is measured in metres and standardised. The data is then
+re-collected in centimetres and standardised again. Show that the standardised
+values are identical, and explain why this makes standardisation preferable to
+dividing by the maximum when units are arbitrary.
+
+\ap The four-point set has $x = 1,2,3,4$. Compute $\mu$, $\sigma$, the
+standardised values, and by hand verify that the resulting Hessian is the
+identity. Then show that gradient descent with $\alpha=1$ from any starting
+point reaches the minimum in one step.
+
+\ap A degree-$d$ polynomial is fitted to $m$ points. For what $d$ can the
+training cost be driven to exactly zero, and how many such fits are there when
+$d$ exceeds that value?
+
+\exercisesection{Design Problems}
+
+\dpr You are handed a dataset whose features include an age in years, an income
+in local currency, a binary indicator, a count of prior visits, and a latitude.
+Decide how to scale each, justify any you would leave alone, and say what you
+would store to make the transformation reproducible at prediction time.
+
+\dpr A colleague reports that standardising their features improved test accuracy
+by four per cent. Given this chapter, list the possible explanations in order of
+likelihood, and describe the single experiment that would distinguish between
+them.
+
+\dpr You are modelling electricity demand from a timestamp, an outdoor
+temperature and a holiday flag. Propose six engineered features, say what
+knowledge each encodes, and identify which pairs you would expect to be strongly
+correlated.
+
+\dpr Write the checklist you would apply before every gradient-descent training
+run --- scaling, learning rate, budget, stopping rule, diagnostics to plot ---
+and for each item state what evidence would tell you it was wrong.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement standardisation and reproduce the conditioning table of
+\cref{sec:feature-scaling} for D2, including all four rows.
+
+\pe Reproduce the iteration counts of \cref{sec:scaling-payoff}. Then plot
+iterations required against condition number for a family of synthetic datasets
+with $\kappa$ ranging over four orders of magnitude, on log--log axes. What slope
+do you get, and does it match the claim that iterations grow in proportion
+to $\kappa$?
+
+\pe Fit polynomials of degree $1$ through $9$ to T5 using standardised powers,
+and plot training cost against degree. Then repeat without standardising and
+compare how far each fit gets with a fixed budget of gradient-descent iterations.
+
+\pe Split T5 into eight training points and two held-out points, fit each degree
+on the eight, and plot both training and held-out cost against degree on the same
+axes. Identify the degree at which the two curves diverge. Keep this plot: it is
+the central figure of \cref{ch:ch10}.
+
+\exercisesection{Self-Test}
+
+\qz The condition number of the cost is the ratio of: (a)~the largest to the
+smallest feature; (b)~the largest to the smallest Hessian eigenvalue;
+(c)~training to test error; (d)~$\alpha$ to $\alpha^\star$.
+
+\qz Dividing each feature by its maximum: (a)~is equivalent to standardisation;
+(b)~fixes the ranges but not the centring; (c)~makes the contours circular;
+(d)~changes the model's predictions.
+
+\qz Standardising the features of a converged, unregularized linear regression
+changes: (a)~the predictions; (b)~the fitted parameter values only;
+(c)~neither; (d)~the training data.
+
+\qz After standardisation, the condition number of a two-feature problem is
+determined by: (a)~the number of examples; (b)~the correlation between the
+features; (c)~the learning rate; (d)~the bias.
+
+\qz Scaling statistics should be computed on: (a)~the whole dataset; (b)~the
+training set only; (c)~the test set; (d)~each batch separately.
+
+\qz The model $f(x) = w_1x + w_2x^2 + b$ is: (a)~nonlinear regression;
+(b)~linear in the parameters and so fitted by the usual method; (c)~not fittable
+by gradient descent; (d)~always better than a straight line.
+
+\qz Adding $x^3$ as a feature when $x$ ranges over $[1,10]$: (a)~has no effect on
+conditioning; (b)~adds a feature ranging over three decades and makes scaling
+essential; (c)~reduces the condition number; (d)~guarantees a better fit.
+
+\qz A model achieving $J = 0$ on its training set is: (a)~ideal; (b)~evidence
+the algorithm worked and nothing else; (c)~impossible; (d)~proof of a bug.
+
+\furtherreading
+
+\textcite{james2021} §3.3 covers the practical extensions of this chapter ---
+interaction terms, which are the products of \cref{sec:feature-engineering}, and
+polynomial regression --- and §7.1 develops polynomial fits properly, with the
+caution about behaviour near the boundary of the data that
+\cref{fig:polynomial} illustrates. \textcite{bishop2006} §1.1 is the canonical
+treatment of polynomial order and its consequences, and is best read now and
+again alongside \cref{ch:ch07}; §3.1 covers the general basis-function view, of
+which every transformation in this chapter is an instance.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch06} changes the question. Instead of predicting
+a number we predict a category, which breaks the squared-error cost in a way that
+no amount of scaling repairs, and requires a new model and a new cost derived
+from first principles.
