@@ -21,10 +21,13 @@
 \RequirePackage[utf8]{inputenc}
 \RequirePackage{newpxtext}              % Palatino-style text
 \RequirePackage{newpxmath}              % matching maths font
-% Sans face for headings and box titles.  newpxtext defaults to qhv
-% (TeX Gyre Heros) and psnfss offers phv (Helvetica); neither ships with a
-% basic TeX Live install, so use Latin Modern Sans, which always does.
-\renewcommand*{\sfdefault}{lmss}
+% Sans face for headings and box titles: TeX Gyre Heros (qhv), scaled to 94%
+% of the text size, which is what newpxtext selects by default and the right
+% optical match for Palatino.  Neither qhv nor the psnfss alternative phv ships
+% with a basic TeX Live install; install both in user mode with
+%   tlmgr --usermode --repository <2025 tlnet-final> install tex-gyre helvetic
+% If they are unavailable, add \renewcommand*{\sfdefault}{lmss} below to fall
+% back on Latin Modern Sans, which is always present.
 \RequirePackage{inconsolata}            % monospace for code
 \RequirePackage[expansion=false]{microtype}
 \RequirePackage{setspace}
@@ -108,7 +111,7 @@
   numbers=left, numberstyle=\tiny\color{MLGray}, numbersep=8pt,
   breaklines=true, showstringspaces=false,
   keywordstyle=\color{MLBlue}\bfseries,
-  commentstyle=\color{MLTeal}\itshape,
+  commentstyle=\color{MLTeal},   % no \itshape: inconsolata has no italic
   stringstyle=\color{MLRose},
   emphstyle=\color{MLAmber}\bfseries,
   emph={np,numpy,plt,array,dot,mean,shape,reshape},
@@ -288,6 +291,10 @@
   bookmarksnumbered=true, bookmarksopen=true
 ]{hyperref}
 \RequirePackage[capitalise,noabbrev,nameinlink]{cleveref}
+% Chapters in the back matter must be referred to as appendices; main.tex
+% issues \crefalias{chapter}{appendix} immediately after \appendix.
+\crefname{appendix}{Appendix}{Appendices}
+\Crefname{appendix}{Appendix}{Appendices}
 \RequirePackage{makeidx}
 \makeindex
 \RequirePackage{emptypage}

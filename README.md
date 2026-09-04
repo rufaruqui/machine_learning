@@ -100,6 +100,14 @@ A deck is finished only when `make check` prints `clean: no over/underfull boxes
 
 ### The textbook
 
+Requires `newpx` (Palatino), `inconsolata`, `tcolorbox`, `biblatex` with `biber`, and the
+sans faces `tex-gyre` (TeX Gyre Heros) and `helvetic`. On a minimal TeX Live the last two
+are missing and headings silently fall back to a substitute font; install them with
+
+```bash
+tlmgr --usermode install tex-gyre helvetic
+```
+
 ```bash
 cd book
 make                 # pdflatex → biber → makeindex → pdflatex ×2, via latexmk
