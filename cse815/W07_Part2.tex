@@ -1,0 +1,527 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 3, Week 7, Part 2
+%  Anomaly Detection: the Gaussian Distribution, Density Estimation,
+%  Evaluation, and Feature Choice
+%  (the epsilon frame is a step-by-step beamer overlay)
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 7, Part 2]{Anomaly Detection}
+\subtitle{The Gaussian Distribution, Density Estimation, Evaluation, and Choosing Features}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 7 / Part 2]{Week 7 $\cdot$ Part 2}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From groups to outliers}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Part 1 gave us}
+        \footnotesize
+        K-means: find groups in unlabelled data by alternating assignment and centroid
+        updates, minimising the distortion $J$.
+      \end{block}
+      \footnotesize
+      Clustering asks what the typical points look like. Anomaly detection asks the
+      opposite: which points look \emph{unlike} the rest? It learns what normal is from
+      unlabelled data, then flags whatever is improbable under that model.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Finding unusual events
+          \item The Gaussian (normal) distribution
+          \item The anomaly detection algorithm
+          \item Developing and evaluating a detector
+          \item Anomaly detection vs.\ supervised learning
+          \item Choosing what features to use
+        \end{enumerate}
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Finding Unusual Events}
+
+\begin{frame}{Example: aircraft engines}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize 250 of 6000 engines that passed inspection (synthetic)}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=7.0cm,height=4.9cm,xmin=380,xmax=620,ymin=1.8,ymax=6.2,
+          xlabel={$x_1$: heat generated ($^\circ$C)},ylabel={$x_2$: vibration (mm/s)},
+          tick label style={font=\scriptsize},label style={font=\scriptsize}]
+          \addplot[only marks,mark=*,mark size=1pt,cublue!60] coordinates {(528.4,3.772)(509.5,3.686)(485.1,4.993)(474.0,4.142)(503.3,4.110)(514.0,4.218)(457.4,3.908)(493.9,3.909)(498.5,4.284)(457.8,4.709)(476.9,4.195)(536.4,4.242)(470.0,3.937)(468.1,4.541)(500.5,2.936)(544.8,4.672)(504.4,4.018)(521.1,4.382)(500.6,3.523)(490.2,4.044)(517.2,3.194)(495.0,4.542)(496.4,3.521)(594.1,4.166)(508.2,4.034)(483.2,3.610)(466.3,4.308)(528.3,3.986)(478.4,3.658)(527.3,5.004)(422.9,4.180)(473.8,4.050)(491.9,3.752)(468.9,4.429)(529.8,3.680)(474.5,4.020)(508.5,3.188)(514.8,3.633)(501.3,3.942)(502.1,3.299)(494.8,3.837)(499.3,4.248)(496.5,3.926)(493.8,4.584)(466.0,4.203)(539.1,4.173)(495.7,3.860)(537.8,4.476)(517.2,4.388)(526.9,4.122)(467.7,4.173)(483.9,3.011)(526.7,2.948)(506.2,4.551)(467.9,4.268)(513.2,3.650)(474.8,3.619)(532.2,4.055)(492.3,3.839)(457.2,3.994)(509.6,5.191)(489.0,3.872)(514.2,4.722)(507.8,4.591)(525.1,3.773)(489.7,4.257)(484.0,4.399)(473.4,2.920)(514.8,3.846)(541.3,4.467)(507.7,2.860)(482.3,3.513)(491.6,4.051)(474.0,4.160)(516.1,4.114)(505.6,3.007)(516.5,3.128)(514.7,3.858)(466.6,4.203)(510.1,3.698)(462.8,3.623)(457.6,3.319)(478.5,4.343)(503.2,3.406)(500.4,4.258)(465.5,4.475)(490.7,3.468)(480.3,3.971)(527.0,4.762)(522.4,3.865)(536.2,3.854)(465.2,4.115)(486.6,4.442)(507.4,4.055)(453.4,4.721)(447.1,3.562)(483.5,3.794)(469.9,3.229)(523.5,4.661)(513.4,4.585)(479.5,4.936)(493.8,4.193)(475.6,2.845)(506.9,4.392)(517.1,3.842)(487.9,4.466)(516.8,3.780)(510.8,4.337)(503.2,4.209)(523.7,4.347)(523.6,4.358)(524.2,3.480)(520.5,4.020)(470.7,3.530)(523.9,3.631)(489.7,4.210)(472.2,3.981)(551.9,3.962)(467.5,3.901)(493.4,4.581)(496.4,3.518)(456.1,3.708)(495.3,2.749)(477.2,5.048)(558.8,3.448)(495.6,4.019)(480.7,4.508)(476.9,4.722)(492.5,4.461)(529.7,3.306)(516.5,4.253)(478.8,3.789)(498.0,4.149)(483.2,4.595)(495.0,3.886)(490.5,3.448)(497.4,4.137)(503.5,3.892)(447.0,3.903)(516.8,3.594)(509.8,3.969)(496.3,2.734)(509.9,4.055)(528.5,3.708)(517.4,3.560)(465.2,4.308)(482.3,4.069)(533.8,4.242)(547.3,3.253)(465.8,3.274)(513.1,3.120)(511.5,5.008)(512.9,3.934)(452.6,3.838)(498.8,3.875)(564.0,4.533)(495.9,4.344)(553.1,4.103)(503.3,3.777)(503.1,4.300)(512.8,4.480)(526.2,4.215)(504.0,3.817)(573.2,3.479)(503.5,4.184)(533.0,3.486)(478.1,3.846)(520.6,3.827)(550.2,4.183)(515.8,4.065)(495.7,4.688)(533.4,4.037)(506.0,4.342)(510.5,3.914)(450.4,3.962)(520.8,3.813)(471.1,3.342)(515.8,3.711)(514.9,4.504)(493.8,4.051)(515.0,4.252)(543.7,3.706)(524.2,3.930)(530.3,3.755)(461.7,3.761)(487.1,2.970)(518.1,3.617)(522.4,4.190)(523.1,3.885)(507.8,4.793)(498.8,3.809)(477.8,4.299)(518.7,3.685)(504.0,4.025)(511.3,3.650)(513.6,3.999)(472.0,3.688)(501.5,4.150)(560.0,3.990)(498.1,3.802)(503.3,4.190)(505.2,3.789)(480.7,4.675)(534.2,5.154)(487.0,2.933)(458.4,3.697)(494.0,3.646)(447.4,3.076)(515.6,4.200)(505.9,3.122)(505.1,3.271)(477.9,3.307)(511.6,3.504)(545.9,3.422)(493.9,3.586)(479.8,3.639)(547.4,3.922)(498.9,4.104)(474.5,4.466)(514.9,3.367)(486.7,3.512)(497.7,3.637)(482.8,4.232)(507.7,4.213)(546.2,3.826)(522.8,3.379)(472.3,3.392)(475.3,4.088)(498.1,4.308)(483.0,3.802)(532.4,3.449)(506.0,3.023)(502.3,2.962)(498.4,3.974)(527.6,5.122)(472.3,3.052)(515.3,4.610)(500.4,5.095)(493.7,4.552)(498.7,3.688)(518.1,4.263)(509.3,3.544)(543.8,3.805)(467.4,4.204)(500.3,4.821)(454.9,3.920)(492.8,4.723)(478.0,3.726)(489.8,4.381)(483.4,4.323)};
+          \addplot[only marks,mark=x,mark size=3pt,curose,very thick] coordinates {(590,5.6)};
+          \node[font=\tiny,curose,anchor=west] at (axis cs:594,5.6) {new engine?};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{The task}
+        Data: features $\vx^{(1)},\dots,\vx^{(m)}$ of engines already built --- almost all
+        of them fine. A new engine $\vx_{\text{test}}$ comes off the line. Is it like the
+        others, or should it be inspected?
+      \end{block}
+      \begin{defnbox}[Density estimation]
+        \small Build a model $p(\vx)$ of how probable each feature vector is. Then
+        \[ p(\vx_{\text{test}})<\varepsilon\ \Rightarrow\ \text{flag as an anomaly}. \]
+      \end{defnbox}
+      \begin{block}{Applications}
+        Fraud detection (logins, purchases, typing speed); manufacturing (engines, circuit
+        boards); monitoring computers in a data centre (memory, disk, CPU).
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Gaussian Distribution}
+
+\begin{frame}{The Gaussian (normal) distribution}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=6.6cm,height=4.6cm,xmin=-4,xmax=6,ymin=0,ymax=0.85,
+          xlabel={$x$},ylabel={$p(x)$},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.98,0.98)},anchor=north east},legend cell align=left]
+          \addplot[cublue,very thick,domain=-4:6,samples=120]{exp(-x^2/2)/sqrt(2*pi)};
+          \addlegendentry{$\mu=0,\ \sigma=1$}
+          \addplot[curose,very thick,domain=-4:6,samples=120]{exp(-x^2/(2*0.25))/sqrt(2*pi*0.25)};
+          \addlegendentry{$\mu=0,\ \sigma=0.5$}
+          \addplot[cuteal,very thick,domain=-4:6,samples=120]{exp(-x^2/8)/sqrt(8*pi)};
+          \addlegendentry{$\mu=0,\ \sigma=2$}
+          \addplot[cuamber,very thick,dashed,domain=-4:6,samples=120]{exp(-(x-3)^2/(2*0.25))/sqrt(2*pi*0.25)};
+          \addlegendentry{$\mu=3,\ \sigma=0.5$}
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Gaussian density]
+        \small
+        \[ p(x;\mu,\sigma^2)=\frac{1}{\sqrt{2\pi}\,\sigma}\exp\!\Bigl(-\frac{(x-\mu)^2}{2\sigma^2}\Bigr) \]
+        $\mu$: the centre. $\sigma$: the spread (standard deviation); $\sigma^2$ the
+        variance.
+      \end{defnbox}
+      \footnotesize
+      The area under each curve is $1$. Halve $\sigma$ and the bell becomes half as wide
+      and twice as tall.
+      \begin{pitfall}[A density is not a probability]
+        \footnotesize With $\sigma=0.5$ the peak is $0.798$; with $\sigma=0.1$ it is
+        $3.99$. Values above $1$ are fine --- only areas are probabilities.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Estimating $\mu$ and $\sigma^2$ from data}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Parameter estimates]
+        \small
+        \[ \mu=\frac1m\sum_{i=1}^{m}x^{(i)},\qquad
+           \sigma^2=\frac1m\sum_{i=1}^{m}\bigl(x^{(i)}-\mu\bigr)^2 \]
+        These are the maximum-likelihood estimates. Statisticians often divide by $m-1$
+        instead; for the thousands of examples typical here the difference is negligible.
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{The 6000 engines}
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{@{}lcc@{}}
+          \toprule
+          & $\mu_j$ & $\sigma_j$\\
+          \midrule
+          $x_1$, heat ($^\circ$C)     & $499.79$ & $25.12$\\
+          $x_2$, vibration (mm/s)     & $3.993$ & $0.495$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}
+        Fitting a Gaussian is two averages. Nothing is trained by gradient descent; there
+        are no labels.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Anomaly Detection Algorithm}
+
+\begin{frame}{Density estimation with $n$ features}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \begin{defnbox}[Anomaly detection algorithm]
+        \small
+        \begin{enumerate}
+          \item Choose features $x_j$ that might indicate anomalies.
+          \item Fit $\mu_j$, $\sigma_j^2$ for each feature $j=1,\dots,n$ on the training set.
+          \item For a new $\vx$, compute
+          \[ p(\vx)=\prod_{j=1}^{n}p(x_j;\mu_j,\sigma_j^2). \]
+          \item Flag $\vx$ as an anomaly if $p(\vx)<\varepsilon$.
+        \end{enumerate}
+      \end{defnbox}
+      \footnotesize
+      Multiplying the densities treats the features as statistically independent. The
+      algorithm works well in practice even when they are not quite.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Three new engines}
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{@{}lccc@{}}
+          \toprule
+          $\vx$ & $p(x_1)$ & $p(x_2)$ & $p(\vx)$\\
+          \midrule
+          $(505,4.1)$ & $0.0155$ & $0.787$ & $1.2\times10^{-2}$\\
+          $(560,4.9)$ & $0.0009$ & $0.151$ & $1.4\times10^{-4}$\\
+          $(590,5.6)$ & $0.000025$ & $0.0042$ & $1.0\times10^{-7}$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      With $\varepsilon=10^{-5}$: the first two are normal; the third, $3.6\sigma$ hot
+      and $3.2\sigma$ shaky, is flagged.
+      \begin{keyidea}
+        $p(\vx)$ is small when \emph{any} feature is far from its mean --- one improbable
+        reading is enough.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Turning the threshold $\varepsilon$}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=7.0cm,height=5.0cm,xmin=380,xmax=620,ymin=1.8,ymax=6.2,
+          view={0}{90},xlabel={heat ($^\circ$C)},ylabel={vibration (mm/s)},
+          tick label style={font=\scriptsize},label style={font=\scriptsize}]
+          \addplot[only marks,mark=*,mark size=0.8pt,cublue!45,forget plot] coordinates {(528.4,3.772)(509.5,3.686)(485.1,4.993)(474.0,4.142)(503.3,4.110)(514.0,4.218)(457.4,3.908)(493.9,3.909)(498.5,4.284)(457.8,4.709)(476.9,4.195)(536.4,4.242)(470.0,3.937)(468.1,4.541)(500.5,2.936)(544.8,4.672)(504.4,4.018)(521.1,4.382)(500.6,3.523)(490.2,4.044)(517.2,3.194)(495.0,4.542)(496.4,3.521)(594.1,4.166)(508.2,4.034)(483.2,3.610)(466.3,4.308)(528.3,3.986)(478.4,3.658)(527.3,5.004)(422.9,4.180)(473.8,4.050)(491.9,3.752)(468.9,4.429)(529.8,3.680)(474.5,4.020)(508.5,3.188)(514.8,3.633)(501.3,3.942)(502.1,3.299)(494.8,3.837)(499.3,4.248)(496.5,3.926)(493.8,4.584)(466.0,4.203)(539.1,4.173)(495.7,3.860)(537.8,4.476)(517.2,4.388)(526.9,4.122)(467.7,4.173)(483.9,3.011)(526.7,2.948)(506.2,4.551)(467.9,4.268)(513.2,3.650)(474.8,3.619)(532.2,4.055)(492.3,3.839)(457.2,3.994)(509.6,5.191)(489.0,3.872)(514.2,4.722)(507.8,4.591)(525.1,3.773)(489.7,4.257)(484.0,4.399)(473.4,2.920)(514.8,3.846)(541.3,4.467)(507.7,2.860)(482.3,3.513)(491.6,4.051)(474.0,4.160)(516.1,4.114)(505.6,3.007)(516.5,3.128)(514.7,3.858)(466.6,4.203)(510.1,3.698)(462.8,3.623)(457.6,3.319)(478.5,4.343)(503.2,3.406)(500.4,4.258)(465.5,4.475)(490.7,3.468)(480.3,3.971)(527.0,4.762)(522.4,3.865)(536.2,3.854)(465.2,4.115)(486.6,4.442)(507.4,4.055)(453.4,4.721)(447.1,3.562)(483.5,3.794)(469.9,3.229)(523.5,4.661)(513.4,4.585)(479.5,4.936)(493.8,4.193)(475.6,2.845)(506.9,4.392)(517.1,3.842)(487.9,4.466)(516.8,3.780)(510.8,4.337)(503.2,4.209)(523.7,4.347)(523.6,4.358)(524.2,3.480)(520.5,4.020)(470.7,3.530)(523.9,3.631)(489.7,4.210)(472.2,3.981)(551.9,3.962)(467.5,3.901)(493.4,4.581)(496.4,3.518)(456.1,3.708)(495.3,2.749)(477.2,5.048)(558.8,3.448)(495.6,4.019)(480.7,4.508)(476.9,4.722)(492.5,4.461)(529.7,3.306)(516.5,4.253)(478.8,3.789)(498.0,4.149)(483.2,4.595)(495.0,3.886)(490.5,3.448)(497.4,4.137)(503.5,3.892)(447.0,3.903)(516.8,3.594)(509.8,3.969)(496.3,2.734)(509.9,4.055)(528.5,3.708)(517.4,3.560)(465.2,4.308)(482.3,4.069)(533.8,4.242)(547.3,3.253)(465.8,3.274)(513.1,3.120)(511.5,5.008)(512.9,3.934)(452.6,3.838)(498.8,3.875)(564.0,4.533)(495.9,4.344)(553.1,4.103)(503.3,3.777)(503.1,4.300)(512.8,4.480)(526.2,4.215)(504.0,3.817)(573.2,3.479)(503.5,4.184)(533.0,3.486)(478.1,3.846)(520.6,3.827)(550.2,4.183)(515.8,4.065)(495.7,4.688)(533.4,4.037)(506.0,4.342)(510.5,3.914)(450.4,3.962)(520.8,3.813)(471.1,3.342)(515.8,3.711)(514.9,4.504)(493.8,4.051)(515.0,4.252)(543.7,3.706)(524.2,3.930)(530.3,3.755)(461.7,3.761)(487.1,2.970)(518.1,3.617)(522.4,4.190)(523.1,3.885)(507.8,4.793)(498.8,3.809)(477.8,4.299)(518.7,3.685)(504.0,4.025)(511.3,3.650)(513.6,3.999)(472.0,3.688)(501.5,4.150)(560.0,3.990)(498.1,3.802)(503.3,4.190)(505.2,3.789)(480.7,4.675)(534.2,5.154)(487.0,2.933)(458.4,3.697)(494.0,3.646)(447.4,3.076)(515.6,4.200)(505.9,3.122)(505.1,3.271)(477.9,3.307)(511.6,3.504)(545.9,3.422)(493.9,3.586)(479.8,3.639)(547.4,3.922)(498.9,4.104)(474.5,4.466)(514.9,3.367)(486.7,3.512)(497.7,3.637)(482.8,4.232)(507.7,4.213)(546.2,3.826)(522.8,3.379)(472.3,3.392)(475.3,4.088)(498.1,4.308)(483.0,3.802)(532.4,3.449)(506.0,3.023)(502.3,2.962)(498.4,3.974)(527.6,5.122)(472.3,3.052)(515.3,4.610)(500.4,5.095)(493.7,4.552)(498.7,3.688)(518.1,4.263)(509.3,3.544)(543.8,3.805)(467.4,4.204)(500.3,4.821)(454.9,3.920)(492.8,4.723)(478.0,3.726)(489.8,4.381)(483.4,4.323)};
+\only<1>{\costcontour{contour/draw color=cuteal,very thick,forget plot,domain=380:620,y domain=1.8:6.2}{5.0975}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+  \addplot[only marks,mark=o,mark size=1.6pt,cuamber,thick,forget plot] coordinates {(556.1,3.693)(573.9,3.996)(442.1,4.813)(557.9,3.786)(445.2,2.889)(461.2,2.915)(508.0,5.299)(432.1,3.592)(522.0,2.528)(564.5,3.870)(445.3,3.014)(499.2,5.128)(549.0,3.402)(509.1,5.108)(452.8,4.725)(458.2,4.763)(559.9,4.680)(500.5,5.119)(448.7,3.444)(522.7,2.719)(472.6,5.044)(533.1,4.939)(443.5,3.396)(515.7,5.503)(509.0,5.208)(444.6,3.568)(528.7,2.988)(562.7,3.890)(506.2,2.821)(547.8,2.539)(425.3,3.649)(528.0,5.299)(438.5,4.418)(430.7,4.791)(555.2,4.742)(469.3,5.011)(569.1,3.804)(474.7,2.913)(473.2,2.812)(446.0,4.402)(488.7,5.363)(518.1,5.392)(506.3,5.106)(554.4,4.321)(463.6,2.778)(433.2,4.012)(440.7,4.473)(499.6,2.570)(506.3,2.763)(572.7,4.381)(420.8,4.283)(513.4,5.109)(484.4,5.191)(500.8,2.715)(497.1,2.370)(445.8,3.142)(535.5,3.076)(449.0,3.430)(469.2,4.994)(565.6,4.185)(446.9,3.496)(437.4,4.309)(428.7,4.334)(534.2,5.024)(545.0,4.768)(545.6,4.724)(494.3,2.694)(559.2,3.800)(412.7,4.421)(487.2,2.785)(507.9,5.407)(491.1,2.853)(431.3,4.231)(550.9,2.996)(532.5,4.976)(456.9,4.929)(539.6,3.124)(544.3,5.241)(563.2,4.395)(504.3,2.658)(561.6,3.861)(556.4,4.777)(544.0,4.918)(464.0,5.251)(534.1,5.050)(549.1,4.804)(460.9,3.161)(452.5,2.878)(542.4,4.792)(478.2,2.476)(428.1,3.944)(470.0,4.952)(482.0,5.234)(548.0,2.455)(436.0,4.290)(429.9,4.039)(489.7,2.863)(520.8,2.863)(458.4,5.108)(429.7,5.119)(446.6,3.590)(550.0,2.520)(559.9,3.839)(559.5,3.439)(462.9,4.861)(470.6,2.898)(433.4,3.537)(504.0,5.221)(428.6,3.710)(423.9,2.816)(554.8,4.664)(443.6,3.681)(465.9,3.055)(557.9,3.345)(488.6,5.260)(438.9,4.625)(454.3,5.271)(546.6,3.090)(456.0,5.004)(442.3,4.627)(475.0,5.178)(442.0,4.451)(568.7,3.219)(490.5,5.172)(549.8,2.997)(566.0,4.247)(562.2,3.994)(564.1,4.637)(490.6,2.818)(474.1,2.705)(442.4,4.799)(542.0,3.106)(536.0,3.047)(562.4,3.910)(565.6,5.494)(548.9,4.565)(575.4,3.712)(535.6,5.067)(499.2,5.238)(426.9,3.837)(533.9,3.066)(507.0,2.794)(499.2,5.278)(508.6,5.596)(563.2,3.704)(439.7,3.917)(489.4,5.361)(477.2,5.166)(554.1,3.467)(534.3,2.775)(483.3,5.660)(457.6,4.804)(541.0,2.981)(489.6,2.778)(549.2,2.449)(444.6,4.740)};}%
+\only<2>{\costcontour{contour/draw color=cuteal,very thick,forget plot,domain=380:620,y domain=1.8:6.2}{9.7027}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+  \addplot[only marks,mark=o,mark size=1.6pt,cuamber,thick,forget plot] coordinates {(547.8,2.539)(430.7,4.791)(420.8,4.283)(497.1,2.370)(412.7,4.421)(478.2,2.476)(548.0,2.455)(429.7,5.119)(550.0,2.520)(423.9,2.816)(454.3,5.271)(568.7,3.219)(565.6,5.494)(508.6,5.596)(483.3,5.660)(549.2,2.449)};}%
+\only<3>{\costcontour{contour/draw color=cuteal,very thick,forget plot,domain=380:620,y domain=1.8:6.2}{12.1106}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+  \addplot[only marks,mark=o,mark size=1.6pt,cuamber,thick,forget plot] coordinates {(547.8,2.539)(412.7,4.421)(548.0,2.455)(429.7,5.119)(550.0,2.520)(423.9,2.816)(565.6,5.494)(549.2,2.449)};}%
+\only<4>{\costcontour{contour/draw color=cuteal,very thick,forget plot,domain=380:620,y domain=1.8:6.2}{14.3078}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+  \addplot[only marks,mark=o,mark size=1.6pt,cuamber,thick,forget plot] coordinates {(423.9,2.816)(565.6,5.494)};}%
+\only<5>{\costcontour{contour/draw color=cuteal,very thick,forget plot,domain=380:620,y domain=1.8:6.2}{16.7158}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}}%
+          \addplot[only marks,mark=x,mark size=2.6pt,curose,very thick,forget plot] coordinates {(386.4,3.831)(599.2,3.362)(558.5,5.493)(609.5,3.268)(464.5,5.733)(411.0,4.930)(540.4,2.480)(417.4,5.060)(415.1,3.453)(590.4,4.316)};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize \textcolor{cuteal}{teal}: the boundary $p(\vx)=\varepsilon$\\
+      \textcolor{curose}{$\times$}: the 10 faulty validation engines \quad
+      \textcolor{cuamber}{$\circ$}: good engines flagged}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Validation set: 2000 good, 10 faulty}
+        \renewcommand{\arraystretch}{1.1}\setlength{\tabcolsep}{3pt}
+        \begin{tabular}{@{}lcccccc@{}}
+          \toprule
+          $\varepsilon$ & TP & FP & FN & $P$ & $R$ & $F_1$\\
+          \midrule
+          \alert<1>{$10^{-3}$} & \alert<1>{10} & \alert<1>{156} & \alert<1>{0} & \alert<1>{$0.060$} & \alert<1>{$1.0$} & \alert<1>{$0.114$}\\
+          \alert<2>{$10^{-4}$} & \alert<2>{10} & \alert<2>{16} & \alert<2>{0} & \alert<2>{$0.385$} & \alert<2>{$1.0$} & \alert<2>{$0.556$}\\
+          \alert<3>{$3\times10^{-5}$} & \alert<3>{9} & \alert<3>{8} & \alert<3>{1} & \alert<3>{$0.529$} & \alert<3>{$0.9$} & \alert<3>{$0.667$}\\
+          \alert<4>{$10^{-5}$} & \alert<4>{7} & \alert<4>{2} & \alert<4>{3} & \alert<4>{$0.778$} & \alert<4>{$0.7$} & \alert<4>{$0.737$}\\
+          \alert<5>{$3\times10^{-6}$} & \alert<5>{3} & \alert<5>{0} & \alert<5>{7} & \alert<5>{$1.000$} & \alert<5>{$0.3$} & \alert<5>{$0.462$}\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{minipage}[t][7ex][t]{\linewidth}
+\only<1>{$\varepsilon=10^{-3}$: flags 10 of 10 faulty and 156 of 2000 good validation engines. $F_1=0.114$.}%
+\only<2>{$\varepsilon=10^{-4}$: flags 10 of 10 faulty and 16 of 2000 good validation engines. $F_1=0.556$.}%
+\only<3>{$\varepsilon=3\times10^{-5}$: flags 9 of 10 faulty and 8 of 2000 good validation engines. $F_1=0.667$.}%
+\only<4>{$\varepsilon=10^{-5}$: flags 7 of 10 faulty and 2 of 2000 good validation engines. $F_1=0.737$.}%
+\only<5>{$\varepsilon=3\times10^{-6}$: flags 3 of 10 faulty and 0 of 2000 good validation engines. $F_1=0.462$.}%
+      \end{minipage}
+      \begin{keyidea}
+        The boundary of $p(\vx)=\varepsilon$ is an ellipse (the real level set, drawn
+        from the formula). Smaller $\varepsilon$ widens it: fewer false alarms, more
+        missed faults.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Developing and Evaluating a Detector}
+
+\begin{frame}{Real-number evaluation, with a few labels}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{The engines: 10\,000 good, 20 faulty}
+        \footnotesize
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{@{}lll@{}}
+          \toprule
+          set & good & faulty\\
+          \midrule
+          training      & $6000$ & $0$ (assumed)\\
+          cross-validation & $2000$ & $10$\\
+          test          & $2000$ & $10$\\
+          \bottomrule
+        \end{tabular}\par
+        \vspace{1mm}
+        Train on unlabelled, mostly-normal data. Use the few labelled anomalies only to
+        choose $\varepsilon$ (and features), then to report.
+      \end{block}
+      \footnotesize
+      A few anomalies slipping into the training set is harmless: they barely move $\mu$
+      and $\sigma$.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Procedure}
+        \begin{enumerate}
+          \item Fit $p(\vx)$ on the training set.
+          \item On validation, predict $y=1$ if $p(\vx)<\varepsilon$.
+          \item Classes are skewed ($10$ in $2010$): measure $P$, $R$, $F_1$ (Week 6), not
+                accuracy.
+          \item Keep the best-$F_1$ $\varepsilon$: $10^{-5}$, $F_1=0.737$.
+        \end{enumerate}
+      \end{block}
+      \begin{keyidea}[Test set, once]
+        At $\varepsilon=10^{-5}$: TP $=8$, FP $=0$, FN $=2$; precision
+        $1.0$, recall $0.8$, $F_1=0.889$.
+      \end{keyidea}
+      \begin{pitfall}[Very few anomalies]
+        \footnotesize With only $2$ faults, use both for validation and skip the test set
+        --- the result is then optimistic.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Anomaly Detection vs.\ Supervised Learning}
+
+\begin{frame}{If we have some labels, why not train a classifier?}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.35}
+  \begin{tabular}{@{}L{6.6cm}L{6.8cm}@{}}
+    \toprule
+    \textbf{Anomaly detection} & \textbf{Supervised learning}\\
+    \midrule
+    Very few positives ($0$--$20$ is common), many negatives.
+      & Enough positives and negatives to learn both.\\
+    Many \emph{different kinds} of anomaly; future ones may look like none seen so far.
+      & Future positives are likely to resemble the training positives.\\
+    Fraud, where attackers invent new tricks; a never-before-seen engine fault; a
+    misbehaving server.
+      & Spam (the types recur); known manufacturing defects such as scratches; weather;
+      diagnosing a known disease.\\
+    \bottomrule
+  \end{tabular}
+  \vspace{3mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{keyidea}[The difference in one line]
+        A classifier learns what positives look like. An anomaly detector learns what
+        \emph{normal} looks like, and flags anything else.
+      \end{keyidea}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{In practice}
+        Many systems use both: a classifier for the known fraud patterns, an anomaly
+        detector for the unknown ones.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Choosing What Features to Use}
+
+\begin{frame}{Make features look Gaussian}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.56\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[name=h1,ybar,bar width=7pt,width=4.8cm,height=4.0cm,xmin=-0.25,xmax=6.25,
+          ymin=0,title={\scriptsize raw $x$: skewed},tick label style={font=\tiny},
+          ytick=\empty]
+          \addplot[fill=cublue!60,draw=cublue] coordinates {(0.25,176)(0.75,310)(1.25,181)(1.75,139)(2.25,60)(2.75,41)(3.25,29)(3.75,22)(4.25,15)(4.75,4)(5.25,6)(5.75,3)};
+        \end{axis}
+        \begin{axis}[at={(h1.east)},anchor=west,xshift=4mm,ybar,bar width=7pt,width=4.8cm,
+          height=4.0cm,xmin=-3.25,xmax=3.25,ymin=0,title={\scriptsize $\log x$: bell-shaped},
+          tick label style={font=\tiny},ytick=\empty]
+          \addplot[fill=cuteal!60,draw=cuteal] coordinates {(-2.75,1)(-2.25,8)(-1.75,21)(-1.25,63)(-0.75,159)(-0.25,234)(0.25,227)(0.75,171)(1.25,89)(1.75,19)(2.25,6)(2.75,2)};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize 1000 synthetic readings; the raw histogram omits 14 values above 6.}
+    \end{column}
+    \begin{column}{0.4\textwidth}
+      \footnotesize
+      \begin{block}{Why it matters}
+        The algorithm models each feature as a Gaussian. A long right tail makes large but
+        perfectly normal values look improbable, and squeezes the real outliers together.
+      \end{block}
+      \begin{block}{Transformations to try}
+        $\log x$, \ $\log(x+c)$, \ $\sqrt{x}$, \ $x^{1/3}$. Plot the histogram, choose by
+        eye, and apply the \emph{same} transformation to the validation and test sets.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Error analysis: invent the feature that exposes the miss}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize Data-centre computers (synthetic): traffic tracks CPU load}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.4cm,height=4.6cm,xmin=10,xmax=100,ymin=0,ymax=1100,
+          xlabel={CPU load (\%)},ylabel={network traffic},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},scaled y ticks=false]
+          \addplot[only marks,mark=*,mark size=1pt,cublue!60] coordinates {(76.4,673.5)(23.8,276.0)(23.4,248.2)(50.4,500.0)(47.5,483.4)(58.9,541.3)(67.5,686.7)(81.1,703.3)(55.2,517.6)(76.4,780.2)(51.4,512.9)(76.0,824.9)(21.0,229.4)(45.8,389.5)(58.9,569.8)(67.9,768.1)(27.5,301.9)(75.9,764.5)(46.6,489.0)(89.4,986.1)(69.9,663.4)(53.6,534.2)(20.1,204.8)(84.7,887.7)(77.6,708.4)(80.1,864.7)(38.1,384.1)(80.5,821.2)(20.2,189.9)(82.3,748.7)(80.1,857.0)(61.6,624.6)(68.8,706.0)(35.0,328.6)(62.1,721.5)(49.2,509.6)(46.3,436.5)(36.1,341.1)(57.4,483.3)(23.0,243.9)(21.4,186.8)(71.1,810.7)(63.1,667.5)(33.4,379.6)(40.6,338.8)(21.2,197.2)(68.3,663.4)(67.5,643.9)(39.2,373.5)(71.3,662.3)(26.5,222.0)(20.0,210.7)(62.1,625.4)(62.8,583.1)(47.7,494.0)(55.5,508.3)(53.8,506.7)(81.6,824.3)(24.2,246.9)(57.9,534.4)(84.3,835.9)(27.9,288.3)(24.7,252.4)(53.6,521.7)(25.0,252.1)(71.9,703.5)(49.8,570.9)(43.5,423.7)(86.3,723.6)(59.7,600.5)(82.1,832.6)(74.8,770.7)(29.1,269.3)(77.2,723.2)(90.0,1024.8)(66.0,605.7)(24.9,263.0)(37.1,371.6)(24.3,235.9)(85.2,916.5)(34.3,379.6)(60.1,619.0)(61.7,606.8)(54.3,555.3)(56.1,578.5)(37.8,367.6)(68.9,738.5)(43.3,423.6)(68.5,613.7)(25.4,263.3)(37.9,371.6)(22.7,234.3)(75.4,659.8)(24.6,293.6)(71.2,658.1)(36.7,349.2)(34.8,347.8)(21.5,209.0)(74.5,663.3)(65.5,674.4)(28.7,292.8)(32.0,278.9)(83.7,953.0)(49.7,479.8)(35.9,347.1)(85.8,802.4)(75.1,734.1)(22.6,200.2)(59.6,628.1)(20.8,189.9)(39.7,392.2)(36.4,387.1)(79.0,690.9)(56.4,570.3)(71.0,690.6)(20.4,218.7)(77.9,843.9)(64.1,555.0)(24.4,231.7)(82.5,917.4)(57.7,617.6)(80.7,875.5)(86.0,909.2)(43.7,406.2)(36.8,373.7)};
+          \addplot[only marks,mark=x,mark size=3pt,curose,very thick] coordinates {(85,250)};
+          \node[font=\tiny,curose,anchor=east] at (axis cs:82,250) {stuck process?};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{The miss}
+        High CPU with little traffic: a process stuck in a loop. Each feature alone is
+        unremarkable ($1.5\sigma$ and $-1.4\sigma$), so $p(\vx)=4.5\times10^{-6}$ --- lower
+        than for $79$ of the $500$ normal machines. No $\varepsilon$ flags it without
+        flagging those $79$.
+      \end{block}
+      \begin{keyidea}[Add a feature]
+        $x_3=\dfrac{\text{CPU load}}{\text{network traffic}}$. Normal machines:
+        $0.101\pm0.009$. The stuck one: $0.34$, which is $28\sigma$ out. Now
+        $p(\vx)\approx10^{-174}$, against at least $1.1\times10^{-7}$ for every normal
+        machine.
+      \end{keyidea}
+      Error analysis for anomaly detection: find the anomalies $p(\vx)$ missed, ask what
+      makes them unusual, and turn that into a feature.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Model normal data with $p(\vx)$; flag $p(\vx)<\varepsilon$.
+          \item Fit one Gaussian per feature: $\mu_j$ and $\sigma_j^2$ are averages.
+          \item Train on unlabelled data; use a few labelled anomalies to choose
+                $\varepsilon$ by $F_1$, and to test.
+          \item Prefer anomaly detection when positives are rare and varied; supervised
+                learning when they are plentiful and alike.
+          \item Transform skewed features towards a bell shape; build new features from
+                the anomalies you miss.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ p(x;\mu,\sigma^2)=\tfrac{1}{\sqrt{2\pi}\sigma}e^{-(x-\mu)^2/2\sigma^2} \]
+        \[ p(\vx)=\prod_{j=1}^{n}p(x_j;\mu_j,\sigma_j^2) \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Week 8: recommender systems --- collaborative filtering and
+        content-based filtering.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Explain anomaly detection by density estimation, and give three applications.
+          \hfill\clo{4}
+    \item State the Gaussian density. Sketch it for $(\mu,\sigma)=(0,1)$, $(0,0.5)$ and
+          $(3,1)$, and explain why its value can exceed $1$. \hfill\clo{6}
+    \item Give the estimates of $\mu$ and $\sigma^2$ from $m$ examples, and compute them for
+          $x=\{2,4,4,4,5,5,7,9\}$. \hfill\clo{5}
+    \item State the anomaly detection algorithm for $n$ features. What assumption does the
+          product make? \hfill\clo{5}
+    \item Using the lecture's engine parameters, compute $p(\vx)$ for $\vx=(450,3.0)$ and
+          decide whether it is an anomaly at $\varepsilon=10^{-5}$. \hfill\clo{8}
+    \item Explain how the data are split to develop an anomaly detector, and why accuracy
+          is a poor way to choose $\varepsilon$. \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item From the validation table, explain why $F_1$ is best at $\varepsilon=10^{-5}$
+          rather than at the largest or smallest $\varepsilon$. \hfill\clo{5}
+    \item Compare anomaly detection with supervised learning, and classify: (a) detecting
+          new kinds of credit-card fraud; (b) filtering spam; (c) finding dented car
+          panels in a factory with $5000$ labelled dents. \hfill\clo{6}
+    \item Why should features be roughly Gaussian? Name three transformations, and explain
+          why the same one must be applied to every data split. \hfill\clo{5}
+    \item Explain error analysis for anomaly detection using the stuck-process example.
+          \hfill\clo{6}
+    \item Show that the level set $p(\vx)=\varepsilon$ for two features is an ellipse, and
+          find its semi-axes for the engines at $\varepsilon=10^{-5}$. \hfill\clo{8}
+    \item Why do a few anomalies in the training set do little harm? \hfill\clo{4}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a fraud detector.} A mobile financial service in Bangladesh wants
+          to flag unusual transactions. Design the features (including at least one ratio),
+          the training data, how you will obtain labelled frauds for validation, and how
+          you choose $\varepsilon$ given the cost of a blocked genuine payment.
+          \hfill\clo{12}
+    \item \textbf{Design for a garment factory.} Design an anomaly detector for sewing
+          machines using vibration and power sensors, including how you would detect a
+          machine that drifts slowly over weeks. \hfill\clo{10}
+    \item \textbf{Design the decision.} You have $40$ labelled defects and $50\,000$ good
+          circuit boards. Design an experiment to decide between anomaly detection and a
+          supervised classifier. \hfill\clo{12}
+    \item \textbf{Design a feature-transform check.} Design an automatic procedure that
+          picks a transformation for each feature before fitting $p(\vx)$, and a test
+          that it improves validation $F_1$. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S4.4.1--4.4.2} --- Gaussian densities and their
+    parameter estimates; \textbf{\S4.4.2} --- thresholds, sensitivity and specificity.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S1.2.4} --- the Gaussian distribution and its
+    maximum-likelihood estimates; \textbf{\S2.3} --- the multivariate Gaussian, whose
+    level sets are ellipses.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 7): anomaly detection.
+  \end{center}
+\end{frame}
+
+\end{document}

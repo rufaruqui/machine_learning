@@ -1,0 +1,733 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 4, Part 1
+%  Neural Networks: Neurons, Layers, and Forward Propagation
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 4, Part 1]{Neural Networks}
+\subtitle{Neurons, Layers, and Making Predictions by Forward Propagation}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 4 / Part 1]{Week 4 $\cdot$ Part 1}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From one logistic unit to many}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Module 1 gave us}
+        \[ f_{\vw,b}(\vx)=g(\vw\cdot\vx+b),\qquad g(z)=\frac{1}{1+e^{-z}} \]
+        a classifier whose decision boundary is a line --- unless we hand-craft features such
+        as $x_1^2$, $x_1x_2$ to bend it.
+      \end{block}
+      \footnotesize
+      Hand-crafting features does not scale to an image with a million pixels. Module 2 asks:
+      can the model \emph{learn} its own features? A neural network does exactly that, and
+      every one of its units is the logistic regression you already know.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Neurons and the brain --- and where the analogy stops
+          \item Demand prediction: a network as stacked logistic units
+          \item Recognising images: features learned layer by layer
+          \item Inside a layer: notation and computation
+          \item Deeper networks and forward propagation
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize Part 2 turns all of this into code: TensorFlow, then NumPy from scratch,
+      then matrix multiplication.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Neurons and the Brain}
+
+\begin{frame}{A short history}
+  \footnotesize
+  \begin{center}
+  \begin{tikzpicture}[x=1.4cm]
+    \draw[cugray,thick,-{Stealth}] (0,0) -- (10.3,0);
+    \foreach \x/\yr in {0.3/1943,1.6/1958,3.4/1969,5.2/1986,7.0/1998,8.8/2012}{
+      \fill[cuteal] (\x,0) circle (2pt);
+      \node[below=2pt,font=\scriptsize\bfseries,cublue] at (\x,0) {\yr};
+    }
+    \node[above,align=center,font=\scriptsize,text width=1.6cm] at (0.3,0.1) {McCulloch \& Pitts: a logical neuron};
+    \node[above,align=center,font=\scriptsize,text width=1.7cm] at (1.6,0.1) {Rosenblatt's perceptron};
+    \node[above,align=center,font=\scriptsize,text width=1.7cm] at (3.4,0.1) {Minsky \& Papert: limits of one layer};
+    \node[above,align=center,font=\scriptsize,text width=1.8cm] at (5.2,0.1) {Back-propagation popularised};
+    \node[above,align=center,font=\scriptsize,text width=1.7cm] at (7.0,0.1) {LeNet reads cheques};
+    \node[above,align=center,font=\scriptsize,text width=1.8cm] at (8.8,0.1) {AlexNet wins ImageNet};
+  \end{tikzpicture}
+  \end{center}
+  \vspace{1mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Original motivation}
+        Write software that mimics how the brain learns. Interest rose, fell, and rose again
+        --- twice.
+      \end{block}
+      \begin{block}{Today's motivation}
+        Engineering, not biology: networks are simply the most accurate known models for
+        speech, images and text, once there is enough data.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Where they won first}
+        \begin{enumerate}
+          \item Speech recognition
+          \item Computer vision
+          \item Natural-language processing
+        \end{enumerate}
+        and now climate, medicine, advertising, recommendation \dots
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The biological neuron, and the artificial one}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize Biological: dendrites $\to$ cell body $\to$ axon}\par
+      \begin{tikzpicture}[scale=0.85]
+        \fill[cuteal!15,draw=cuteal,thick] (0,0) circle (0.55);
+        \node[font=\tiny,cuteal] at (0,0) {nucleus};
+        \foreach \a in {120,150,180,210,240}{
+          \draw[cuteal,thick] (\a:0.55) -- (\a:1.6);
+          \draw[cuteal] (\a:1.2) -- ++(\a+25:0.35);
+        }
+        \draw[cuteal,very thick] (0.55,0) -- (3.0,0);
+        \foreach \a in {-30,0,30}{\draw[cuteal,thick] (3.0,0) -- ++(\a:0.5);}
+        \node[font=\tiny,cugray] at (-1.5,1.25) {dendrites (inputs)};
+        \node[font=\tiny,cugray] at (1.8,0.25) {axon (output)};
+      \end{tikzpicture}
+      \vspace{1mm}
+
+      \centering {\scriptsize Artificial: inputs $\to$ weighted sum $\to$ activation}\par
+      \begin{tikzpicture}[node distance=5mm]
+        \node[inneuron] (x1) at (0,0.6) {$x_1$};
+        \node[inneuron] (x2) at (0,0) {$x_2$};
+        \node[inneuron] (x3) at (0,-0.6) {$x_3$};
+        \node[neuron,minimum size=9mm] (n) at (2.2,0) {$g(z)$};
+        \node[font=\scriptsize] (a) at (3.8,0) {$a$};
+        \foreach \i in {1,2,3}{\draw[synapse] (x\i) -- node[pos=0.35,above,font=\tiny,sloped]{$w_\i$} (n);}
+        \draw[synapse] (n) -- (a);
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Artificial neuron (unit)]
+        \small
+        \[ z=\vw\cdot\vx+b,\qquad a=g(z) \]
+        $a$ is the unit's \textbf{activation} --- the number it sends on. With the sigmoid
+        $g$, one unit \emph{is} logistic regression.
+      \end{defnbox}
+      \begin{pitfall}[A loose analogy]
+        \small
+        We still do not know how the brain learns. Modern networks owe their success to
+        mathematics and data, not to fidelity to neurobiology. Do not argue from biology
+        when designing a model.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Why now? Scale}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize Schematic --- not measured data}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=7.2cm,height=4.8cm,xlabel={amount of data},ylabel={performance},
+          xmin=0,xmax=10,ymin=0,ymax=10,xtick=\empty,ytick=\empty,
+          label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.98,0.04)},anchor=south east,draw=none,fill=white},
+          legend cell align=left]
+          \addplot[cugray,very thick,domain=0:10,samples=60]{3.3*(1-exp(-0.9*x))};
+          \addlegendentry{logistic / linear regression}
+          \addplot[cuteal,very thick,domain=0:10,samples=60]{5.8*(1-exp(-0.55*x))};
+          \addlegendentry{small network}
+          \addplot[cuamber,very thick,domain=0:10,samples=60]{7.4*(1-exp(-0.38*x))};
+          \addlegendentry{medium network}
+          \addplot[curose,very thick,domain=0:10,samples=60]{9.4*(1-exp(-0.26*x))};
+          \addlegendentry{large network}
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Two things changed}
+        \begin{itemize}
+          \item \textbf{Data.} Digitised records, phones and the web made labelled data
+                abundant.
+          \item \textbf{Compute.} GPUs made the matrix arithmetic of large networks cheap
+                --- the subject of Part 2.
+        \end{itemize}
+      \end{block}
+      \begin{keyidea}
+        Classical models plateau as data grows. Larger networks keep improving --- so, given
+        the data, a bigger network is often the most reliable route to better accuracy.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Demand Prediction}
+
+\begin{frame}{One neuron: will this T-shirt be a top seller?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize $x$ = price; $y=1$ if a top seller}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.2cm,height=3.9cm,xlabel={price (Tk)},ylabel={$a$},
+          xmin=0,xmax=1000,ymin=-0.1,ymax=1.1,ytick={0,0.5,1},
+          tick label style={font=\scriptsize},label style={font=\scriptsize}]
+          \addplot[only marks,mark=*,mark size=1.6pt,cublue,forget plot]
+            coordinates {(150,1)(220,1)(300,1)(380,1)(450,1)(560,0)(640,0)(720,0)(850,0)(930,0)};
+          \addplot[curose,very thick,domain=0:1000,samples=80,forget plot]
+            {1/(1+exp(0.02*(x-500)))};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \[ a = f(x) = \frac{1}{1+e^{-(wx+b)}} \]
+      \footnotesize
+      \begin{center}
+      \begin{tikzpicture}
+        \node[inneuron] (x) at (0,0) {$x$};
+        \node[neuron,minimum size=8mm] (n) at (2,0) {};
+        \node[font=\scriptsize] (a) at (3.5,0) {$a$};
+        \draw[synapse] (x) -- node[above,font=\tiny]{price} (n);
+        \draw[synapse] (n) -- node[above,font=\tiny]{prob.} (a);
+      \end{tikzpicture}
+      \end{center}
+      \begin{block}{Vocabulary}
+        The circle is a \textbf{neuron}. Its output $a$ is its \textbf{activation} --- here
+        the estimated probability of being a top seller. The term comes from biology: how
+        strongly a neuron ``fires''.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Four features, three intermediate ideas, one answer}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.56\textwidth}
+      \centering
+      \begin{tikzpicture}[x=2.1cm,y=1.05cm]
+        \foreach \n/\lab [count=\i] in {price,shipping cost,marketing,material}{
+          \node[inneuron] (x\i) at (0,-\i) {};
+          \node[left,font=\tiny] at (x\i.west) {\lab};
+        }
+        \foreach \n [count=\j] in {affordability,awareness,perceived quality}{
+          \node[neuron] (h\j) at (1,-\j-0.5) {};
+          \node[above=1pt,font=\tiny,cublue,fill=white,inner sep=1pt] at (h\j.north) {\n};
+        }
+        \node[outneuron] (o) at (2,-2.5) {};
+        \node[right,font=\tiny] (p) at (2.3,-2.5) {$P(\text{top seller})$};
+        \draw[synapse] (o) -- (p);
+        \foreach \i in {1,...,4}{\foreach \j in {1,2,3}{\draw[synapse] (x\i) -- (h\j);}}
+        \foreach \j in {1,2,3}{\draw[synapse] (h\j) -- (o);}
+        \node[font=\tiny,cugray] at (0,-5) {input layer $\vx$};
+        \node[font=\tiny,cugray] at (1,-5) {hidden layer $\va$};
+        \node[font=\tiny,cugray] at (2,-5) {output layer};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \footnotesize
+      \begin{block}{How to read it}
+        We \emph{imagine} that the hidden units estimate affordability (from price and
+        shipping), awareness (from marketing), and perceived quality (from price and
+        material). The output unit is a logistic regression on those three numbers.
+      \end{block}
+      \begin{keyidea}[Full connectivity]
+        In practice every hidden unit sees \emph{every} input. We do not wire affordability
+        to price by hand --- training decides which inputs each unit should use, by setting
+        the weights.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The network learns its own features}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Week 2: feature engineering}
+        \footnotesize
+        You decided the useful feature was $\text{area}=\text{frontage}\times\text{depth}$,
+        computed it, and handed it to linear regression.
+      \end{block}
+      \begin{block}{Week 4: feature learning}
+        \footnotesize
+        The hidden layer computes features $\va$ from $\vx$; the output layer is a logistic
+        regression on $\va$. What the features \emph{are} is chosen by gradient descent, not
+        by you.
+      \end{block}
+      \begin{center}
+        \footnotesize
+        \begin{tikzpicture}[node distance=4mm]
+          \node[draw=cuteal,fill=cuteal!12,rounded corners,inner sep=3pt] (x) {$\vx$};
+          \node[draw=cublue,fill=culight,rounded corners,inner sep=3pt,right=8mm of x] (a) {$\va$};
+          \node[draw=cuamber,fill=cuamber!15,rounded corners,inner sep=3pt,right=8mm of a] (y) {$a\approx P(y=1)$};
+          \draw[synapse] (x) -- node[above,font=\tiny]{layer 1} (a);
+          \draw[synapse] (a) -- node[above,font=\tiny]{layer 2} (y);
+        \end{tikzpicture}
+      \end{center}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Architecture]
+        \small
+        The choices you make \emph{before} training: how many hidden layers, and how many
+        units in each. Weights and biases are what training then learns.
+      \end{defnbox}
+      \footnotesize
+      \textbf{Terminology.}
+      \begin{itemize}
+        \item \textbf{Input layer}: the feature vector $\vx$ --- it computes nothing.
+        \item \textbf{Hidden layer}: its correct values never appear in the training set,
+              which contains only $(\vx,y)$.
+        \item \textbf{Output layer}: produces the prediction.
+        \item A network with several hidden layers is a \textbf{multilayer perceptron}.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Example: Recognising Images}
+
+\begin{frame}{An image is a long vector}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.4\textwidth}
+      \centering
+      \begin{tikzpicture}[scale=0.32]
+        \foreach \i in {0,...,7}{\foreach \j in {0,...,7}{
+          \pgfmathsetmacro{\v}{mod(37*\i+11*\j+5*\i*\j,90)}
+          \fill[cublue!\v] (\i,\j) rectangle ++(1,1);
+        }}
+        \draw[cugray] (0,0) grid (8,8);
+        \node[font=\tiny,cugray] at (4,-0.8) {each cell: brightness $0$--$255$};
+      \end{tikzpicture}
+      \vspace{1mm}
+
+      \footnotesize
+      A $1000\times1000$ greyscale photograph is a vector
+      \[ \vx\in\R^{1\,000\,000}. \]
+      A colour photo is three times that.
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \begin{block}{Face recognition}
+        \footnotesize
+        Input: the pixel vector $\vx$. Output: the identity of the person. Logistic
+        regression on raw pixels fails --- no single pixel says anything about identity, and
+        no human can engineer a million-pixel feature set.
+      \end{block}
+      \begin{keyidea}[What a trained network turns out to compute]
+        \footnotesize
+        Inspecting a trained face network, researchers find:
+        \begin{enumerate}
+          \item first hidden layer: short \textbf{edges} at various angles;
+          \item second: \textbf{parts} --- an eye, the corner of a nose;
+          \item third: coarse \textbf{whole-face} shapes.
+        \end{enumerate}
+        Nobody told it to look for edges. Each layer builds on the one before.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Increasingly abstract features, learned from data}
+  \centering
+  \begin{tikzpicture}[
+      stage/.style={draw=cublue,fill=culight,rounded corners,minimum width=2.3cm,
+                    minimum height=1.6cm,align=center,font=\scriptsize}]
+    \node[stage,draw=cuteal,fill=cuteal!10] (in) at (0,0) {pixels\\[2pt]$\vx$};
+    \node[stage] (l1) at (3.2,0) {edges\\[2pt]small windows};
+    \node[stage] (l2) at (6.4,0) {parts\\[2pt]larger windows};
+    \node[stage] (l3) at (9.6,0) {objects\\[2pt]whole image};
+    \node[stage,draw=cuamber,fill=cuamber!12] (out) at (12.6,0) {answer\\[2pt]$P(\text{person }k)$};
+    \foreach \a/\b in {in/l1,l1/l2,l2/l3,l3/out}{\draw[synapse,thick] (\a) -- (\b);}
+    % edge glyphs
+    \foreach \ang [count=\k] in {0,45,90,135}{
+      \draw[cublue,thick] ($(l1.south)+(-0.9+0.6*\k-0.6,-0.45)$) -- ++(\ang:0.35);
+    }
+    \draw[cublue,thick] ($(l2.south)+(-0.5,-0.55)$) circle (0.15);
+    \draw[cublue,thick] ($(l2.south)+(0.3,-0.55)$) arc (180:360:0.25 and 0.12);
+    \draw[cublue,thick] ($(l3.south)+(0,-0.6)$) ellipse (0.3 and 0.38);
+  \end{tikzpicture}
+  \vspace{4mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Same architecture, different data}
+        \footnotesize
+        Train the identical network on photographs of cars and the hidden layers learn
+        wheels and windows instead of eyes and noses. The architecture is generic; the
+        features come from the data.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{pitfall}[Interpretations are post hoc]
+        \footnotesize
+        ``Layer 2 detects eyes'' is a description we attach after training, by visualising
+        what excites each unit. It is not a guarantee, and many units have no tidy label.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Inside a Neural Network Layer}
+
+\begin{frame}{Layer 1, unit by unit}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.4\textwidth}
+      \centering
+      \begin{tikzpicture}[x=1.9cm,y=0.95cm]
+        \node[inneuron] (x1) at (0,-1) {$x_1$};
+        \node[inneuron] (x2) at (0,-2) {$x_2$};
+        \foreach \j in {1,2,3}{\node[neuron,minimum size=8mm] (h\j) at (1,-\j+0.5) {\tiny $a^{[1]}_{\j}$};}
+        \node[outneuron,minimum size=8mm] (o) at (2,-1.5) {\tiny $a^{[2]}$};
+        \foreach \i in {1,2}{\foreach \j in {1,2,3}{\draw[synapse] (x\i) -- (h\j);}}
+        \foreach \j in {1,2,3}{\draw[synapse] (h\j) -- (o);}
+        \node[font=\tiny,cugray] at (0,-3.4) {layer 0};
+        \node[font=\tiny,cugray] at (1,-3.4) {layer 1};
+        \node[font=\tiny,cugray] at (2,-3.4) {layer 2};
+      \end{tikzpicture}
+      \vspace{1mm}
+
+      \footnotesize
+      Each hidden unit $j$ has its own parameters $\vw^{[1]}_j$, $b^{[1]}_j$, and is a
+      logistic regression on $\vx$.
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \small
+      \begin{align*}
+        a^{[1]}_1 &= g\bigl(\vw^{[1]}_1\cdot\vx + b^{[1]}_1\bigr)\\
+        a^{[1]}_2 &= g\bigl(\vw^{[1]}_2\cdot\vx + b^{[1]}_2\bigr)\\
+        a^{[1]}_3 &= g\bigl(\vw^{[1]}_3\cdot\vx + b^{[1]}_3\bigr)
+      \end{align*}
+      \vspace{-3mm}
+      \[ \va^{[1]} = \bigl[a^{[1]}_1,\ a^{[1]}_2,\ a^{[1]}_3\bigr] \]
+      \footnotesize
+      The output layer then does the same thing to $\va^{[1]}$:
+      \[ a^{[2]} = g\bigl(\vw^{[2]}_1\cdot\va^{[1]} + b^{[2]}_1\bigr) \]
+      \textbf{Optional final step:} predict $\yhat=1$ if $a^{[2]}\ge 0.5$, else $\yhat=0$ ---
+      exactly as in Week 3.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Notation: superscripts in square brackets}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Layer notation]
+        \small
+        \begin{itemize}
+          \item $[l]$ --- a quantity belonging to \textbf{layer} $l$.
+          \item $(i)$ --- belonging to \textbf{training example} $i$ (as before).
+          \item subscript $j$ --- \textbf{unit} $j$ within the layer.
+        \end{itemize}
+        So $a^{[2](7)}_3$ is the activation of unit 3 of layer 2 on example 7.
+      \end{defnbox}
+      \footnotesize
+      By convention $\va^{[0]}=\vx$, so the input is ``layer 0''. A network is said to have
+      $L$ layers when it has $L-1$ hidden layers and one output layer: the input layer is not
+      counted.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[The one equation of this lecture]
+        \[ a^{[l]}_j = g\bigl(\vw^{[l]}_j\cdot\va^{[l-1]} + b^{[l]}_j\bigr) \]
+        \footnotesize
+        Unit $j$ of layer $l$ takes the \emph{whole} activation vector of the previous layer,
+        forms a weighted sum, adds its bias, and applies the activation function $g$.
+      \end{keyidea}
+      \footnotesize
+      For now $g$ is the sigmoid. Week 5 introduces other choices of $g$; in this
+      context $g$ is called the \textbf{activation function}.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{How many parameters does a layer have?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Counting}
+        A layer with $n_{\text{in}}$ inputs and $n_{\text{out}}$ units has
+        \[ \underbrace{n_{\text{in}}\times n_{\text{out}}}_{\text{weights}}
+           + \underbrace{n_{\text{out}}}_{\text{biases}} \]
+        parameters: each unit needs one weight per input, plus its own bias.
+      \end{block}
+      \footnotesize
+      \textbf{Demand network}, $4\to3\to1$:\\
+      layer 1: $4\cdot3+3=15$; \ layer 2: $3\cdot1+1=4$; \ total $19$.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{pitfall}[Count the inputs of \emph{this} layer]
+        \small
+        Layer 2's units see the $3$ activations of layer 1, not the $4$ original features. A
+        frequent exam error is to use $n$ (the number of features) for every layer.
+      \end{pitfall}
+      \footnotesize
+      Parameter count grows with the \emph{product} of adjacent layer widths --- which is why
+      a fully connected first layer on a million-pixel image is expensive, and why vision
+      networks use other layer types (Week 5).
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{More Complex Networks and Forward Propagation}
+
+\begin{frame}{A deeper network}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.55\textwidth}
+      \centering
+      \begin{tikzpicture}[x=1.45cm,y=0.62cm]
+        \foreach \i in {1,...,4}{\node[inneuron,minimum size=4.5mm] (x\i) at (0,-\i-0.5) {};}
+        \foreach \i in {1,...,5}{\node[neuron,minimum size=4.5mm] (a\i) at (1,-\i) {};}
+        \foreach \i in {1,...,4}{\node[neuron,minimum size=4.5mm] (b\i) at (2,-\i-0.5) {};}
+        \foreach \i in {1,...,3}{\node[neuron,minimum size=4.5mm] (c\i) at (3,-\i-1) {};}
+        \node[outneuron,minimum size=4.5mm] (o) at (4,-3) {};
+        \foreach \i in {1,...,4}{\foreach \j in {1,...,5}{\draw[synapse,cugray!35] (x\i)--(a\j);}}
+        \foreach \i in {1,...,5}{\foreach \j in {1,...,4}{\draw[synapse,cugray!35] (a\i)--(b\j);}}
+        \foreach \i in {1,...,4}{\foreach \j in {1,...,3}{\draw[synapse,cugray!35] (b\i)--(c\j);}}
+        \foreach \i in {1,...,3}{\draw[synapse,cugray!35] (c\i)--(o);}
+        \foreach \x/\l in {0/{$\vx=\va^{[0]}$},1/{$\va^{[1]}$},2/{$\va^{[2]}$},3/{$\va^{[3]}$},4/{$a^{[4]}$}}{
+          \node[font=\tiny] at (\x,-6.3) {\l};}
+        \foreach \x/\l in {1/layer 1,2/layer 2,3/layer 3,4/layer 4}{
+          \node[font=\tiny,cugray] at (\x,-0.1) {\l};}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \footnotesize
+      \begin{block}{Four layers}
+        Three hidden layers and one output layer --- the input is not counted.
+      \end{block}
+      \begin{block}{Zoom into layer 3, unit 2}
+        \[ a^{[3]}_2 = g\bigl(\vw^{[3]}_2\cdot\va^{[2]} + b^{[3]}_2\bigr) \]
+        $\vw^{[3]}_2$ has $4$ entries, because layer 2 has $4$ units.
+      \end{block}
+      \begin{keyidea}
+        Every layer takes a vector in and gives a vector out. Stacking layers is composing
+        functions:
+        $f(\vx)=g^{[4]}\bigl(g^{[3]}\bigl(g^{[2]}\bigl(g^{[1]}(\vx)\bigr)\bigr)\bigr)$.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Handwritten digits: 0 or 1?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.36\textwidth}
+      \centering
+      \begin{tikzpicture}[scale=0.3]
+        \foreach \i in {0,...,7}{\foreach \j in {0,...,7}{\fill[white] (\i,\j) rectangle ++(1,1);}}
+        \foreach \c in {(3,1),(3,2),(3,3),(3,4),(3,5),(3,6),(4,1),(4,2),(4,3),(4,4),(4,5),(4,6),(2,5),(4,7),(3,7)}{
+          \fill[cublue] \c rectangle ++(1,1);}
+        \draw[cugray!60] (0,0) grid (8,8);
+      \end{tikzpicture}\par
+      {\scriptsize an $8\times8$ ``1'': $\vx\in\R^{64}$}
+      \vspace{2mm}
+
+      \begin{tikzpicture}[node distance=3mm,
+          lay/.style={draw=cublue,fill=culight,rounded corners,font=\tiny,
+                      minimum height=5mm,inner sep=2pt}]
+        \node[lay,draw=cuteal,fill=cuteal!12] (x) {64};
+        \node[lay,right=of x] (l1) {25};
+        \node[lay,right=of l1] (l2) {15};
+        \node[lay,right=of l2,draw=cuamber,fill=cuamber!15] (l3) {1};
+        \foreach \a/\b in {x/l1,l1/l2,l2/l3}{\draw[synapse] (\a)--(\b);}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.6\textwidth}
+      \footnotesize
+      \begin{block}{Forward propagation}
+        \vspace{-2mm}
+        \begin{align*}
+          \va^{[1]} &= g\bigl(\vw^{[1]}_j\cdot\vx + b^{[1]}_j\bigr)_{j=1..25}
+             && \text{25 numbers}\\
+          \va^{[2]} &= g\bigl(\vw^{[2]}_j\cdot\va^{[1]} + b^{[2]}_j\bigr)_{j=1..15}
+             && \text{15 numbers}\\
+          a^{[3]} &= g\bigl(\vw^{[3]}_1\cdot\va^{[2]} + b^{[3]}_1\bigr)
+             && \text{1 number}
+        \end{align*}
+        \vspace{-4mm}
+
+        $f(\vx)=a^{[3]}$; predict ``1'' if $a^{[3]}\ge0.5$.
+      \end{block}
+      \begin{keyidea}[Inference]
+        Computing activations left to right, input to output, is \textbf{forward
+        propagation}. It is all that \emph{inference} --- prediction with a trained network
+        --- requires. Learning the weights uses \emph{backward} propagation (Week 5).
+      \end{keyidea}
+      Parameters: $64\cdot25+25=1625$, \ $25\cdot15+15=390$, \ $15+1=16$; \ total $2031$.\par
+      Layers usually narrow towards the output.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Forward propagation by hand: a $2\to3\to1$ network}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.4\textwidth}
+      \begin{block}{Parameters}
+        Layer 1:\vspace{-1mm}
+        \[ \vw^{[1]}_1=\begin{bmatrix}1\\2\end{bmatrix},\
+           \vw^{[1]}_2=\begin{bmatrix}-3\\4\end{bmatrix},\
+           \vw^{[1]}_3=\begin{bmatrix}5\\-6\end{bmatrix} \]
+        \vspace{-2mm}
+        \[ b^{[1]}_1=-1,\quad b^{[1]}_2=1,\quad b^{[1]}_3=2 \]
+        Layer 2:\vspace{-1mm}
+        \[ \vw^{[2]}_1=[\,2,\,-1,\,-3\,],\quad b^{[2]}_1=0.5 \]
+      \end{block}
+      Input: $\vx=[1,\,2]$.
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \renewcommand{\arraystretch}{1.2}
+      \begin{tabular}{@{}lll@{}}
+        \toprule
+        unit & $z = \vw\cdot\va_{\text{in}}+b$ & $a=g(z)$\\
+        \midrule
+        $a^{[1]}_1$ & $1\cdot1+2\cdot2-1=4$       & $0.9820$\\
+        $a^{[1]}_2$ & $-3\cdot1+4\cdot2+1=6$      & $0.9975$\\
+        $a^{[1]}_3$ & $5\cdot1-6\cdot2+2=-5$      & $0.0067$\\
+        \midrule
+        $a^{[2]}$   & $2(0.9820)-0.9975-3(0.0067)+0.5$ & \\
+                    & $\;=1.9640-0.9975-0.0201+0.5$ & \\
+                    & $\;=1.4464$                       & $\mathbf{0.8094}$\\
+        \bottomrule
+      \end{tabular}
+      \vspace{1mm}
+
+      $a^{[2]}=0.8094\ge0.5$, so $\yhat=1$.\par
+      \vspace{1mm}
+      For $\vx=[-1,-1]$: $\vz^{[1]}=[-4,0,3]$, $\va^{[1]}=[0.0180,0.5000,0.9526]$,
+      $z^{[2]}=-2.8217$, $a^{[2]}=0.0562$, so $\yhat=0$.
+      \begin{pitfall}[Sanity anchor]
+        \footnotesize $g(0)=0.5$ exactly, $g(4)\approx0.982$, $g(-5)\approx0.007$. Check
+        hand calculations against these before trusting a long chain.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item A unit computes $a=g(\vw\cdot\va_{\text{in}}+b)$ --- a logistic regression.
+          \item A layer is many units sharing the same input vector; it maps a vector to a
+                vector.
+          \item Hidden layers compute features that training, not the designer, chooses.
+          \item Deeper layers build more abstract features from earlier ones.
+          \item Forward propagation: compute $\va^{[1]},\va^{[2]},\dots$ left to right.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ a^{[l]}_j = g\bigl(\vw^{[l]}_j\cdot\va^{[l-1]} + b^{[l]}_j\bigr),\quad \va^{[0]}=\vx \]
+        \[ \#\text{params} = n_{\text{in}}\,n_{\text{out}}+n_{\text{out}} \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Part 2: the same computation in TensorFlow, then in NumPy from scratch,
+        and finally as a single matrix multiplication.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Describe the artificial neuron: its inputs, parameters, computation and output.
+          Explain why a single sigmoid unit is identical to logistic regression. \hfill\clo{5}
+    \item Give two reasons neural networks became dominant after about 2010, and explain the
+          performance-versus-data picture that motivates large networks. \hfill\clo{5}
+    \item Using the demand-prediction example, explain the terms input layer, hidden layer,
+          output layer and activation. Why is a hidden layer called ``hidden''? \hfill\clo{6}
+    \item Contrast feature engineering (Week 2) with feature learning. What does the designer
+          still choose when using a neural network? \hfill\clo{6}
+    \item Describe what the successive hidden layers of a face-recognition network are
+          typically found to compute, and explain why such descriptions are post hoc.
+          \hfill\clo{5}
+    \item Explain the meaning of each index in $a^{[2](7)}_3$, and state the general
+          activation equation for unit $j$ of layer $l$. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item How many layers does a network with input $\vx$, three hidden layers and one output
+          unit have? State the convention you use. \hfill\clo{4}
+    \item A network has layer sizes $64\to25\to15\to1$. Compute the number of parameters in
+          each layer and in total. Show your working. \hfill\clo{6}
+    \item What is forward propagation, and why is it all that is needed for inference? What
+          additional computation does training require? \hfill\clo{5}
+    \item For the $2\to3\to1$ network on the worked-example slide, compute $a^{[2]}$ for
+          $\vx=[0,0]$ and state the prediction. \hfill\clo{8}
+    \item Write the output of a three-layer network as a composition of functions, and
+          explain why each layer can be viewed as a feature transformation for the next.
+          \hfill\clo{6}
+    \item In the worked example, $a^{[1]}_2$ is near $1$ for both inputs shown. What does that
+          suggest about how useful unit 2 is for distinguishing them? \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a demand model.} A Chattogram garment exporter wants to predict
+          whether a new design will sell above 10\,000 units. Propose the input features, an
+          architecture (number of layers and units) and the meaning you hope some hidden units
+          will acquire. Justify why a network is better here than hand-engineered logistic
+          regression --- or argue that it is not. \hfill\clo{12}
+    \item \textbf{Design for a parameter budget.} A microcontroller can store at most $5000$
+          parameters. Design a network for $28\times28$ greyscale digit images (0 vs.\ 1)
+          that fits, and show the count. What do you give up to fit? \hfill\clo{10}
+    \item \textbf{Design a check for an inference engine.} You inherit code that claims to do
+          forward propagation. Design three hand-computable test cases that would expose,
+          respectively: a missing bias, the wrong previous-layer input, and a missing
+          activation function. \hfill\clo{12}
+    \item \textbf{Design an interpretation study.} A colleague claims hidden unit 7 of a
+          trained X-ray classifier ``detects fractures''. Design an experiment to support or
+          refute the claim, and state what result would refute it. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S10.1--10.2} --- single-layer neural networks, hidden
+    units as learned features, and multilayer networks on the MNIST digits.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S5.1} --- feed-forward network functions: the
+    two-layer network written out unit by unit, and forward propagation.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 4): neurons and layers; coffee roasting in TensorFlow and in NumPy;
+    practice lab on neural networks for binary classification.\\
+    Practice quizzes: \emph{Neural networks intuition}; \emph{Neural network model}.
+  \end{center}
+\end{frame}
+
+\end{document}

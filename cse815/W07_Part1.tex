@@ -1,0 +1,790 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 3, Week 7, Part 1
+%  Unsupervised Learning: Clustering with K-means
+%  (k-means frames are step-by-step beamer overlays generated from a
+%   real run; press "next" to advance one half-iteration)
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 7, Part 1]{Clustering}
+\subtitle{The K-means Algorithm, Its Objective, Initialisation, and Choosing $K$}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 7 / Part 1]{Week 7 $\cdot$ Part 1}
+
+\pgfplotsset{kmaxis/.style={width=7.0cm,height=5.6cm,xmin=-1,xmax=11,ymin=0,ymax=11.3,
+  xtick=\empty,ytick=\empty,xlabel={$x_1$},ylabel={$x_2$},label style={font=\scriptsize}}}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{Module 3: learning without labels}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Modules 1 and 2}
+        \footnotesize
+        Every training example came with an answer: $(\vx^{(i)},y^{(i)})$. The model
+        learned to map $\vx$ to $y$ --- \textbf{supervised} learning.
+      \end{block}
+      \begin{block}{Module 3}
+        \footnotesize
+        The data are only $\vx^{(1)},\dots,\vx^{(m)}$. There is no $y$ to predict. The task
+        is to find \emph{structure}: groups, unusual points, hidden factors ---
+        \textbf{unsupervised} learning (Week 1's definition).
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item What is clustering?
+          \item K-means, watched step by step
+          \item The algorithm, by hand
+          \item The optimisation objective
+          \item Initialising K-means
+          \item Choosing the number of clusters
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize Part 2: anomaly detection, the other unsupervised workhorse of this
+      week. \textcolor{cugray}{Several frames are animations: advance them one click at a
+      time.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{What Is Clustering?}
+
+\begin{frame}{Labels or no labels}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[kmaxis,width=6.0cm,height=4.8cm,
+          title={\scriptsize the same 60 points, with no labels}]
+          \addplot[only marks,mark=*,mark size=1.5pt,cugray] coordinates {(8.37,8.81)(2.30,6.32)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(3.82,8.17)(9.65,7.69)(7.59,5.90)(1.13,8.00)(4.62,1.98)(3.64,2.70)(4.99,2.42)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(9.65,7.77)(3.86,7.49)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(1.95,6.40)(4.68,2.83)(-0.27,7.27)(6.68,3.24)(2.56,7.71)(3.12,8.66)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(2.00,6.07)(8.30,7.42)(5.43,0.91)(3.94,7.64)(1.55,5.48)(3.15,7.54)(7.49,3.46)(1.73,6.40)(7.89,9.87)(6.57,2.67)(7.90,9.31)(4.29,4.42)(6.42,8.55)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(1.57,10.23)(5.46,1.48)(0.18,8.59)(8.62,7.17)(1.31,7.81)(4.67,3.93)};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{defnbox}[Clustering]
+        \small Given unlabelled data, find groups --- \textbf{clusters} --- of points that are
+        similar to each other and different from points in other groups.
+      \end{defnbox}
+      \begin{block}{Where it is used}
+        \begin{itemize}
+          \item Grouping similar news articles.
+          \item Market segmentation: customers who buy alike.
+          \item DNA analysis; grouping stars into galaxies.
+        \end{itemize}
+      \end{block}
+      \begin{keyidea}
+        You see three groups at a glance. K-means finds them --- in any number of
+        dimensions.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{K-means, Step by Step}
+
+\begin{frame}{Watch K-means work ($K=3$)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[kmaxis]
+\only<1>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cugray!55] coordinates {(8.37,8.81)(2.30,6.32)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(3.82,8.17)(9.65,7.69)(7.59,5.90)(1.13,8.00)(4.62,1.98)(3.64,2.70)(4.99,2.42)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(9.65,7.77)(3.86,7.49)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(1.95,6.40)(4.68,2.83)(-0.27,7.27)(6.68,3.24)(2.56,7.71)(3.12,8.66)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(2.00,6.07)(8.30,7.42)(5.43,0.91)(3.94,7.64)(1.55,5.48)(3.15,7.54)(7.49,3.46)(1.73,6.40)(7.89,9.87)(6.57,2.67)(7.90,9.31)(4.29,4.42)(6.42,8.55)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(1.57,10.23)(5.46,1.48)(0.18,8.59)(8.62,7.17)(1.31,7.81)(4.67,3.93)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.554,5.483)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(1.574,10.232)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(7.486,3.456)};}%
+\only<2>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.64,2.70)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(4.29,4.42)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.12,8.66)(7.89,9.87)(6.42,8.55)(1.57,10.23)(0.18,8.59)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(7.90,9.31)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.554,5.483)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(1.574,10.232)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(7.486,3.456)};}%
+\only<3>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.64,2.70)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(4.29,4.42)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.12,8.66)(7.89,9.87)(6.42,8.55)(1.57,10.23)(0.18,8.59)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(7.90,9.31)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.463,6.405)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(3.255,8.993)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.790,4.976)};}%
+\only<4>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(3.12,8.66)(3.94,7.64)(7.89,9.87)(6.42,8.55)(1.57,10.23)(0.18,8.59)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(7.90,9.31)(4.29,4.42)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.463,6.405)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(3.255,8.993)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.790,4.976)};}%
+\only<5>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(3.12,8.66)(3.94,7.64)(7.89,9.87)(6.42,8.55)(1.57,10.23)(0.18,8.59)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(7.90,9.31)(4.29,4.42)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.742,6.902)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(3.518,8.849)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.637,4.899)};}%
+\only<6>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.18,9.18)(0.68,9.61)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(1.73,6.40)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(2.61,8.14)(2.04,8.45)(3.86,7.49)(3.12,8.66)(3.94,7.64)(3.15,7.54)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(1.57,10.23)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.742,6.902)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(3.518,8.849)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.637,4.899)};}%
+\only<7>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.18,9.18)(0.68,9.61)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(1.73,6.40)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.42,10.47)(3.82,8.17)(2.61,8.14)(2.04,8.45)(3.86,7.49)(3.12,8.66)(3.94,7.64)(3.15,7.54)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(1.57,10.23)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.359,7.404)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(4.835,8.777)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.559,4.639)};}%
+\only<8>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(3.82,8.17)(3.86,7.49)(3.12,8.66)(7.85,7.66)(3.94,7.64)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.359,7.404)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(4.835,8.777)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.559,4.639)};}%
+\only<9>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(3.82,8.17)(3.86,7.49)(3.12,8.66)(7.85,7.66)(3.94,7.64)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.605,7.701)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(6.485,8.707)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.414,4.301)};}%
+\only<10>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(9.65,7.69)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(7.79,6.04)(6.12,6.02)(4.05,2.91)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(1.605,7.701)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(6.485,8.707)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(6.414,4.301)};}%
+\only<11>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(9.65,7.69)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(7.79,6.04)(6.12,6.02)(4.05,2.91)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.251,8.189)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.567,3.085)};}%
+\only<12>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(6.12,6.02)(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.251,8.189)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.567,3.085)};}%
+\only<13>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(6.12,6.02)(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)(8.192,7.956)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)(5.365,2.810)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.192,7.956)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.365,2.810)};}%
+\only<14>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)(8.192,7.956)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)(5.365,2.810)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.192,7.956)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.365,2.810)};}%
+\only<15>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)(2.021,7.758)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)(8.192,7.956)(8.088,7.859)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)(5.365,2.810)(5.327,2.649)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.088,7.859)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.327,2.649)};}%
+\only<16>{%
+  \addplot[only marks,mark=*,mark size=1.5pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+  \addplot[only marks,mark=square*,mark size=1.5pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+  \addplot[only marks,mark=triangle*,mark size=1.5pt,cuteal!80] coordinates {(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.554,5.483)(2.463,6.405)(1.742,6.902)(1.359,7.404)(1.605,7.701)(2.021,7.758)(2.021,7.758)(2.021,7.758)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(1.574,10.232)(3.255,8.993)(3.518,8.849)(4.835,8.777)(6.485,8.707)(8.251,8.189)(8.192,7.956)(8.088,7.859)};
+  \addplot[cuteal,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(7.486,3.456)(6.790,4.976)(6.637,4.899)(6.559,4.639)(6.414,4.301)(5.567,3.085)(5.365,2.810)(5.327,2.649)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=curose] coordinates {(8.088,7.859)};
+  \addplot[only marks,mark=diamond*,mark size=4pt,draw=black,fill=cuteal] coordinates {(5.327,2.649)};}%
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Step}%
+        \noindent\begin{minipage}[t][11ex][t]{\dimexpr\linewidth-7pt\relax}
+\only<1>{\textbf{Initialise.} Pick $K$ training examples at random as the first centroids $\mu_k$ (diamonds).}%
+\only<2>{\textbf{Iteration 1, assign.} Each point joins its nearest centroid. $J=10.990$.}%
+\only<3>{\textbf{Iteration 1, move.} Each centroid moves to the mean of its points. $J=8.124$.}%
+\only<4>{\textbf{Iteration 2, assign.} Each point joins its nearest centroid. $J=8.062$.}%
+\only<5>{\textbf{Iteration 2, move.} Each centroid moves to the mean of its points. $J=7.896$.}%
+\only<6>{\textbf{Iteration 3, assign.} Each point joins its nearest centroid. $J=7.716$.}%
+\only<7>{\textbf{Iteration 3, move.} Each centroid moves to the mean of its points. $J=7.216$.}%
+\only<8>{\textbf{Iteration 4, assign.} Each point joins its nearest centroid. $J=6.737$.}%
+\only<9>{\textbf{Iteration 4, move.} Each centroid moves to the mean of its points. $J=6.080$.}%
+\only<10>{\textbf{Iteration 5, assign.} Each point joins its nearest centroid. $J=4.575$.}%
+\only<11>{\textbf{Iteration 5, move.} Each centroid moves to the mean of its points. $J=2.714$.}%
+\only<12>{\textbf{Iteration 6, assign.} Each point joins its nearest centroid. $J=2.460$.}%
+\only<13>{\textbf{Iteration 6, move.} Each centroid moves to the mean of its points. $J=2.401$.}%
+\only<14>{\textbf{Iteration 7, assign.} Each point joins its nearest centroid. $J=2.354$.}%
+\only<15>{\textbf{Iteration 7, move.} Each centroid moves to the mean of its points. $J=2.338$.}%
+\only<16>{\textbf{Iteration 8, assign.} No point changes cluster: \alert{converged}. $J=2.338$.}%
+        \end{minipage}%
+      \end{block}
+      \centering {\scriptsize distortion $J$ after each half-step}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=5.8cm,height=3.4cm,xmin=0,xmax=16,ymin=0,ymax=12,
+          xlabel={half-step},tick label style={font=\tiny},label style={font=\tiny},
+          ytick={0,4,8,12}]
+\only<2>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)};}%
+\only<3>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)};}%
+\only<4>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)};}%
+\only<5>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)};}%
+\only<6>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)};}%
+\only<7>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)};}%
+\only<8>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)};}%
+\only<9>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)};}%
+\only<10>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)};}%
+\only<11>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)};}%
+\only<12>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)(11,2.460)};}%
+\only<13>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)(11,2.460)(12,2.401)};}%
+\only<14>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)(11,2.460)(12,2.401)(13,2.354)};}%
+\only<15>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)(11,2.460)(12,2.401)(13,2.354)(14,2.338)};}%
+\only<16>{\addplot[cuamber,very thick,mark=*,mark size=1.2pt] coordinates {(1,10.990)(2,8.124)(3,8.062)(4,7.896)(5,7.716)(6,7.216)(7,6.737)(8,6.080)(9,4.575)(10,2.714)(11,2.460)(12,2.401)(13,2.354)(14,2.338)(15,2.338)};}%
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{What you just watched}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Two steps, repeated}
+        \footnotesize
+        \begin{enumerate}
+          \item \textbf{Assign} every point to its nearest centroid (recolour).
+          \item \textbf{Move} every centroid to the mean of the points assigned to it.
+        \end{enumerate}
+        Stop when an assignment step changes nothing.
+      \end{block}
+      \footnotesize
+      This run started badly. Two of the three random starting points (blue and rose) lay
+      in the top-left group, so teal had to cover both other groups --- 35 of the 60 points.
+      Rose was then pulled across the top one move at a time, its $x_1$ going
+      $1.6\to3.3\to3.5\to4.8\to6.5\to8.3$, until it reached the top-right group. Teal was
+      left with the bottom group, and the clusters settled at $20/20/20$.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{keyidea}[$J$ never goes up]
+        The cost fell at every half-step: from $10.99$ after the first assignment to
+        $2.338$ at convergence. That is no accident --- it is guaranteed, and the next
+        section but one proves it.
+      \end{keyidea}
+      \begin{block}{The numbers}
+        Iterations: $8$. Final centroids:
+        $(2.02,7.76)$, $(8.09,7.86)$, $(5.33,2.65)$.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The K-means Algorithm}
+
+\begin{frame}{K-means, precisely}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \begin{defnbox}[K-means]
+        \small
+        Randomly initialise $K$ cluster centroids $\mu_1,\dots,\mu_K\in\R^n$.\\[2pt]
+        Repeat \{\\[1pt]
+        \hspace*{1em}\textbf{for} $i=1$ to $m$:\\
+        \hspace*{2em}$c^{(i)}:=$ index $k$ of the centroid closest to $\vx^{(i)}$,\\
+        \hspace*{2em}i.e.\ $\displaystyle c^{(i)}=\argmin_k \|\vx^{(i)}-\mu_k\|^2$\\[2pt]
+        \hspace*{1em}\textbf{for} $k=1$ to $K$:\\
+        \hspace*{2em}$\mu_k:=$ mean of the points assigned to cluster $k$\\
+        \}
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Notation}
+        $c^{(i)}\in\{1,\dots,K\}$: the cluster of example $i$.\\
+        $\mu_k\in\R^n$: the centroid of cluster $k$ --- a point in feature space, not a
+        training example.\\
+        $\mu_{c^{(i)}}$: the centroid of the cluster that $\vx^{(i)}$ is in.
+      \end{block}
+      \begin{pitfall}[An empty cluster]
+        \footnotesize If no point is assigned to some $\mu_k$, its mean is $0/0$. Either
+        drop that cluster (continue with $K-1$) or re-initialise it at a random example.
+        In our data, starting all three centroids bunched in one corner produces exactly
+        this.
+      \end{pitfall}
+      Squared distance is used because it is cheaper (no square root) and selects the same
+      nearest centroid.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{By hand: seven points, $K=2$}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=6.4cm,height=5.4cm,xmin=0,xmax=6,ymin=0,ymax=8,
+          xlabel={$x_1$},ylabel={$x_2$},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},clip=false]
+\only<1>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cugray!55] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(3.000,4.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(5.000,7.000)};}%
+\only<2>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(3.000,4.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(5.000,7.000)};}%
+\only<3>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.833,3.583)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(5.000,7.000)};}%
+\only<4>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,5.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(4.50,5.00)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.833,3.583)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(5.000,7.000)};}%
+\only<5>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,5.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(4.50,5.00)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.500,3.300)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.750,6.000)};}%
+\only<6>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(3.50,5.00)(4.50,5.00)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.500,3.300)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.750,6.000)};}%
+\only<7>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)(3.50,4.50)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(3.50,5.00)(4.50,5.00)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.250,2.875)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.333,5.667)};}%
+\only<8>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(2.250,2.875)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.333,5.667)};}%
+\only<9>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)(3.00,4.00)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)(1.833,2.333)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)(4.125,5.375)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(1.833,2.333)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.125,5.375)};}%
+\only<10>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(3.00,4.00)(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)(1.833,2.333)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)(4.125,5.375)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(1.833,2.333)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(4.125,5.375)};}%
+\only<11>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(3.00,4.00)(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)(1.833,2.333)(1.250,1.500)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)(4.125,5.375)(3.900,5.100)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(1.250,1.500)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(3.900,5.100)};}%
+\only<12>{%
+  \addplot[only marks,mark=*,mark size=2.2pt,cublue!80] coordinates {(1.00,1.00)(1.50,2.00)};
+  \addplot[only marks,mark=square*,mark size=2.2pt,curose!80] coordinates {(3.00,4.00)(5.00,7.00)(3.50,5.00)(4.50,5.00)(3.50,4.50)};
+  \addplot[cublue,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(3.000,4.000)(2.833,3.583)(2.500,3.300)(2.250,2.875)(1.833,2.333)(1.250,1.500)};
+  \addplot[curose,thick,dashed,-{Stealth[length=1.6mm]}] coordinates {(5.000,7.000)(5.000,7.000)(4.750,6.000)(4.333,5.667)(4.125,5.375)(3.900,5.100)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=cublue] coordinates {(1.250,1.500)};
+  \addplot[only marks,mark=diamond*,mark size=4.5pt,draw=black,fill=curose] coordinates {(3.900,5.100)};}%
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:1.0,1.0) {A};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:1.5,2.0) {B};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:3.0,4.0) {C};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:5.0,7.0) {D};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:3.5,5.0) {E};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:4.5,5.0) {F};
+\node[font=\tiny,anchor=south west,inner sep=1pt] at (axis cs:3.5,4.5) {G};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Data}
+        A$(1,1)$, B$(1.5,2)$, C$(3,4)$, D$(5,7)$, E$(3.5,5)$, F$(4.5,5)$, G$(3.5,4.5)$.
+        Start: $\mu_1=$ C, $\mu_2=$ D.
+      \end{block}
+      \begin{block}{Step}%
+        \noindent\begin{minipage}[t][12ex][t]{\dimexpr\linewidth-7pt\relax}
+\only<1>{\textbf{Initialise.} Pick $K$ training examples at random as the first centroids $\mu_k$ (diamonds).\par\vspace{1mm}$\mu_1=(3,\ 4)$, $\mu_2=(5,\ 7)$}%
+\only<2>{\textbf{Iteration 1, assign.} Each point joins its nearest centroid. $J=3.464$.\par\vspace{1mm}$\mu_1=(3,\ 4)$, $\mu_2=(5,\ 7)$}%
+\only<3>{\textbf{Iteration 1, move.} Each centroid moves to the mean of its points. $J=3.292$.\par\vspace{1mm}$\mu_1=(2.83,\ 3.58)$, $\mu_2=(5,\ 7)$}%
+\only<4>{\textbf{Iteration 2, assign.} Each point joins its nearest centroid. $J=3.215$.\par\vspace{1mm}$\mu_1=(2.83,\ 3.58)$, $\mu_2=(5,\ 7)$}%
+\only<5>{\textbf{Iteration 2, move.} Each centroid moves to the mean of its points. $J=2.775$.\par\vspace{1mm}$\mu_1=(2.5,\ 3.3)$, $\mu_2=(4.75,\ 6)$}%
+\only<6>{\textbf{Iteration 3, assign.} Each point joins its nearest centroid. $J=2.585$.\par\vspace{1mm}$\mu_1=(2.5,\ 3.3)$, $\mu_2=(4.75,\ 6)$}%
+\only<7>{\textbf{Iteration 3, move.} Each centroid moves to the mean of its points. $J=2.324$.\par\vspace{1mm}$\mu_1=(2.25,\ 2.88)$, $\mu_2=(4.33,\ 5.67)$}%
+\only<8>{\textbf{Iteration 4, assign.} Each point joins its nearest centroid. $J=2.018$.\par\vspace{1mm}$\mu_1=(2.25,\ 2.88)$, $\mu_2=(4.33,\ 5.67)$}%
+\only<9>{\textbf{Iteration 4, move.} Each centroid moves to the mean of its points. $J=1.744$.\par\vspace{1mm}$\mu_1=(1.83,\ 2.33)$, $\mu_2=(4.12,\ 5.38)$}%
+\only<10>{\textbf{Iteration 5, assign.} Each point joins its nearest centroid. $J=1.604$.\par\vspace{1mm}$\mu_1=(1.83,\ 2.33)$, $\mu_2=(4.12,\ 5.38)$}%
+\only<11>{\textbf{Iteration 5, move.} Each centroid moves to the mean of its points. $J=1.218$.\par\vspace{1mm}$\mu_1=(1.25,\ 1.5)$, $\mu_2=(3.9,\ 5.1)$}%
+\only<12>{\textbf{Iteration 6, assign.} No point changes cluster: \alert{converged}. $J=1.218$.\par\vspace{1mm}$\mu_1=(1.25,\ 1.5)$, $\mu_2=(3.9,\ 5.1)$}%
+        \end{minipage}%
+      \end{block}
+      \begin{keyidea}[Check one]
+        First assignment, point F: $\|F-\mu_1\|^2=1.5^2+1^2=3.25$,
+        $\|F-\mu_2\|^2=0.5^2+2^2=4.25$. F goes to cluster 1.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Optimisation Objective}
+
+\begin{frame}{K-means minimises the distortion}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Distortion (cost function)]
+        \small
+        \[ J\bigl(c^{(1)},\dots,c^{(m)},\mu_1,\dots,\mu_K\bigr)
+           =\frac1m\sum_{i=1}^{m}\bigl\|\vx^{(i)}-\mu_{c^{(i)}}\bigr\|^2 \]
+        The average squared distance from each point to the centroid of its cluster.
+      \end{defnbox}
+      \footnotesize
+      K-means is \textbf{coordinate descent} on $J$: it minimises over one group of
+      variables while holding the other fixed, and alternates.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Why neither step can increase $J$}
+        \textbf{Assign} (hold $\mu$ fixed, choose $c$): each term
+        $\|\vx^{(i)}-\mu_{c^{(i)}}\|^2$ is made as small as possible by the nearest
+        centroid.\\[3pt]
+        \textbf{Move} (hold $c$ fixed, choose $\mu_k$): $\sum_{i:c^{(i)}=k}\|\vx^{(i)}-\mu_k\|^2$
+        is minimised by the mean. Setting its gradient
+        $-2\sum_{i:c^{(i)}=k}(\vx^{(i)}-\mu_k)$ to zero gives exactly
+        $\mu_k=\text{mean}$.
+      \end{block}
+      \begin{keyidea}[Consequences]
+        $J$ decreases or stays the same at every step, and there are finitely many
+        assignments, so K-means always converges. If $J$ ever rises, the code has a bug.
+      \end{keyidea}
+      Hand example: $J=3.464\to3.292\to\dots\to1.218$.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Initialising K-means}
+
+\begin{frame}{Convergence is guaranteed --- to a \emph{local} minimum}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.56\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[kmaxis,name=good,width=4.6cm,height=4.2cm,
+          title={\scriptsize start A: $J=2.338$}]
+\addplot[only marks,mark=*,mark size=1.1pt,cublue!80] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+\addplot[only marks,mark=square*,mark size=1.1pt,curose!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+\addplot[only marks,mark=triangle*,mark size=1.1pt,cuteal!80] coordinates {(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=cublue] coordinates {(2.021,7.758)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=curose] coordinates {(8.088,7.859)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=cuteal] coordinates {(5.327,2.649)};
+        \end{axis}
+        \begin{axis}[kmaxis,at={(good.east)},anchor=west,xshift=3mm,width=4.6cm,
+          height=4.2cm,ylabel={},title={\scriptsize start B: $J=7.717$}]
+\addplot[only marks,mark=*,mark size=1.1pt,cublue!80] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(7.89,9.87)(6.57,2.67)(7.90,9.31)(4.29,4.42)(6.42,8.55)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+\addplot[only marks,mark=square*,mark size=1.1pt,curose!80] coordinates {(2.30,6.32)(3.82,8.17)(2.61,8.14)(3.86,7.49)(1.95,6.40)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)};
+\addplot[only marks,mark=triangle*,mark size=1.1pt,cuteal!80] coordinates {(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.04,8.45)(-0.27,7.27)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=cublue] coordinates {(6.708,5.254)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=curose] coordinates {(2.716,7.169)};
+\addplot[only marks,mark=diamond*,mark size=3pt,draw=black,fill=cuteal] coordinates {(0.978,8.643)};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize Same data, same algorithm, different random starting centroids.}
+    \end{column}
+    \begin{column}{0.4\textwidth}
+      \footnotesize
+      \begin{block}{Random initialisation}
+        Choose $K<m$. Pick $K$ training examples at random; set $\mu_1,\dots,\mu_K$ to
+        them.
+      \end{block}
+      \begin{block}{200 random starts on these 60 points}
+        $193$ reach the best clustering, $J=2.338$.\\
+        $7$ stop in a poor one, $J$ between $7.717$ and $8.152$: one centroid covers two
+        groups while two split the third.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Multiple random initialisations}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Recipe]
+        \small
+        \textbf{for} $t=1$ to $100$ (typically $50$--$1000$):\\
+        \hspace*{1em}randomly initialise K-means;\\
+        \hspace*{1em}run it to convergence, giving $c^{(i)}$, $\mu_k$;\\
+        \hspace*{1em}compute the distortion $J$.\\
+        Keep the run with the \textbf{lowest} $J$.
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{How many runs are enough?}
+        If one run finds the best clustering with probability $p$, then $t$ runs all miss it
+        with probability $(1-p)^t$. Here $p=193/200=0.965$: two runs miss with probability
+        $0.035^2\approx0.0012$.
+      \end{block}
+      \begin{keyidea}
+        Comparing runs needs a number, and $J$ is that number --- one more use of having
+        an explicit objective.
+      \end{keyidea}
+      \begin{pitfall}[Harder problems]
+        \footnotesize With many clusters or high dimensions $p$ can be small; that is when
+        hundreds of restarts, or smarter seeding such as k-means++, pay off.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Choosing the Number of Clusters}
+
+\begin{frame}{The elbow method}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize Best $J$ of 50 random starts, for each $K$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.6cm,height=4.8cm,xmin=0.5,xmax=8.5,ymin=0,ymax=15.5,
+          xlabel={number of clusters $K$},ylabel={distortion $J$},xtick={1,...,8},
+          tick label style={font=\scriptsize},label style={font=\scriptsize}]
+          \addplot[cublue,very thick,mark=*,mark size=1.6pt] coordinates
+            {(1,14.407)(2,8.132)(3,2.338)(4,1.923)(5,1.519)(6,1.269)(7,1.056)(8,0.805)};
+          \draw[cuamber,thick] (axis cs:3,2.338) circle (4pt);
+          \node[font=\tiny,cuamber,anchor=south west] at (axis cs:3.1,2.8) {elbow};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Reading the curve}
+        $J$ falls steeply up to $K=3$ ($14.41\to8.13\to2.34$) and slowly after
+        ($1.92$, $1.52$, \dots). The bend --- the ``elbow'' --- suggests $K=3$.
+      \end{block}
+      \begin{pitfall}[Do not choose $K$ by minimising $J$]
+        \footnotesize $J$ always decreases as $K$ grows ($K=m$ gives $J=0$). And many real
+        data sets have no clear elbow: the curve bends smoothly.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Choose $K$ for the purpose}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{T-shirt sizes}
+        \footnotesize
+        Cluster customers by height and weight. $K=3$ gives S, M, L; $K=5$ gives XS, S,
+        M, L, XL. Neither is ``correct''. Five sizes fit customers better; three are cheaper
+        to manufacture and stock. The business decides.
+      \end{block}
+      \begin{keyidea}
+        Clustering is usually a step towards something else. Evaluate $K$ by how well the
+        clusters serve that later purpose.
+      \end{keyidea}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Other practical uses}
+        \begin{itemize}
+          \item \textbf{Image compression}: cluster pixel colours into $K=16$ colours and
+                store one 4-bit index per pixel instead of 24 bits.
+          \item \textbf{Pre-processing}: use cluster membership as a feature for a
+                supervised model.
+        \end{itemize}
+      \end{block}
+      \begin{block}{Questions to ask}
+        How many groups can the user act on? What does one more cluster cost? Do the
+        clusters stay stable across random restarts?
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Clustering finds groups in unlabelled data.
+          \item K-means alternates: assign each point to its nearest centroid; move each
+                centroid to its cluster's mean.
+          \item It is coordinate descent on the distortion $J$, which never increases.
+          \item It converges, but possibly to a local minimum: run many random
+                initialisations and keep the lowest $J$.
+          \item Choose $K$ by the elbow if there is one --- and by the downstream purpose
+                in any case.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ c^{(i)}=\argmin_k\|\vx^{(i)}-\mu_k\|^2 \]
+        \[ \mu_k=\frac{1}{|C_k|}\sum_{i\in C_k}\vx^{(i)} \]
+        \[ J=\frac1m\sum_i\|\vx^{(i)}-\mu_{c^{(i)}}\|^2 \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Part 2: anomaly detection --- the Gaussian distribution, density
+        estimation, and how to evaluate a detector with very few anomalies.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Distinguish supervised from unsupervised learning, and give three applications of
+          clustering. \hfill\clo{4}
+    \item State the K-means algorithm. Explain the meaning of $c^{(i)}$, $\mu_k$ and
+          $\mu_{c^{(i)}}$. \hfill\clo{5}
+    \item Run K-means by hand on the seven points of the lecture, $K=2$, starting from
+          $\mu_1=A$, $\mu_2=D$. Give the assignments and centroids at each iteration.
+          \hfill\clo{8}
+    \item Define the distortion $J$. Prove that neither step of K-means can increase it.
+          \hfill\clo{8}
+    \item What happens when a cluster receives no points, and what are two remedies?
+          \hfill\clo{4}
+    \item Why can K-means converge to different solutions from different starts? Describe
+          random initialisation with multiple restarts. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item A single random start finds the best clustering with probability $0.3$. How many
+          starts are needed for at least a $99\%$ chance of finding it? \hfill\clo{5}
+    \item Explain the elbow method and two reasons it can fail. \hfill\clo{5}
+    \item Why does $J$ always decrease as $K$ increases (with the best initialisation)? What
+          is $J$ when $K=m$? \hfill\clo{4}
+    \item Explain how K-means compresses an image to $16$ colours, and compute the
+          compression factor for a $256\times256$ RGB image, ignoring the colour table.
+          \hfill\clo{6}
+    \item Give an example where the right $K$ is set by the application rather than by the
+          data. \hfill\clo{4}
+    \item Explain why K-means uses squared distance in the assignment step, and why the
+          mean is the right centroid for that choice. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a segmentation.} A Chattogram supermarket chain has a year of
+          purchase records for $200\,000$ loyalty-card holders. Design a K-means
+          segmentation: the features (and their scaling), how you choose $K$, and how
+          marketing will use the clusters. \hfill\clo{12}
+    \item \textbf{Design for scale.} K-means on $10^7$ points with $K=100$ is too slow to
+          restart $500$ times. Design a cheaper procedure that still guards against poor
+          local minima, and say how you would check it. \hfill\clo{10}
+    \item \textbf{Design a test of a K-means implementation.} Design three small data sets
+          with known answers that would expose: a wrong assignment rule, a wrong centroid
+          update, and missing empty-cluster handling. \hfill\clo{10}
+    \item \textbf{Design a stability check.} Design an experiment that tells a client
+          whether the clusters you report are real structure or an artefact of the random
+          initialisation. \hfill\clo{12}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S12.1} --- the challenge of unsupervised learning;
+    \textbf{\S12.4.1} --- K-means clustering, its objective, and local optima.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S9.1} --- K-means clustering as alternating
+    minimisation of the distortion measure, and image compression.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 7): K-means.
+  \end{center}
+\end{frame}
+
+\end{document}

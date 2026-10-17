@@ -1,0 +1,691 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 4, Part 2
+%  Neural Networks in Code: TensorFlow, NumPy from Scratch, and
+%  Vectorised Forward Propagation
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 4, Part 2]{Neural Networks in Code}
+\subtitle{TensorFlow, Forward Propagation from Scratch, and Matrix Multiplication}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 4 / Part 2]{Week 4 $\cdot$ Part 2}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From equations to running code}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Part 1 gave us}
+        \[ a^{[l]}_j = g\bigl(\vw^{[l]}_j\cdot\va^{[l-1]} + b^{[l]}_j\bigr),\qquad
+           \va^{[0]}=\vx \]
+        and forward propagation: apply it layer by layer, left to right.
+      \end{block}
+      \footnotesize
+      Today we make that equation run --- three times. First with a library, so you see how
+      little code a practitioner writes; then from scratch in NumPy, so you know what the
+      library does; then as one matrix product, which is why it runs fast.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Inference in code: the coffee-roasting network
+          \item Data in TensorFlow: shapes and tensors
+          \item Building a network with \texttt{Sequential}
+          \item Forward propagation from scratch in NumPy
+          \item Is there a path to AGI?
+          \item Vectorisation and matrix multiplication
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize The running example is the $2\to3\to1$ network of Part 1, so every number
+      can be checked against the hand calculation.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Inference in Code}
+
+\begin{frame}{Example: roasting coffee beans}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize Illustrative data: good roasts in a band}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=7.0cm,height=4.9cm,xlabel={temperature ($^\circ$C)},
+          ylabel={duration (min)},xmin=150,xmax=285,ymin=11.3,ymax=15.7,
+          tick label style={font=\scriptsize},label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.98,0.98)},anchor=north east},
+          legend cell align=left]
+          \addplot[fill=cuteal!12,draw=cuteal,dashed,forget plot]
+            coordinates {(175,12)(175,15)(260,12)} -- cycle;
+          \addplot[only marks,mark=x,mark size=2.2pt,curose,thick]
+            coordinates {(273,14.3)(219,14.6)(277,12.3)(165,13.3)(255,12.4)(177,15.4)
+              (264,15.0)(268,14.5)(215,11.7)(209,15.2)(254,13.6)(278,14.8)(276,13.0)
+              (271,12.9)(231,13.2)(243,13.5)(273,15.3)(238,15.1)(172,13.1)(217,14.7)
+              (218,11.9)(275,13.1)(199,15.0)(183,15.2)(235,11.8)(272,14.7)(228,14.0)
+              (271,13.5)(216,11.8)(239,14.3)(215,13.6)};
+          \addlegendentry{bad roast, $y=0$}
+          \addplot[only marks,mark=*,mark size=1.8pt,cublue]
+            coordinates {(231,12.9)(202,12.2)(223,13.0)(201,12.6)(217,12.7)(220,12.4)
+              (188,12.5)(182,14.3)};
+          \addlegendentry{good roast, $y=1$}
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{The task}
+        Inputs: $x_1$ = temperature, $x_2$ = duration. Too cool or too short: undercooked.
+        Too hot or too long: burnt. Good roasts lie in the triangle.
+      \end{block}
+      \begin{keyidea}[Why one neuron is not enough]
+        The good region is bounded by \emph{three} lines. A single logistic unit draws one.
+        A hidden layer of three units can learn one line each, and the output unit
+        combines them.
+      \end{keyidea}
+      \textbf{Network:} $2\to3\to1$, sigmoid everywhere.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Forward propagation in TensorFlow}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.54\textwidth}
+\begin{lstlisting}
+import numpy as np
+from tensorflow.keras.layers import Dense
+
+x = np.array([[200.0, 17.0]])     # one example
+
+layer_1 = Dense(units=3, activation='sigmoid')
+a1 = layer_1(x)                   # shape (1, 3)
+
+layer_2 = Dense(units=1, activation='sigmoid')
+a2 = layer_2(a1)                  # shape (1, 1)
+
+yhat = 1 if a2 >= 0.5 else 0
+\end{lstlisting}
+      \vspace{1mm}
+      \footnotesize
+      Each line is one row of the forward-propagation equations: build a layer, apply it to
+      the previous activations.
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \footnotesize
+      \begin{block}{What \texttt{Dense} means}
+        A \textbf{dense} (fully connected) layer: every unit receives every activation from
+        the previous layer. \texttt{units} sets the layer's width; \texttt{activation} sets
+        $g$.
+      \end{block}
+      \begin{block}{Where are $\vw$ and $b$?}
+        Inside the layer object. They are created --- with random values --- the first time
+        the layer sees an input, because only then is $n_{\text{in}}$ known. Training (Week 5)
+        replaces them with good values.
+      \end{block}
+      \begin{pitfall}[Scale the inputs]
+        \footnotesize $200$ and $17$ differ by an order of magnitude. Normalise features
+        before training, exactly as in Week 2.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{The same pattern for handwritten digits}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}
+x = np.array([[0.0, ..., 245, ..., 240, ..., 0]])
+                                  # shape (1, 64)
+layer_1 = Dense(units=25, activation='sigmoid')
+a1 = layer_1(x)
+layer_2 = Dense(units=15, activation='sigmoid')
+a2 = layer_2(a1)
+layer_3 = Dense(units=1, activation='sigmoid')
+a3 = layer_3(a2)
+
+yhat = 1 if a3 >= 0.5 else 0
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Read it against Part 1}
+        $64\to25\to15\to1$: three \texttt{Dense} layers, one per layer of the diagram. The
+        input row holds the $64$ pixel brightnesses.
+      \end{block}
+      \begin{keyidea}
+        Writing the network one layer at a time is verbose but transparent: you can inspect
+        \texttt{a1} and \texttt{a2} --- the learned features --- directly. That is how the
+        ``edges, then parts'' pictures of Part 1 are made.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Data in TensorFlow}
+
+\begin{frame}[fragile]{One example is a $1\times n$ matrix, not a vector}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}
+np.array([200.0, 17.0])      # shape (2,)
+np.array([[200.0, 17.0]])    # shape (1, 2)  row
+np.array([[200.0], [17.0]])  # shape (2, 1)  column
+\end{lstlisting}
+      \vspace{2mm}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.2}
+      \begin{tabular}{@{}lll@{}}
+        \toprule
+        Python & shape & meaning\\
+        \midrule
+        \texttt{[200, 17]}       & $(2,)$  & 1-D array: no rows or columns\\
+        \texttt{[[200, 17]]}     & $(1,2)$ & one example, two features\\
+        \texttt{[[200],[17]]}    & $(2,1)$ & two examples, one feature\\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Convention used by TensorFlow]
+        \small
+        A batch of data is a 2-D matrix with \textbf{one row per example} and \textbf{one
+        column per feature}: shape $(m, n)$. A single example is therefore $(1, n)$.
+      \end{defnbox}
+      \begin{pitfall}[1-D arrays]
+        \small
+        Code in Weeks 1--3 used 1-D arrays such as \texttt{np.array([1, 2])}. TensorFlow layers
+        expect 2-D input; passing shape $(2,)$ raises an error or, worse, is broadcast into
+        something you did not mean. Print \texttt{.shape} whenever in doubt.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Tensors and NumPy arrays}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}
+a1 = layer_1(x)
+print(a1)
+# tf.Tensor([[0.2 0.7 0.3]], shape=(1, 3),
+#           dtype=float32)
+
+a1.numpy()           # back to a NumPy array
+# array([[0.2, 0.7, 0.3]], dtype=float32)
+\end{lstlisting}
+      \vspace{1mm}
+      {\footnotesize\color{cugray} Values shown are placeholders: an untrained layer has
+      random weights, so your numbers will differ.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{What a tensor is}
+        TensorFlow's own array type, \texttt{tf.Tensor}: a matrix (or higher-dimensional
+        array) that can live on a GPU and remember how it was computed, for training.
+      \end{block}
+      \begin{block}{Living with two types}
+        NumPy came first; TensorFlow converts NumPy input automatically, and returns
+        tensors. Call \texttt{.numpy()} when you want to plot or print an activation with
+        ordinary tools.
+      \end{block}
+      \begin{keyidea}
+        The \emph{data} is the same in both. Only the container differs --- and the
+        $(m,n)$ shape convention holds in both.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Building a Neural Network}
+
+\begin{frame}[fragile]{\texttt{Sequential}: string the layers together}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense
+
+model = Sequential([
+    Dense(units=3, activation='sigmoid'),
+    Dense(units=1, activation='sigmoid')])
+
+X = np.array([[200.0, 17.0],
+              [120.0,  5.0],
+              [425.0, 20.0],
+              [212.0, 18.0]])    # shape (4, 2)
+y = np.array([1, 0, 0, 1])
+
+model.compile(...)               # Week 5
+model.fit(X, y)                  # Week 5
+model.predict(X_new)             # forward prop
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{What changed}
+        \texttt{Sequential} chains the layers so that \texttt{model.predict} runs the whole
+        forward propagation for you --- on every row of \texttt{X\_new} at once.
+      \end{block}
+      \begin{block}{Digits, in one statement}
+\begin{lstlisting}
+model = Sequential([
+    Dense(units=25, activation='sigmoid'),
+    Dense(units=15, activation='sigmoid'),
+    Dense(units=1,  activation='sigmoid')])
+\end{lstlisting}
+      \end{block}
+      \begin{pitfall}[Do not stop at the library]
+        \footnotesize Five lines train a network. When it misbehaves, only someone who knows
+        what those lines compute can debug it. Hence the next section.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Forward Propagation from Scratch}
+
+\begin{frame}[fragile]{One layer, written out by hand}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}
+def g(z):
+    return 1 / (1 + np.exp(-z))
+
+x = np.array([1, 2])
+
+w1_1 = np.array([1, 2]);   b1_1 = -1
+z1_1 = np.dot(w1_1, x) + b1_1
+a1_1 = g(z1_1)                    # 0.9820
+
+w1_2 = np.array([-3, 4]);  b1_2 = 1
+a1_2 = g(np.dot(w1_2, x) + b1_2)  # 0.9975
+
+w1_3 = np.array([5, -6]);  b1_3 = 2
+a1_3 = g(np.dot(w1_3, x) + b1_3)  # 0.0067
+
+a1 = np.array([a1_1, a1_2, a1_3])
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Naming}
+        \texttt{w1\_2} stands for $\vw^{[1]}_2$: layer 1, unit 2. The code is the
+        Part 1 table, line for line --- and produces the same three numbers.
+      \end{block}
+      \begin{keyidea}[What repeats]
+        Each unit: dot product, add bias, apply $g$. Only the parameters change. That
+        repetition is a loop waiting to be written --- the next slide.
+      \end{keyidea}
+      Layer 2 is the same three lines again, with $\vw^{[2]}_1=[2,-1,-3]$,
+      $b^{[2]}_1=0.5$ and input \texttt{a1}: it returns $0.8094$.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{A general \texttt{dense} and \texttt{sequential}}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+def dense(a_in, W, b):
+    units = W.shape[1]
+    a_out = np.zeros(units)
+    for j in range(units):
+        w = W[:, j]               # column j = unit j
+        z = np.dot(w, a_in) + b[j]
+        a_out[j] = g(z)
+    return a_out
+W1 = np.array([[1, -3,  5],
+               [2,  4, -6]])      # (n_in, units)
+b1 = np.array([-1, 1, 2])
+W2 = np.array([[2], [-1], [-3]])
+b2 = np.array([0.5])
+def sequential(x):
+    a1 = dense(x, W1, b1)
+    a2 = dense(a1, W2, b2)
+    return a2
+sequential(np.array([1, 2]))      # [0.8094]
+sequential(np.array([-1, -1]))    # [0.0562]
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{defnbox}[Stacking parameters into $\mW$]
+        \small
+        Put each unit's weight vector in a \textbf{column}:
+        \[ \mW^{[1]} = \bigl[\,\vw^{[1]}_1\ \ \vw^{[1]}_2\ \ \vw^{[1]}_3\,\bigr]
+           = \begin{bmatrix}1&-3&5\\2&4&-6\end{bmatrix} \]
+        Shape $(n_{\text{in}},\ \text{units})$ = $(2,3)$.
+      \end{defnbox}
+      \begin{keyidea}
+        The function \texttt{dense} implements one layer of any width, and \texttt{sequential}
+        chains layers. Together they are a complete inference engine --- what
+        \texttt{model.predict} does, minus speed. Both outputs match Part 1.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Is There a Path to AGI?}
+
+\begin{frame}{Narrow AI and general AI}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Two different things called ``AI'']
+        \small
+        \textbf{ANI} --- artificial \emph{narrow} intelligence: a system that does one task,
+        such as spam filtering, crop-disease detection or route planning. Enormous progress,
+        enormous economic value.\\[3pt]
+        \textbf{AGI} --- artificial \emph{general} intelligence: a system that can do
+        anything a typical human can.
+      \end{defnbox}
+      \footnotesize
+      Progress in ANI is real and measurable. It does not, by itself, imply progress
+      towards AGI, though the two are often conflated in public discussion.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Why the neuron analogy does not settle it}
+        \footnotesize
+        \begin{itemize}
+          \item Our unit $g(\vw\cdot\vx+b)$ is a drastic simplification of a biological
+                neuron.
+          \item We still do not know, in any detail, how the brain learns.
+          \item So ``simulate enough neurons'' is not, today, a recipe for intelligence.
+        \end{itemize}
+      \end{block}
+      \begin{pitfall}[Be precise in claims]
+        \footnotesize ``The model does task $T$ at level $L$ on data $D$'' is a scientific
+        claim. ``The model understands'' is not, until you define and test it.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The ``one learning algorithm'' hypothesis}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Neural rewiring}
+        \footnotesize
+        In experiments on newborn ferrets, visual input was rerouted to the brain region that
+        normally processes sound. That region developed responses resembling those of the
+        visual cortex: it learned to ``see''.
+      \end{block}
+      \begin{block}{Sensory substitution in people}
+        \footnotesize
+        \begin{itemize}
+          \item A camera driving a grid of electrodes on the tongue lets blind users perceive
+                shapes.
+          \item Some people learn to locate objects by echolocation (clicks).
+          \item A belt that buzzes towards north gives a sense of direction.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[The hypothesis]
+        Much of the brain may run one (or a few) general learning algorithms, which become
+        specialised by the data they receive.
+      \end{keyidea}
+      \footnotesize
+      If so, finding a close enough approximation of that algorithm would be a path to
+      AGI. That is a hope, not a result: nobody knows whether it is true, or what the
+      algorithm is.\par
+      \vspace{2mm}
+      \textbf{For this course}, the useful lesson is narrower and certain: the \emph{same}
+      architecture --- a stack of dense layers --- learns edges from pixels, phonemes from
+      audio and affordability from prices, depending only on the data.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Vectorisation and Matrix Multiplication}
+
+\begin{frame}[fragile]{The loop becomes one line}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize\textbf{Loop over units} (previous section)
+\begin{lstlisting}
+for j in range(units):
+    z = np.dot(W[:, j], a_in) + b[j]
+    a_out[j] = g(z)
+\end{lstlisting}
+      \vspace{1mm}
+      \footnotesize\textbf{Vectorised, over units and examples}
+\begin{lstlisting}
+def dense(A_in, W, B):
+    Z = np.matmul(A_in, W) + B    # or A_in @ W + B
+    return g(Z)
+
+X = np.array([[ 1,  2],
+              [-1, -1]])          # 2 examples
+A1 = dense(X, W1, b1)             # shape (2, 3)
+A2 = dense(A1, W2, b2)            # shape (2, 1)
+# A2 = [[0.8094], [0.0562]]
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Shapes}
+        \centering
+        $\underbrace{\mathbf{A}_{\text{in}}}_{(m,\,n_{\text{in}})}\;
+         \underbrace{\mW}_{(n_{\text{in}},\,\text{units})}
+         = \underbrace{\mathbf{Z}}_{(m,\,\text{units})}$\\[2pt]
+        row $i$ of $\mathbf{Z}$: example $i$; column $j$: unit $j$.
+      \end{block}
+      \begin{keyidea}[Why it matters]
+        One matrix product replaces $m\times\text{units}$ dot products, and GPUs run matrix
+        products in parallel. This is what makes large networks practical.
+      \end{keyidea}
+      \begin{pitfall}[Broadcasting $B$]
+        \footnotesize $b$ has shape $(\text{units},)$; NumPy adds it to every row of
+        $\mathbf{Z}$. A $b$ of shape $(\text{units},1)$ either raises an error or --- worse --- broadcasts
+        into the wrong values without complaint.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Matrix multiplication: dot products, organised}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Building up}
+        \footnotesize
+        \textbf{Vector $\cdot$ vector.}
+        $\mathbf{a}\cdot\vw = a_1w_1+a_2w_2 = \mathbf{a}^{\top}\vw$\\[2pt]
+        \textbf{Row vector $\times$ matrix.} $\mathbf{a}^{\top}\mW$: one dot product per
+        \emph{column} of $\mW$.\\[2pt]
+        \textbf{Matrix $\times$ matrix.} $\mathbf{A}\mW$: one dot product per (row of
+        $\mathbf{A}$, column of $\mW$) pair.
+      \end{block}
+      \begin{defnbox}[Rule]
+        \small
+        If $\mathbf{A}$ is $m\times n$ and $\mathbf{B}$ is $n\times p$, then $\mathbf{AB}$ is
+        $m\times p$ and
+        \[ (\mathbf{AB})_{ij} = \sum_{k=1}^{n} A_{ik}B_{kj}. \]
+        The \emph{inner} dimensions must match.
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Worked example}
+        \[ \mathbf{A}=\begin{bmatrix}1&2\\3&4\end{bmatrix},\quad
+           \mathbf{B}=\begin{bmatrix}5&0&1\\-1&2&0\end{bmatrix} \]
+        $(2\times2)(2\times3)\to(2\times3)$:
+        \[ \mathbf{AB}=\begin{bmatrix}3&4&1\\11&8&3\end{bmatrix} \]
+        e.g.\ $(\mathbf{AB})_{21}=$ row 2 of $\mathbf{A}$ $\cdot$ column 1 of $\mathbf{B}$
+        $=3\cdot5+4\cdot(-1)=11$.
+      \end{block}
+      \begin{block}{Transpose}
+        $\mathbf{A}^{\top}$ swaps rows and columns:
+        $\mathbf{A}^{\top}=\begin{bmatrix}1&3\\2&4\end{bmatrix}$.
+        In NumPy, \texttt{A.T}.
+      \end{block}
+      \textbf{Order matters:} $\mathbf{BA}$ is $(2\times3)(2\times2)$ --- undefined here.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The forward pass as one product: our network}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.54\textwidth}
+      \[ \mathbf{X}\mW^{[1]} + \mathbf{b}^{[1]} =
+         \begin{bmatrix}1&2\\-1&-1\end{bmatrix}
+         \begin{bmatrix}1&-3&5\\2&4&-6\end{bmatrix}
+         + [-1,\,1,\,2] \]
+      \[ = \begin{bmatrix}5&5&-7\\-3&-1&1\end{bmatrix} + [-1,\,1,\,2]
+         = \begin{bmatrix}4&6&-5\\-4&0&3\end{bmatrix} = \mathbf{Z}^{[1]} \]
+      \[ \mathbf{A}^{[1]} = g(\mathbf{Z}^{[1]}) =
+         \begin{bmatrix}0.9820&0.9975&0.0067\\0.0180&0.5000&0.9526\end{bmatrix} \]
+      \[ \mathbf{A}^{[2]} = g\bigl(\mathbf{A}^{[1]}\mW^{[2]}+b^{[2]}\bigr)
+         = g\!\left(\begin{bmatrix}1.4464\\-2.8217\end{bmatrix}\right)
+         = \begin{bmatrix}0.8094\\0.0562\end{bmatrix} \]
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{keyidea}[Check the agreement]
+        Row 1 of $\mathbf{Z}^{[1]}$ is the column of $z$ values from the Part 1 table;
+        row 2 is the second example. The loop and the matrix product compute the same
+        numbers --- confirm it with \texttt{np.allclose}.
+      \end{keyidea}
+      \begin{block}{Shapes along the way}
+        $(2,2)(2,3)\to(2,3)$, \ then \ $(2,3)(3,1)\to(2,1)$.\par
+        The number of rows --- examples --- never changes; the number of columns is the
+        width of the current layer.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item \texttt{Dense(units, activation)} is one layer; \texttt{Sequential} chains
+                them; \texttt{predict} runs forward propagation.
+          \item Data is a 2-D matrix: one row per example, one column per feature.
+          \item From scratch: \texttt{dense} loops over units; \texttt{sequential} loops over
+                layers.
+          \item Store unit weights as the columns of $\mW$, of shape
+                $(n_{\text{in}},\text{units})$.
+          \item Vectorised: $\mathbf{Z}=\mathbf{A}_{\text{in}}\mW+\mathbf{b}$, \
+                $\mathbf{A}_{\text{out}}=g(\mathbf{Z})$.
+          \item ANI is not AGI.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ \mathbf{A}^{[l]} = g\bigl(\mathbf{A}^{[l-1]}\mW^{[l]}+\mathbf{b}^{[l]}\bigr),
+           \quad \mathbf{A}^{[0]}=\mathbf{X} \]
+        \[ (m\times n)(n\times p)\to(m\times p) \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Week 5: training --- the loss, \texttt{compile} and \texttt{fit},
+        activation functions beyond the sigmoid, multiclass output with softmax, and
+        back-propagation.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Explain what \texttt{Dense(units=3, activation='sigmoid')} represents, and why its
+          weights do not exist until the layer is first called. \hfill\clo{5}
+    \item Explain why the coffee-roasting data cannot be classified well by one logistic unit
+          but can be by a $2\to3\to1$ network. \hfill\clo{6}
+    \item State the shapes of \texttt{np.array([5, 3])}, \texttt{np.array([[5, 3]])} and
+          \texttt{np.array([[5], [3]])}, and say which one a TensorFlow layer expects for a
+          single example with two features. \hfill\clo{5}
+    \item What is a \texttt{tf.Tensor}? How do you convert it to a NumPy array, and why would
+          you? \hfill\clo{4}
+    \item Explain the roles of \texttt{Sequential}, \texttt{compile}, \texttt{fit} and
+          \texttt{predict}. Which of them involves only forward propagation? \hfill\clo{5}
+    \item Write the function \texttt{dense(a\_in, W, b)} using a loop over units. Explain why
+          the weights of unit $j$ are \texttt{W[:, j]}. \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Distinguish ANI from AGI. Explain why rapid progress in the first does not by
+          itself imply progress in the second. \hfill\clo{5}
+    \item State the ``one learning algorithm'' hypothesis and describe one piece of evidence
+          offered for it. What would it mean for AGI if it were true? \hfill\clo{5}
+    \item State the rule for the shape of a matrix product and the formula for
+          $(\mathbf{AB})_{ij}$. Compute $\mathbf{AB}$ for
+          $\mathbf{A}=\bigl[\begin{smallmatrix}2&0\\1&-1\end{smallmatrix}\bigr]$,
+          $\mathbf{B}=\bigl[\begin{smallmatrix}1&3\\4&2\end{smallmatrix}\bigr]$. \hfill\clo{6}
+    \item A layer receives $\mathbf{A}_{\text{in}}$ of shape $(100, 64)$ and has $25$ units.
+          Give the shapes of $\mW$, $\mathbf{b}$, $\mathbf{Z}$ and $\mathbf{A}_{\text{out}}$.
+          \hfill\clo{5}
+    \item Using the matrix form, compute $\mathbf{Z}^{[1]}$ and $\mathbf{A}^{[2]}$ for the
+          worked network with $\mathbf{X}=\bigl[\begin{smallmatrix}0&0\\2&1\end{smallmatrix}
+          \bigr]$. \hfill\clo{8}
+    \item Explain why a vectorised forward pass is much faster than nested loops, even
+          though it performs the same arithmetic. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a verification harness.} You have written \texttt{dense} and
+          \texttt{sequential} in NumPy, and a colleague built the same network in
+          TensorFlow. Design a procedure that proves the two compute identical predictions,
+          including how you copy weights across and the tolerance you accept. \hfill\clo{12}
+    \item \textbf{Design for batch inference.} A mobile-banking app must score
+          $2$ million transactions overnight with a $30\to16\to8\to1$ network. Design the
+          inference code: batch size, memory per batch, and the shape of every intermediate
+          matrix. Justify your batch size. \hfill\clo{12}
+    \item \textbf{Design a shape-bug detector.} Students' forward-propagation code often
+          fails because of row/column confusion or a $b$ of the wrong shape. Design a set of
+          \texttt{assert} statements to place in \texttt{dense} that catch these bugs early,
+          with an error message for each. \hfill\clo{10}
+    \item \textbf{Design a claim.} A start-up says its product ``thinks like a human
+          radiologist''. Rewrite the claim as a testable statement, and design the evaluation
+          that would support it. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S10.2} --- multilayer neural networks, written with
+    weight matrices $\mathbf{W}_1$, $\mathbf{W}_2$ and the layer-by-layer computation of
+    activations.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S5.1} --- feed-forward network functions, including
+    absorbing the bias into the weights; \textbf{Appendix C} --- properties of matrices.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 4): coffee roasting in TensorFlow; coffee roasting in NumPy;
+    practice lab on neural networks for binary classification (digits 0 vs.\ 1).\\
+    Practice quizzes: \emph{TensorFlow implementation}; \emph{Neural network implementation
+    in Python}.
+  \end{center}
+\end{frame}
+
+\end{document}

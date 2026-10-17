@@ -1,0 +1,803 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 5, Part 2
+%  Multiclass Classification, Softmax, Adam, Convolutional Layers,
+%  and Back-propagation
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 5, Part 2]{Multiclass Classification and Back-propagation}
+\subtitle{Softmax, a Stable Implementation, Adam, Convolutional Layers, and Computation Graphs}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 5 / Part 2]{Week 5 $\cdot$ Part 2}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{Beyond yes or no}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Part 1 gave us}
+        \footnotesize
+        \begin{itemize}
+          \item Training: \texttt{Sequential}, \texttt{compile(loss=...)}, \texttt{fit}.
+          \item ReLU in hidden layers; output activation chosen from the range of $y$.
+          \item Without a non-linear $g$, depth collapses.
+        \end{itemize}
+      \end{block}
+      \footnotesize
+      Every output so far was one number. Today the output becomes a probability for
+      \emph{each} of $N$ classes. Then we open the two black boxes inside \texttt{fit}: the
+      optimiser, and the computation of gradients.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Multiclass classification and softmax
+          \item Softmax in a network: a stable implementation; multi-label output
+          \item Advanced optimisation: Adam
+          \item Additional layer types: convolution
+          \item Derivatives, computation graphs and back-propagation
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize The last section is marked optional in the syllabus but is examinable
+      here: it is how \texttt{fit} obtains every gradient.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Multiclass Classification and Softmax}
+
+\begin{frame}{More than two classes}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \centering {\scriptsize Illustrative data: four classes in two features}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.4cm,height=4.8cm,xmin=0,xmax=10,ymin=0,ymax=10,
+          xlabel={$x_1$},ylabel={$x_2$},xtick=\empty,ytick=\empty,label style={font=\scriptsize}]
+          \draw[cugray!60,dashed,thick] (axis cs:5.2,0) -- (axis cs:5.2,10);
+          \draw[cugray!60,dashed,thick] (axis cs:0,5.0) -- (axis cs:10,5.6);
+          \addplot[only marks,mark=*,mark size=1.8pt,cublue]
+            coordinates {(1.5,7.5)(2.4,8.6)(3.1,7.0)(1.9,6.3)(3.6,8.9)(2.8,6.0)};
+          \addplot[only marks,mark=x,mark size=2.4pt,thick,curose]
+            coordinates {(7.0,8.0)(8.3,7.2)(6.6,6.6)(8.8,8.8)(7.6,9.1)(6.2,7.6)};
+          \addplot[only marks,mark=triangle*,mark size=2.2pt,cuteal]
+            coordinates {(1.6,2.0)(2.8,3.1)(3.7,1.5)(1.2,3.6)(2.2,1.0)(4.0,2.9)};
+          \addplot[only marks,mark=square*,mark size=1.7pt,cuamber]
+            coordinates {(7.2,2.2)(8.6,3.4)(6.4,1.4)(9.0,1.6)(7.9,4.1)(6.6,3.2)};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \footnotesize
+      \begin{defnbox}[Multiclass classification]
+        \small The target $y$ takes one of $N>2$ \emph{discrete} values: $y\in\{1,\dots,N\}$.
+        Exactly one is correct for each example.
+      \end{defnbox}
+      \begin{block}{Examples}
+        \begin{itemize}
+          \item Handwritten digit: $N=10$.
+          \item Diagnosis of a leaf: healthy, blast, brown spot, or blight.
+        \end{itemize}
+      \end{block}
+      \begin{keyidea}
+        We now want an estimate of $P(y=j\mid\vx)$ for every class $j$ --- $N$ numbers
+        that are non-negative and sum to $1$.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The softmax function}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Softmax regression, $N$ classes]
+        \small
+        One linear score per class,
+        \[ z_j=\vw_j\cdot\vx+b_j,\qquad j=1,\dots,N, \]
+        turned into probabilities by
+        \[ a_j=\frac{e^{z_j}}{\sum_{k=1}^{N}e^{z_k}}=P(y=j\mid\vx). \]
+      \end{defnbox}
+      \footnotesize
+      Exponentiation makes every score positive; dividing by the sum makes them add to $1$.
+      The largest $z_j$ gets the largest $a_j$ --- hence ``soft'' max.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Worked example: $\vz=[2,\ 1,\ 0.1]$}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}cccc@{}}
+          \toprule
+          $j$ & $z_j$ & $e^{z_j}$ & $a_j$\\
+          \midrule
+          1 & $2$   & $7.3891$ & $0.6590$\\
+          2 & $1$   & $2.7183$ & $0.2424$\\
+          3 & $0.1$ & $1.1052$ & $0.0986$\\
+          \midrule
+            &       & $11.2125$ & $1.0000$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}[$N=2$ gives back logistic regression]
+        \[ a_1=\frac{e^{z_1}}{e^{z_1}+e^{z_2}}=\frac{1}{1+e^{-(z_1-z_2)}}=g(z_1-z_2) \]
+        e.g.\ $\vz=[2,0.5]$: $a_1=0.8176=g(1.5)$.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The softmax loss: cross-entropy}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Cross-entropy loss]
+        \small
+        \[ L(\va,y) = -\log a_y =
+           \begin{cases}-\log a_1 & y=1\\ \ \ \vdots\\ -\log a_N & y=N\end{cases} \]
+        Only the probability assigned to the \emph{correct} class is penalised.
+      \end{defnbox}
+      \footnotesize
+      For $N=2$ this is exactly binary cross-entropy: if $y=1$ the loss is $-\log a_1$; if
+      $y=2$ it is $-\log a_2=-\log(1-a_1)$.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \centering {\scriptsize $-\log a_y$ against $a_y$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=5.8cm,height=3.6cm,xmin=0,xmax=1,ymin=0,ymax=4.5,
+          xlabel={$a_y$},tick label style={font=\scriptsize},label style={font=\scriptsize}]
+          \addplot[curose,very thick,domain=0.012:1,samples=120]{-ln(x)};
+          \addplot[only marks,mark=*,mark size=1.6pt,cublue] coordinates
+            {(0.6590,0.4170)(0.2424,1.4170)(0.0986,2.3170)};
+        \end{axis}
+      \end{tikzpicture}
+      \footnotesize
+      \begin{block}{Same example}
+        $L=0.4170$ if $y=1$; \ $1.4170$ if $y=2$; \ $2.3170$ if $y=3$.\par
+        The losses differ by exactly the gaps between the $z_j$: \
+        $-\log a_j=\log\sum_k e^{z_k}-z_j$.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Softmax in a Neural Network}
+
+\begin{frame}[fragile]{A softmax output layer}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \centering
+      \begin{tikzpicture}[node distance=3mm,
+          lay/.style={draw=cublue,fill=culight,rounded corners,font=\tiny,
+                      minimum height=5mm,inner sep=2pt}]
+        \node[lay,draw=cuteal,fill=cuteal!12] (x) {$\vx$: 784};
+        \node[lay,right=of x] (l1) {25 ReLU};
+        \node[lay,right=of l1] (l2) {15 ReLU};
+        \node[lay,right=of l2,draw=cuamber,fill=cuamber!15] (l3) {10 softmax};
+        \foreach \a/\b in {x/l1,l1/l2,l2/l3}{\draw[synapse] (\a)--(\b);}
+      \end{tikzpicture}\par
+      \vspace{2mm}
+      \footnotesize\raggedright
+      Digits $0$--$9$ from $28\times28$ images. The output layer computes
+      \[ z^{[3]}_j=\vw^{[3]}_j\cdot\va^{[2]}+b^{[3]}_j,\qquad
+         a^{[3]}_j=\frac{e^{z^{[3]}_j}}{\sum_{k=1}^{10}e^{z^{[3]}_k}} \]
+\begin{lstlisting}
+from tensorflow.keras.losses import \
+    SparseCategoricalCrossentropy
+model = Sequential([
+    Dense(units=25, activation='relu'),
+    Dense(units=15, activation='relu'),
+    Dense(units=10, activation='softmax')])
+model.compile(loss=SparseCategoricalCrossentropy())
+model.fit(X, y, epochs=100)
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \footnotesize
+      \begin{keyidea}[Softmax is different]
+        Sigmoid, ReLU and linear act on each $z_j$ alone. Each softmax output $a_j$ depends
+        on \emph{all} of $z_1,\dots,z_N$, through the denominator. Raise one score and every
+        other probability falls.
+      \end{keyidea}
+      \begin{defnbox}[``Sparse categorical'']
+        \small \emph{Categorical}: $y$ is one of $N$ categories. \emph{Sparse}: $y$ is
+        stored as a single integer ($0$--$9$), not as a length-$10$ one-hot vector.
+      \end{defnbox}
+      \begin{pitfall}[Do not ship this version]
+        \footnotesize It works, but it is numerically fragile. The next two slides give
+        the version you should actually use.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Round-off: the same number, two ways}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+\begin{lstlisting}
+x1 = 2.0 / 10000
+print(f"{x1:.20f}")
+# 0.00020000000000000001
+
+x2 = 1 + 1/10000 - (1 - 1/10000)
+print(f"{x2:.20f}")
+# 0.00019999999999997797
+\end{lstlisting}
+      \footnotesize
+      Mathematically $x_1=x_2$. In floating point, computing a small number as the
+      difference of two numbers near $1$ loses digits.
+      \begin{block}{The softmax version of the problem}
+        For logits $\vz=[1000,999,998]$, \texttt{np.exp(1000)} overflows to \texttt{inf},
+        and $a_1=\texttt{inf}/\texttt{inf}=\texttt{nan}$; very negative $z$ give $\log 0$.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{keyidea}[Do not compute $a$ and then $\log a$]
+        Substitute the softmax into the loss and simplify \emph{before} evaluating:
+        \[ -\log a_y = \log\sum_{k}e^{z_k}-z_y. \]
+        Shift by $c=\max_k z_k$, so that every exponent is $\le 0$:
+        \[ \log\sum_k e^{z_k} = c+\log\sum_k e^{z_k-c}. \]
+      \end{keyidea}
+      \begin{block}{Check it}
+        $\vz=[1000,999,998]$, $y=1$:
+        \[ L=\log(1+e^{-1}+e^{-2})=0.4076 \]
+        --- finite, and computed without ever forming $e^{1000}$.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{The recommended implementation: \texttt{from\_logits=True}}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+model = Sequential([
+    Dense(units=25, activation='relu'),
+    Dense(units=15, activation='relu'),
+    Dense(units=10, activation='linear')])  # z, not a
+model.compile(
+    loss=SparseCategoricalCrossentropy(from_logits=True))
+model.fit(X, y, epochs=100)
+
+logits = model(X_new)            # z: scores, not probs
+probs  = tf.nn.softmax(logits)   # if probabilities needed
+yhat   = np.argmax(logits, axis=1)
+\end{lstlisting}
+      \vspace{1mm}
+      \footnotesize\textbf{Binary case, same idea:} \texttt{Dense(1, 'linear')} with
+      \texttt{BinaryCrossentropy(from\_logits=True)}; recover the probability with
+      \texttt{tf.nn.sigmoid(logits)}.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{defnbox}[Logits]
+        \small The values $\vz$ that the last layer outputs \emph{before} the softmax (or
+        sigmoid). \texttt{from\_logits=True} tells the loss to apply the softmax itself,
+        using the stable formula.
+      \end{defnbox}
+      \begin{pitfall}[The model now outputs $\vz$]
+        \footnotesize \texttt{model(X)} returns logits, which can be negative and do not
+        sum to $1$. Apply \texttt{tf.nn.softmax} before reporting probabilities. For the
+        predicted class you do not need it: $\argmax_j z_j=\argmax_j a_j$.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Multi-label classification (several outputs)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{A different question}
+        \footnotesize
+        A street camera image. Is there a \textbf{car}? A \textbf{bus}? A
+        \textbf{pedestrian}? Any combination may be present, so the label is a vector:
+        \[ \vec{y}=[1,\ 0,\ 1] \quad\text{(car, no bus, pedestrian)}. \]
+      \end{block}
+      \centering
+      \begin{tikzpicture}[node distance=3mm,
+          lay/.style={draw=cublue,fill=culight,rounded corners,font=\tiny,
+                      minimum height=5mm,inner sep=2pt}]
+        \node[lay,draw=cuteal,fill=cuteal!12] (x) {image $\vx$};
+        \node[lay,right=of x] (l1) {hidden};
+        \node[lay,right=of l1] (l2) {hidden};
+        \node[lay,right=of l2,draw=cuamber,fill=cuamber!15,align=center] (l3)
+          {3 sigmoid\\[-1pt]units};
+        \foreach \a/\b in {x/l1,l1/l2,l2/l3}{\draw[synapse] (\a)--(\b);}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.2}
+      \begin{tabular}{@{}L{1.6cm}L{2.2cm}L{2.4cm}@{}}
+        \toprule
+        & multiclass & multi-label\\
+        \midrule
+        labels per example & exactly one & any number\\
+        output layer & $N$ softmax units & $N$ sigmoid units\\
+        outputs sum to & $1$ & anything in $[0,N]$\\
+        loss & cross-entropy & binary cross-entropy per output, summed\\
+        \bottomrule
+      \end{tabular}
+      \begin{pitfall}[Choosing by the data, not by habit]
+        \footnotesize Softmax on a multi-label task forces the classes to compete: a
+        confident ``car'' pushes ``pedestrian'' down even when both are present.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Advanced Optimisation: Adam}
+
+\begin{frame}{One learning rate does not suit every parameter}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize $J=w_1^2+10\,w_2^2$, gradient descent from the left}\par
+      \begin{tikzpicture}
+        \begin{axis}[name=lo,width=4.4cm,height=3.7cm,view={0}{90},
+          xmin=-4.5,xmax=1,ymin=-1.3,ymax=1.3,title={\tiny $\alpha=0.01$: creeping},
+          tick label style={font=\tiny},xtick={-4,-2,0},ytick={-1,0,1}]
+          \costcontour{cugray!60,forget plot,domain=-4.5:1,y domain=-1.3:1.3}{1,4,9,16}{x^2+10*y^2}
+          \addplot[cuteal,thick,mark=*,mark size=0.9pt] coordinates
+            {(-4.000,0.800)(-3.920,0.640)(-3.842,0.512)(-3.765,0.410)(-3.689,0.328)
+             (-3.616,0.262)(-3.543,0.210)(-3.473,0.168)(-3.403,0.134)(-3.335,0.107)
+             (-3.268,0.086)(-3.203,0.069)(-3.139,0.055)(-3.076,0.044)(-3.015,0.035)};
+        \end{axis}
+        \begin{axis}[at={(lo.east)},anchor=west,xshift=4mm,width=4.4cm,height=3.7cm,
+          view={0}{90},xmin=-4.5,xmax=1,ymin=-1.3,ymax=1.3,
+          title={\tiny $\alpha=0.09$: zig-zag},
+          tick label style={font=\tiny},xtick={-4,-2,0},ytick={-1,0,1},yticklabels={}]
+          \costcontour{cugray!60,forget plot,domain=-4.5:1,y domain=-1.3:1.3}{1,4,9,16}{x^2+10*y^2}
+          \addplot[curose,thick,mark=*,mark size=0.9pt] coordinates
+            {(-4.000,1.000)(-3.280,-0.800)(-2.690,0.640)(-2.205,-0.512)(-1.808,0.410)
+             (-1.483,-0.328)(-1.216,0.262)(-0.997,-0.210)(-0.818,0.168)(-0.670,-0.134)
+             (-0.550,0.107)(-0.451,-0.086)};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize $x$-axis $w_1$, $y$-axis $w_2$; 15 and 12 steps shown.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Two failure modes, one fix}
+        \textbf{Left:} every step moves $w_1$ in the same direction, but slowly --- $w_1$
+        wants a \emph{larger} step.\\[2pt]
+        \textbf{Right:} $w_2$ flips sign every step --- it wants a \emph{smaller} step,
+        while $w_1$ is still happy to go faster.
+      \end{block}
+      \begin{keyidea}[Adam --- adaptive moment estimation]
+        Give every parameter its own effective step size, adjusted automatically from the
+        history of its gradients:
+        \begin{itemize}
+          \item gradient keeps the same sign $\Rightarrow$ steps stay large;
+          \item gradient oscillates $\Rightarrow$ the average cancels, steps shrink.
+        \end{itemize}
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{The Adam update, and how to use it}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \begin{defnbox}[Adam, for one parameter $w$ at step $t$]
+        \small
+        With gradient $d=\partial J/\partial w$:
+        \begin{align*}
+          m &\leftarrow \beta_1 m+(1-\beta_1)\,d && \text{mean of } d\\
+          v &\leftarrow \beta_2 v+(1-\beta_2)\,d^2 && \text{mean of } d^2\\
+          w &\leftarrow w-\alpha\,\frac{\hat m}{\sqrt{\hat v}+\epsilon},
+          && \hat m=\tfrac{m}{1-\beta_1^t},\ \hat v=\tfrac{v}{1-\beta_2^t}
+        \end{align*}
+        Defaults: $\beta_1=0.9$, $\beta_2=0.999$, $\epsilon=10^{-7}$; $\alpha=10^{-3}$.
+      \end{defnbox}
+      \footnotesize
+      $\hat m/\sqrt{\hat v}$ is near $\pm1$ when the gradient is consistent, so each step is
+      about $\alpha$ \emph{whatever the gradient's scale}; near $0$ when it oscillates.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+\begin{lstlisting}
+model.compile(
+  optimizer=tf.keras.optimizers.Adam(
+      learning_rate=1e-3),
+  loss=SparseCategoricalCrossentropy(
+      from_logits=True))
+\end{lstlisting}
+      \vspace{1mm}
+      \begin{block}{In practice}
+        Adam is the default optimiser for neural networks. It is far less sensitive to the
+        choice of $\alpha$ than plain gradient descent, but $\alpha$ still matters: try
+        $10^{-2}$, $10^{-3}$, $10^{-4}$.
+      \end{block}
+      \begin{pitfall}[Not magic]
+        \footnotesize A bad loss, unscaled features or a bug in the data are not fixed by
+        changing the optimiser. Check the learning curve first.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Additional Layer Types}
+
+\begin{frame}{Dense layers, and an alternative}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Dense layer}
+        \footnotesize Every unit sees every activation of the previous layer. Powerful,
+        but parameter-hungry: $784$ pixels into $25$ units already costs $19\,625$
+        parameters.
+      \end{block}
+      \begin{defnbox}[Convolutional layer]
+        \small Each unit looks only at a \textbf{window} --- a small, contiguous region of
+        its input --- and the \emph{same} weights (a \textbf{filter}) are slid across all
+        windows.
+      \end{defnbox}
+      \footnotesize
+      \textbf{Why it helps.}
+      \begin{itemize}
+        \item Far fewer parameters $\Rightarrow$ faster to compute.
+        \item Needs less data, and is less prone to overfitting (Week 3).
+        \item Builds in a useful assumption: a pattern means the same thing wherever it
+              appears.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \centering {\scriptsize Each hidden unit sees one region of the image}\par
+      \begin{tikzpicture}[scale=0.3]
+        \draw[cugray!60] (0,0) grid (8,8);
+        \fill[cuteal,opacity=0.25] (0,4) rectangle (4,8);
+        \fill[cuamber,opacity=0.25] (4,4) rectangle (8,8);
+        \fill[curose,opacity=0.25] (2,0) rectangle (6,4);
+        \node[neuron,minimum size=5mm] (u1) at (12,7) {};
+        \node[neuron,minimum size=5mm] (u2) at (12,4.5) {};
+        \node[neuron,minimum size=5mm] (u3) at (12,2) {};
+        \draw[synapse,cuteal] (2,6) -- (u1);
+        \draw[synapse,cuamber] (6,6) -- (u2);
+        \draw[synapse,curose] (4,2) -- (u3);
+      \end{tikzpicture}
+      \vspace{3mm}
+
+      \footnotesize\raggedright
+      Hand-designing the window size, the stride (how far each window moves), and the
+      number of filters is part of the architecture. Convolutional networks are the
+      workhorse of computer vision.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Example: classifying a heart signal}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.54\textwidth}
+      \centering {\scriptsize An EKG trace: $100$ samples $x_1,\dots,x_{100}$ (schematic)}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=7.4cm,height=2.9cm,xmin=0,xmax=100,ymin=-1.2,ymax=2.3,clip=false,
+          axis lines=none]
+          \addplot[cublue,thick,domain=0:100,samples=400]
+            {0.25*sin(deg(x/3))+1.6*exp(-((mod(x,25)-12)^2)/1.2)-0.4*exp(-((mod(x,25)-15)^2)/2)};
+          \draw[cuteal,thick,decorate,decoration={brace,mirror,amplitude=3pt}]
+            (axis cs:0,-0.9) -- node[below=2pt,font=\tiny]{unit 1: $x_1..x_{20}$} (axis cs:20,-0.9);
+          \draw[cuamber,thick,decorate,decoration={brace,amplitude=3pt}]
+            (axis cs:10,2.05) -- node[above=2pt,font=\tiny]{unit 2: $x_{11}..x_{30}$} (axis cs:30,2.05);
+          \draw[curose,thick,decorate,decoration={brace,mirror,amplitude=3pt}]
+            (axis cs:80,-0.9) -- node[below=2pt,font=\tiny]{unit 9: $x_{81}..x_{100}$} (axis cs:100,-0.9);
+        \end{axis}
+      \end{tikzpicture}\par
+      \vspace{4mm}
+      \begin{tikzpicture}[node distance=3mm,
+          lay/.style={draw=cublue,fill=culight,rounded corners,font=\tiny,
+                      minimum height=5mm,inner sep=2pt,align=center}]
+        \node[lay,draw=cuteal,fill=cuteal!12] (x) {$\vx$\\100};
+        \node[lay,right=of x] (l1) {conv: 9 units\\window 20, stride 10};
+        \node[lay,right=of l1] (l2) {conv: 3 units\\window 5, stride 2};
+        \node[lay,right=of l2,draw=cuamber,fill=cuamber!15] (l3) {1 sigmoid\\heart disease?};
+        \foreach \a/\b in {x/l1,l1/l2,l2/l3}{\draw[synapse] (\a)--(\b);}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \footnotesize
+      \begin{block}{Windows}
+        Layer 1: windows start at $1,11,\dots,81$: $9$ units. Layer 2 looks at
+        $a^{[1]}_{1..5}$, $a^{[1]}_{3..7}$, $a^{[1]}_{5..9}$: $3$ units.
+      \end{block}
+      \begin{block}{Parameters in layer 1}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}ll@{}}
+          dense, $100\to9$ & $100\cdot9+9=909$\\
+          own weights per window & $9\cdot(20+1)=189$\\
+          one shared filter & $20+1=21$\\
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}
+        A real convolutional layer uses several filters, each shared across all windows,
+        so it detects several patterns anywhere in the signal for a few dozen parameters
+        apiece.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Derivatives, Computation Graphs and Back-propagation}
+
+\begin{frame}{What a derivative tells gradient descent}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Informal definition}
+        \footnotesize
+        If nudging $w$ by a tiny $\varepsilon$ changes $J(w)$ by about $k\varepsilon$, then
+        \[ \frac{dJ}{dw}=k. \]
+        Example: $J=w^2$ at $w=3$, with $\varepsilon=0.001$:\par
+        $J(3.001)=9.006001$, a rise of $0.006001\approx 6\varepsilon$. So $dJ/dw=6$ ---
+        and indeed $\tfrac{d}{dw}w^2=2w=6$.
+      \end{block}
+      \footnotesize
+      The update $w\leftarrow w-\alpha\,dJ/dw$: a large derivative means $J$ is sensitive
+      to $w$, so take a large step; a negative one means increasing $w$ lowers $J$.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Check: derivatives at $w=2$, $\varepsilon=0.001$}
+        \renewcommand{\arraystretch}{1.2}
+        \begin{tabular}{@{}llll@{}}
+          \toprule
+          $J(w)$ & $\dfrac{dJ}{dw}$ & at $w=2$ & $\dfrac{J(2.001)-J(2)}{0.001}$\\
+          \midrule
+          $w^2$   & $2w$        & $4$     & $4.001$\\
+          $w^3$   & $3w^2$      & $12$    & $12.006$\\
+          $w$     & $1$         & $1$     & $1$\\
+          $1/w$   & $-1/w^2$    & $-0.25$ & $-0.2499$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}[Numerical gradient check]
+        Comparing an analytic derivative with $\bigl(J(w+\varepsilon)-J(w)\bigr)/\varepsilon$
+        is the standard way to test gradient code. Symbolic tools (e.g.\ SymPy) do the
+        algebra if you need it.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The computation graph}
+  \footnotesize
+  \centering
+  Linear regression on one example: $J=\tfrac12(wx+b-y)^2$, with $w=2,\ b=8,\ x=-2,\ y=2$.\par
+  \vspace{2mm}
+  \begin{tikzpicture}[
+      op/.style={draw=cublue,fill=culight,rounded corners,minimum width=1.9cm,
+                 minimum height=7mm,align=center,font=\scriptsize},
+      inp/.style={font=\scriptsize,cuteal}]
+    \node[inp] (w) at (0,0.55) {$w=2$};
+    \node[inp] (x) at (0,-0.55) {$x=-2$};
+    \node[op] (c) at (2.5,0) {$c=wx$\\$=-4$};
+    \node[inp] (b) at (2.5,-1.35) {$b=8$};
+    \node[op] (a) at (5.3,0) {$a=c+b$\\$=4$};
+    \node[inp] (y) at (5.3,-1.35) {$y=2$};
+    \node[op] (d) at (8.1,0) {$d=a-y$\\$=2$};
+    \node[op,draw=cuamber,fill=cuamber!12] (J) at (10.9,0) {$J=\tfrac12d^2$\\$=2$};
+    \draw[synapse,thick] (w) -- (c); \draw[synapse,thick] (x) -- (c);
+    \draw[synapse,thick] (c) -- (a); \draw[synapse,thick] (b) -- (a);
+    \draw[synapse,thick] (a) -- (d); \draw[synapse,thick] (y) -- (d);
+    \draw[synapse,thick] (d) -- (J);
+    \foreach \s/\t/\l in {J/d/{$\frac{\partial J}{\partial d}=d=2$},
+                          d/a/{$\frac{\partial J}{\partial a}=2$},
+                          a/c/{$\frac{\partial J}{\partial c}=2$}}{
+      \draw[-{Stealth},curose,thick] ([yshift=4mm]\s.north) to[bend right=30]
+        node[above,font=\tiny,curose]{\l} ([yshift=4mm]\t.north);}
+    \node[font=\tiny,curose,align=left] at (1.0,1.25) {$\frac{\partial J}{\partial w}=\frac{\partial J}{\partial c}\cdot x=-4$};
+    \node[font=\tiny,curose] at (3.9,-1.35) {$\frac{\partial J}{\partial b}=\frac{\partial J}{\partial a}=2$};
+  \end{tikzpicture}\par
+  \vspace{2mm}
+  \raggedright
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Forward, left to right}
+        Compute and store every intermediate value: $c$, $a$, $d$, $J$.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Backward, right to left}
+        Each node multiplies the derivative arriving from its right by its own local
+        derivative (chain rule). Check: nudging $w$ to $2.001$ changes $J$ by $-0.004$.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Why backward is efficient}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{keyidea}[Reuse]
+        $\partial J/\partial a$ was computed once and then used for \emph{both}
+        $\partial J/\partial b$ and $\partial J/\partial c$ (and through $c$, for $w$).
+        Every intermediate derivative is shared by everything to its left.
+      \end{keyidea}
+      \footnotesize
+      \begin{block}{Cost, for $N$ nodes and $P$ parameters}
+        \begin{itemize}
+          \item Nudge each parameter and re-run the forward pass: about $N\times P$ steps.
+          \item Back-propagation: about $N+P$ steps.
+        \end{itemize}
+        With $N=10^4$ and $P=10^5$: $10^9$ against $1.1\times10^5$ --- the difference
+        between impossible and instant.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{defnbox}[Back-propagation]
+        \small Compute all $\partial J/\partial(\text{parameter})$ in one backward sweep over
+        the computation graph, applying the chain rule at each node and reusing every
+        intermediate result.
+      \end{defnbox}
+      \begin{block}{Automatic differentiation}
+        TensorFlow records the forward computation as a graph while it runs, then runs
+        back-propagation over it. This is the ``library does the calculus'' of Part 1 ---
+        and why you only ever write the forward pass.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{A larger example: two ReLU layers}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.44\textwidth}
+      \begin{block}{Setting}
+        One input, one unit per layer, ReLU in both, squared-error loss:
+        \[ a^{[1]}=g(w^{[1]}x+b^{[1]}),\quad a^{[2]}=g(w^{[2]}a^{[1]}+b^{[2]}) \]
+        \[ J=\tfrac12\bigl(a^{[2]}-y\bigr)^2 \]
+        $x=1$, $y=5$; \ $w^{[1]}=2$, $b^{[1]}=0$; \ $w^{[2]}=3$, $b^{[2]}=1$.
+      \end{block}
+      \begin{block}{Forward}
+        $z^{[1]}=2$, $a^{[1]}=2$; \ $z^{[2]}=3\cdot2+1=7$, $a^{[2]}=7$;\\
+        $J=\tfrac12(7-5)^2=2$.
+      \end{block}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \begin{block}{Backward (ReLU$'(z)=1$ here, since every $z>0$)}
+        \renewcommand{\arraystretch}{1.25}
+        \begin{tabular}{@{}lll@{}}
+          $\partial J/\partial a^{[2]}$ & $=a^{[2]}-y$ & $=2$\\
+          $\partial J/\partial z^{[2]}$ & $=2\cdot1$ & $=2$\\
+          $\partial J/\partial w^{[2]}$ & $=2\cdot a^{[1]}$ & $=\mathbf{4}$\\
+          $\partial J/\partial b^{[2]}$ & $=2$ & $=\mathbf{2}$\\
+          $\partial J/\partial a^{[1]}$ & $=2\cdot w^{[2]}$ & $=6$\\
+          $\partial J/\partial z^{[1]}$ & $=6\cdot1$ & $=6$\\
+          $\partial J/\partial w^{[1]}$ & $=6\cdot x$ & $=\mathbf{6}$\\
+          $\partial J/\partial b^{[1]}$ & $=6$ & $=\mathbf{6}$\\
+        \end{tabular}
+      \end{block}
+      \begin{pitfall}[Verify numerically]
+        \footnotesize Nudging each parameter by $0.001$ gives $6.0045$, $6.0045$,
+        $4.0020$, $2.0005$ --- agreeing to the size of $\varepsilon$.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Softmax turns $N$ scores into $N$ probabilities; with $N=2$ it is logistic
+                regression.
+          \item Loss $-\log a_y$: \texttt{SparseCategoricalCrossentropy}.
+          \item Output linear logits and pass \texttt{from\_logits=True}: numerically stable.
+          \item Multi-label: $N$ sigmoid outputs, not softmax.
+          \item Adam adapts a step size per parameter; it is the default optimiser.
+          \item Convolutional units see windows and share weights.
+          \item Back-propagation: one backward sweep, chain rule, $\approx N+P$ steps.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ a_j=\frac{e^{z_j}}{\sum_k e^{z_k}},\qquad L=-\log a_y \]
+        \[ -\log a_y = \log\sum_k e^{z_k}-z_y \]
+        \[ \frac{\partial J}{\partial w}=\frac{\partial J}{\partial c}\cdot\frac{\partial c}{\partial w} \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Week 6: advice for applying machine learning --- evaluating a model,
+        train/validation/test sets, and diagnosing bias and variance.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Define multiclass classification and give two examples. Why can one sigmoid
+          output not handle it? \hfill\clo{4}
+    \item State the softmax function. Compute $\va$ for $\vz=[1,\ 0,\ -1]$ and verify that
+          the outputs sum to $1$. \hfill\clo{6}
+    \item Show that softmax with $N=2$ is the same as logistic regression, and say what
+          plays the role of $z$. \hfill\clo{6}
+    \item Write the cross-entropy loss for softmax. For the worked example
+          $\vz=[2,1,0.1]$, which label gives the largest loss, and why? \hfill\clo{5}
+    \item Explain why softmax is unlike sigmoid, ReLU and linear activations in how each
+          output depends on the scores. \hfill\clo{4}
+    \item What are logits? Explain why \texttt{from\_logits=True} with a linear output layer
+          is preferred, and how you then obtain probabilities. \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Distinguish multiclass from multi-label classification, giving the output layer
+          and loss for each. \hfill\clo{5}
+    \item Describe the Adam update. Explain how it behaves when a parameter's gradient
+          keeps the same sign, and when it oscillates. \hfill\clo{6}
+    \item What is a convolutional layer? A $1$-D input has $200$ samples; layer 1 uses
+          windows of $40$ with stride $20$. How many units, and how many parameters with one
+          shared filter? \hfill\clo{6}
+    \item For $J=\tfrac12(wx+b-y)^2$ with $w=1$, $b=2$, $x=3$, $y=1$, draw the computation
+          graph and compute $\partial J/\partial w$ and $\partial J/\partial b$ by
+          back-propagation. \hfill\clo{8}
+    \item Explain why back-propagation takes about $N+P$ steps whereas finite differences
+          take about $N\times P$. \hfill\clo{5}
+    \item In the two-ReLU-layer example, recompute every derivative with $w^{[2]}=-1$.
+          What happens, and why? \hfill\clo{8}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a crop-disease classifier.} The Bangladesh Rice Research Institute
+          wants to classify leaf photographs as healthy, blast, brown spot or bacterial
+          blight. Specify the architecture (including any convolutional layers), every
+          activation, the loss, the optimiser, and how you will output probabilities to
+          farmers. \hfill\clo{12}
+    \item \textbf{Design a news tagger.} A Bangla news portal wants to tag each article with
+          any of $12$ topics (politics, sport, economy, \dots). Design the output layer and
+          loss, and explain what would go wrong with softmax. \hfill\clo{10}
+    \item \textbf{Design a gradient checker.} Design a routine that verifies the gradients
+          produced by a back-propagation implementation for an arbitrary network. Specify
+          $\varepsilon$, the comparison metric, the tolerance, and how you handle the
+          ReLU kink at $0$. \hfill\clo{12}
+    \item \textbf{Design an optimiser comparison.} Design an experiment comparing plain
+          gradient descent and Adam on the digit data. Specify the learning rates you
+          sweep, what you measure, and how you make the comparison fair. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S10.2} --- softmax output and cross-entropy on the
+    MNIST digits; \textbf{\S10.3} --- convolutional networks; \textbf{\S10.7.1} ---
+    back-propagation.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S4.3.4} --- multiclass logistic regression
+    (softmax); \textbf{\S5.3} --- error back-propagation.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 5): softmax; multiclass; practice lab on neural networks for
+    multiclass classification; derivatives and back-propagation.\\
+    Practice quizzes: \emph{Multiclass Classification}; \emph{Additional Neural Network
+    Concepts}.
+  \end{center}
+\end{frame}
+
+\end{document}

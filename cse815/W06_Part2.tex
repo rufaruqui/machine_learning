@@ -1,0 +1,648 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 6, Part 2
+%  The Machine Learning Development Process: Error Analysis, Data,
+%  Transfer Learning, Deployment, Fairness, and Skewed Classes
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 6, Part 2]{The Machine Learning Development Process}
+\subtitle{Error Analysis, Adding Data, Transfer Learning, Deployment, Fairness, and Precision--Recall}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 6 / Part 2]{Week 6 $\cdot$ Part 2}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From diagnosis to a development process}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Part 1 gave us}
+        \footnotesize
+        \begin{itemize}
+          \item Train / cross-validation / test: fit, choose, report.
+          \item Bias gap and variance gap, measured against a baseline.
+          \item Learning curves: does more data help?
+        \end{itemize}
+      \end{block}
+      \footnotesize
+      Bias and variance say \emph{how much} a model is wrong. They do not say \emph{which}
+      examples it gets wrong, where more data should come from, or whether the model should
+      be deployed at all. Today is about the rest of the process.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item The iterative loop, and error analysis
+          \item Adding data: targeted collection, augmentation, synthesis
+          \item Transfer learning
+          \item The full cycle of a project; fairness, bias and ethics
+          \item Skewed classes: precision, recall and $F_1$
+        \end{enumerate}
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Iterative Loop and Error Analysis}
+
+\begin{frame}{The iterative loop of ML development}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \centering
+      \begin{tikzpicture}[
+          st/.style={draw=cublue,fill=culight,rounded corners,align=center,font=\scriptsize,
+                     minimum width=2.6cm,minimum height=9mm}]
+        \node[st] (a) at (90:1.55) {choose architecture\\(model, data, $\lambda$)};
+        \node[st,draw=cuamber,fill=cuamber!12] (t) at (-30:1.85) {train model};
+        \node[st,draw=cuteal,fill=cuteal!12] (d) at (210:1.85) {diagnostics\\(bias, variance,\\error analysis)};
+        \foreach \u/\v in {a/t,t/d,d/a}{
+          \draw[-{Stealth[length=2.6mm]},cugray,very thick] (\u) to[bend left=25] (\v);}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \footnotesize
+      \begin{block}{Example: a spam classifier}
+        Features: $x_j=1$ if word $j$ of a 10\,000-word list appears in the email. Ideas
+        for improving it:
+        \begin{itemize}
+          \item collect more data (``honeypot'' accounts that attract spam);
+          \item features from the email's routing headers;
+          \item features from the body: punctuation, ``w4tches'' for ``watches'';
+          \item algorithms to detect deliberate misspellings.
+        \end{itemize}
+      \end{block}
+      \begin{keyidea}
+        Every turn of the loop costs time. Good diagnostics make each turn count.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Error analysis: look at the mistakes}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \footnotesize
+      \begin{block}{Illustrative: 500 of 5000 validation emails misclassified}
+        Pick 100 of the 500 at random and tag each by hand:\par
+        \vspace{1mm}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lr@{}}
+          \toprule
+          category & count\\
+          \midrule
+          pharmaceutical spam & $21$\\
+          phishing (stealing passwords) & $18$\\
+          unusual email routing & $7$\\
+          spam inside an embedded image & $5$\\
+          deliberate misspellings & $3$\\
+          \bottomrule
+        \end{tabular}\par
+        \vspace{1mm}
+        Categories may overlap: one email can be both pharmaceutical and misspelt.
+      \end{block}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{keyidea}[What the table decides]
+        A perfect misspelling detector would fix at most $3$ in $100$ mistakes --- about
+        $15$ of the $500$. Pharmaceutical spam and phishing together account for $39$:
+        that is where effort should go (more pharmaceutical examples; features for URLs in
+        phishing emails).
+      \end{keyidea}
+      Why 100? Enough to see the large categories clearly; few enough to read in an hour or
+      two.
+      \begin{pitfall}[Limits]
+        \footnotesize Easy for tasks people do well (reading email, recognising objects);
+        much harder when people cannot judge either, such as predicting which advert a
+        user will click.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Adding Data}
+
+\begin{frame}{More data --- of the right kind}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Targeted collection}
+        \footnotesize
+        ``More of everything'' is slow and expensive. If error analysis says pharmaceutical
+        spam is the problem, collect \emph{pharmaceutical spam}: for instance, search the
+        unlabelled mail you already have for it and label only that.
+      \end{block}
+      \begin{block}{Two views of a project}
+        \footnotesize
+        \textbf{Model-centric}: hold the data fixed, improve the algorithm.\\[2pt]
+        \textbf{Data-centric}: hold a good algorithm fixed, improve the data. With strong
+        off-the-shelf networks, the second is often the faster route to better
+        performance.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{defnbox}[Three ways to add data]
+        \small
+        \begin{enumerate}
+          \item \textbf{Collect} more real examples, targeted by error analysis.
+          \item \textbf{Augment}: create new examples by modifying existing ones, keeping
+                the label.
+          \item \textbf{Synthesise}: create new examples from scratch.
+        \end{enumerate}
+      \end{defnbox}
+      \begin{keyidea}
+        All three serve a model with \emph{high variance}. Part 1's learning curve tells
+        you whether that is the model you have.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Data augmentation}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize One labelled ``A'' becomes many}\par
+      \vspace{1mm}
+      \begin{tikzpicture}[letter/.style={font=\sffamily\bfseries\Huge,cublue}]
+        \node[draw=cuamber,thick,minimum size=1.3cm,letter] at (0,0) {A};
+        \node[font=\tiny,cuamber] at (0,-0.9) {original};
+        \foreach \x/\lab in {1.8/rotated,3.4/stretched,5.0/shrunk,6.6/sheared}{
+          \node[draw=cugray!50,minimum size=1.3cm] at (\x,0) {};
+          \node[font=\tiny,cugray] at (\x,-0.9) {\lab};}
+        \node[letter,rotate=15] at (1.8,0) {A};
+        \node[letter,xscale=1.4] at (3.4,0) {A};
+        \node[letter,scale=0.65] at (5.0,0) {A};
+        \node[letter,xslant=0.4] at (6.6,0) {A};
+        \node[draw=cugray!50,minimum size=1.3cm] at (3.4,-2.1) {};
+        \node[letter,cublue!45] at (3.4,-2.1) {A};
+        \pgfmathsetseed{6}
+        \foreach \i in {1,...,40}{
+          \pgfmathsetmacro{\px}{3.4+1.1*(rnd-0.5)}
+          \pgfmathsetmacro{\py}{-2.1+1.1*(rnd-0.5)}
+          \fill[cugray] (\px,\py) circle (0.6pt);}
+        \node[font=\tiny,curose] at (3.4,-3.0) {random pixel noise: usually useless};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Other domains}
+        \textbf{Speech}: add background noise --- a crowd, a car, a bad phone line --- to
+        a clean recording. \textbf{Text}: replace words with synonyms. Each modified copy
+        keeps the original label.
+      \end{block}
+      \begin{keyidea}[The rule]
+        A distortion helps only if it represents variation you expect in the
+        \emph{test} set. Rotated letters and noisy calls occur in practice; per-pixel
+        random noise does not, and adds little.
+      \end{keyidea}
+      \begin{pitfall}[Do not change the label]
+        \footnotesize Rotate a ``6'' by $180^\circ$ and it is a ``9''. Augmentations must
+        preserve what the label means.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Data synthesis}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Photo OCR}
+        \footnotesize
+        Reading text in photographs of shop signs and number plates. Real labelled crops are
+        scarce. Synthesise them: render characters in many fonts, sizes, colours and
+        contrasts, on varied backgrounds, and crop.
+      \end{block}
+      \centering
+      \begin{tikzpicture}
+        \foreach \x/\f/\c in {0/\rmfamily/cublue,1.0/\sffamily/curose,2.0/\ttfamily/cuteal,
+                              3.0/\itshape/cuamber,4.0/\bfseries/cugray}{
+          \node[draw=cugray!40,fill=culight,minimum size=8mm,font=\f\LARGE,text=\c]
+            at (\x,0) {A};
+        }
+      \end{tikzpicture}\par
+      {\scriptsize synthetic training images of the letter ``A''}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{When synthesis works}
+        When you can write a program whose output looks like real inputs, with the label
+        known by construction: rendered text, simulated sensor readings, game-engine images
+        for self-driving.
+      \end{block}
+      \begin{pitfall}[The gap between synthetic and real]
+        \footnotesize A model can learn the renderer's quirks instead of the task. Always
+        validate on \emph{real} data, and check with error analysis that the synthetic data
+        fixes the categories it was made for.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Transfer Learning}
+
+\begin{frame}{Using data from a different task}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.54\textwidth}
+      \centering
+      \begin{tikzpicture}[scale=1.35,transform shape,node distance=2.5mm,
+          lay/.style={draw=cublue,fill=culight,rounded corners,font=\tiny,
+                      minimum height=5mm,inner sep=2pt,align=center}]
+        \node[font=\scriptsize\bfseries,cublue] at (2.4,0.75) {1. Supervised pre-training};
+        \node[lay,draw=cuteal,fill=cuteal!12] (x) at (0,0) {$\vx$: 784};
+        \node[lay,right=of x] (h1) {128};
+        \node[lay,right=of h1] (h2) {64};
+        \node[lay,right=of h2,draw=cuamber,fill=cuamber!15] (o) {1000 classes};
+        \foreach \a/\b in {x/h1,h1/h2,h2/o}{\draw[synapse] (\a)--(\b);}
+        \node[font=\tiny,cugray] at (2.4,-0.55) {1 million labelled images: cats, cars, people, \dots};
+        \node[font=\scriptsize\bfseries,cublue] at (2.4,-1.25) {2. Fine-tuning};
+        \node[lay,draw=cuteal,fill=cuteal!12] (x2) at (0,-2.0) {$\vx$: 784};
+        \node[lay,right=of x2] (g1) {128};
+        \node[lay,right=of g1] (g2) {64};
+        \node[lay,right=of g2,draw=curose,fill=curose!10] (o2) {10 digits};
+        \foreach \a/\b in {x2/g1,g1/g2,g2/o2}{\draw[synapse] (\a)--(\b);}
+        \node[font=\tiny,cugray] at (2.4,-2.55) {small labelled set of digits};
+        \draw[cuteal,thick,dashed,-{Stealth}] (h1.south) -- node[left,font=\tiny]{copy} (g1.north);
+        \draw[cuteal,thick,dashed,-{Stealth}] (h2.south) -- (g2.north);
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \footnotesize
+      \begin{block}{Two options for step 2}
+        \textbf{Option 1}: train only the new output layer; keep the copied layers fixed.
+        Best when the new data set is very small.\\[2pt]
+        \textbf{Option 2}: train every layer, starting from the copied values. Better when
+        you have more data.
+      \end{block}
+      \begin{block}{Parameters}
+        Copied: $100\,480+8\,256=108\,736$. New output layer: $64\cdot10+10=650$ (it
+        replaces $65\,000$). Option 1 trains $650$ of $109\,386$.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Why transfer learning works}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{keyidea}[Generic early features]
+        Week 4: the early layers of an image network detect edges, then corners and curves,
+        then parts. These are useful for almost \emph{any} image task, so layers learned on
+        a million photographs give a head start on a few hundred X-rays or digits.
+      \end{keyidea}
+      \begin{pitfall}[Same type of input]
+        \footnotesize Pre-train on images for an image task, on audio for a speech task, on
+        text for a language task. A network pre-trained on photographs offers nothing to a
+        spreadsheet of loan applications.
+      \end{pitfall}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{In practice}
+        \begin{enumerate}
+          \item Download a network pre-trained on a large data set with the same input type
+                --- often published by researchers or companies.
+          \item Replace the output layer to suit your classes.
+          \item Fine-tune on your own data (option 1 or 2).
+        \end{enumerate}
+      \end{block}
+      \begin{block}{The same idea, at scale}
+        Large language models such as GPT and BERT are pre-trained on vast amounts of text,
+        then fine-tuned for a specific task --- including tasks in Bangla.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{The Full Cycle, and Fairness}
+
+\begin{frame}{The full cycle of a machine learning project}
+  \centering
+  \begin{tikzpicture}[
+      st/.style={draw=cublue,fill=culight,rounded corners,align=center,font=\scriptsize,
+                 minimum width=2.6cm,minimum height=11mm}]
+    \node[st] (s) at (0,0) {\textbf{Scope}\\define the project};
+    \node[st] (c) at (3.4,0) {\textbf{Collect data}\\define and collect};
+    \node[st,draw=cuamber,fill=cuamber!12] (t) at (6.8,0) {\textbf{Train model}\\train, error analysis,\\iterate};
+    \node[st,draw=cuteal,fill=cuteal!12] (d) at (10.2,0) {\textbf{Deploy}\\deploy, monitor,\\maintain};
+    \draw[synapse,very thick] (s) -- (c);
+    \draw[synapse,very thick] (c) -- (t);
+    \draw[synapse,very thick] (t) -- (d);
+    \draw[synapse,thick,curose] (t.south) to[bend left=35] node[below,font=\tiny,fill=white,inner sep=1pt]{need more data} (c.south);
+    \draw[synapse,thick,curose] (d.south) to[bend left=30] node[below,font=\tiny,fill=white,inner sep=1pt]{performance drifts: retrain} (t.south);
+  \end{tikzpicture}\par
+  \vspace{2mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Deployment}
+        \footnotesize
+        The model runs on an \textbf{inference server}. A mobile app sends an input --- a
+        voice query, a transaction --- through an API call and receives a prediction.
+        Engineering concerns then dominate: reliable prediction at scale, logging inputs
+        and outputs, monitoring, and updating the model.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[MLOps]
+        \footnotesize Machine-learning operations: the practice of building, deploying and
+        maintaining ML systems. Logged data from deployment is often the best new training
+        data --- and the first sign that the world has changed (\textbf{data drift}).
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Fairness, bias and ethics}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{When systems have done harm}
+        \begin{itemize}
+          \item A hiring tool that learned to rank women's applications lower, from past
+                hiring decisions.
+          \item Face recognition that is markedly less accurate for darker-skinned faces.
+          \item Loan approval that disadvantages groups under-represented in the training
+                data.
+        \end{itemize}
+      \end{block}
+      \begin{block}{Adverse uses}
+        Deepfakes made without consent; recommender systems that spread toxic content
+        because it is engaging; fraud and fake reviews generated at scale.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{keyidea}[Bias in, bias out]
+        ``Bias'' here is not the bias of Part 1. A model trained on historical decisions
+        learns the patterns in those decisions --- including unfair ones --- and applies
+        them at scale.
+      \end{keyidea}
+      \begin{block}{Practical guidelines}
+        \begin{enumerate}
+          \item A diverse team brainstorms what could go wrong, especially for
+                vulnerable groups.
+          \item Search the literature for standards in your field.
+          \item Audit for harm \emph{before} deployment, e.g.\ accuracy per group.
+          \item Plan mitigation (e.g.\ roll back) and keep monitoring.
+        \end{enumerate}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Skewed Classes: Precision and Recall}
+
+\begin{frame}{When accuracy misleads}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{Screening for a rare disease}
+        $1000$ patients in the validation set, $25$ of them ill ($y=1$).
+        \begin{itemize}
+          \item A trained classifier: accuracy $98.5\%$.
+          \item \texttt{print("y = 0")} for everyone: accuracy $97.5\%$.
+        \end{itemize}
+        The program that never finds a single patient is nearly as ``accurate''.
+      \end{block}
+      \begin{block}{Confusion matrix of the classifier}
+        \centering
+        \renewcommand{\arraystretch}{1.25}
+        \begin{tabular}{@{}l|cc@{}}
+          & actual $1$ & actual $0$\\
+          \hline
+          predicted $1$ & TP $=15$ & FP $=5$\\
+          predicted $0$ & FN $=10$ & TN $=970$\\
+        \end{tabular}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{defnbox}[Precision and recall]
+        \small
+        \[ \text{precision}=\frac{\text{TP}}{\text{TP}+\text{FP}}=\frac{15}{20}=0.75 \]
+        of the patients we flagged, the fraction actually ill.
+        \[ \text{recall}=\frac{\text{TP}}{\text{TP}+\text{FN}}=\frac{15}{25}=0.60 \]
+        of the ill patients, the fraction we found.
+      \end{defnbox}
+      \begin{keyidea}
+        ``Always $y=0$'' has recall $0$ and an undefined precision ($0/0$): the two numbers
+        expose it immediately. Convention: $y=1$ is the rare class.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Trading precision for recall with the threshold}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \centering {\scriptsize Precision--recall curve as the threshold varies}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.4cm,height=4.5cm,xmin=0,xmax=1.02,ymin=0,ymax=1.02,
+          xlabel={recall},ylabel={precision},tick label style={font=\scriptsize},
+          label style={font=\scriptsize}]
+          \addplot[cublue,very thick,smooth] coordinates
+            {(0.999,0.117)(0.997,0.125)(0.994,0.138)(0.988,0.155)(0.977,0.178)(0.960,0.210)
+             (0.933,0.252)(0.894,0.305)(0.841,0.371)(0.773,0.449)(0.691,0.535)(0.599,0.624)
+             (0.500,0.709)(0.401,0.785)(0.309,0.847)(0.227,0.894)(0.159,0.929)(0.106,0.953)
+             (0.067,0.970)(0.040,0.981)(0.023,0.988)};
+          \addplot[only marks,mark=*,mark size=2pt,curose] coordinates
+            {(0.841,0.371)(0.627,0.597)(0.461,0.741)(0.301,0.851)(0.116,0.949)};
+          \node[font=\tiny,curose,anchor=south west] at (axis cs:0.841,0.371) {0.1};
+          \node[font=\tiny,curose,anchor=south west] at (axis cs:0.627,0.597) {0.3};
+          \node[font=\tiny,curose,anchor=south west] at (axis cs:0.461,0.741) {0.5};
+          \node[font=\tiny,curose,anchor=south west] at (axis cs:0.301,0.851) {0.7};
+          \node[font=\tiny,curose,anchor=south west] at (axis cs:0.116,0.949) {0.9};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize Illustrative: 10\% positives, scores $\mathcal{N}(2,1)$ vs.\
+      $\mathcal{N}(0,1)$; labels are thresholds on $P(y{=}1\mid\vx)$.}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \footnotesize
+      \begin{block}{Predict $\yhat=1$ if $f(\vx)\ge$ threshold}
+        \renewcommand{\arraystretch}{1.0}
+        \begin{tabular}{@{}cccc@{}}
+          \toprule
+          threshold & precision & recall & $F_1$\\
+          \midrule
+          $0.1$ & $0.371$ & $0.841$ & $0.515$\\
+          $0.3$ & $0.597$ & $0.627$ & $\mathbf{0.612}$\\
+          $0.5$ & $0.741$ & $0.461$ & $0.568$\\
+          $0.7$ & $0.851$ & $0.301$ & $0.444$\\
+          $0.9$ & $0.949$ & $0.116$ & $0.206$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \textbf{Raise} it: predict $1$ only when confident --- higher precision, lower recall
+      (before an invasive treatment). \textbf{Lower} it: miss fewer cases --- higher recall,
+      lower precision (when a miss is dangerous and a follow-up test is cheap).
+      \begin{pitfall}[A choice, not a fit]
+        \footnotesize Set the threshold from the costs of the two kinds of error.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Combining precision and recall: the $F_1$ score}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{Three algorithms --- which is best?}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lcccc@{}}
+          \toprule
+          & $P$ & $R$ & average & $F_1$\\
+          \midrule
+          algorithm 1 & $0.5$  & $0.4$ & $0.45$ & $\mathbf{0.444}$\\
+          algorithm 2 & $0.7$  & $0.1$ & $0.40$ & $0.175$\\
+          algorithm 3 & $0.02$ & $1.0$ & $\mathbf{0.51}$ & $0.0392$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      Algorithm 3 predicts $y=1$ for almost everyone: perfect recall, useless precision.
+      The plain average ranks it first.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[$F_1$ score]
+        \small
+        \[ F_1=\frac{1}{\tfrac12\bigl(\tfrac1P+\tfrac1R\bigr)}=\frac{2PR}{P+R} \]
+        The \textbf{harmonic mean} of $P$ and $R$. It is dominated by the smaller of the
+        two, so a classifier must do well on both to score well.
+      \end{defnbox}
+      \footnotesize
+      \textbf{Check:} algorithm 1, $2(0.5)(0.4)/0.9=0.444$; the screening classifier,
+      $2(0.75)(0.6)/1.35=0.667$.\par
+      \vspace{1mm}
+      In the threshold table, $F_1$ peaks at about $0.31$ ($F_1=0.612$) --- not at the
+      default $0.5$.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Development is a loop: choose, train, diagnose. Diagnostics decide the next
+                turn.
+          \item Error analysis: tag a sample of the mistakes by hand; fix the largest
+                categories first.
+          \item Add data where error analysis points; augment with realistic distortions;
+                synthesise when you can render the input.
+          \item Transfer learning: pre-train on a large related task, replace the output
+                layer, fine-tune.
+          \item Deploy, monitor and retrain; audit for harm before and after.
+          \item Skewed classes: use precision, recall and $F_1$, not accuracy.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ P=\frac{\text{TP}}{\text{TP}+\text{FP}},\qquad R=\frac{\text{TP}}{\text{TP}+\text{FN}} \]
+        \[ F_1=\frac{2PR}{P+R} \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Module 3, Week 7: unsupervised learning --- clustering with $k$-means,
+        and anomaly detection.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Describe the iterative loop of ML development and explain the role of
+          diagnostics in it. \hfill\clo{4}
+    \item Explain how to carry out an error analysis. Using the spam table, explain why a
+          misspelling detector is a poor use of effort. \hfill\clo{6}
+    \item Distinguish collecting, augmenting and synthesising data, with one example of
+          each. When will none of them help? \hfill\clo{6}
+    \item State the rule for choosing data augmentations, and give one augmentation that
+          would harm a digit classifier. \hfill\clo{5}
+    \item Explain transfer learning, its two fine-tuning options, and when to use each. Why
+          must the pre-training input be of the same type? \hfill\clo{6}
+    \item Describe the four stages of the full cycle of an ML project, and two reasons a
+          deployed model may need retraining. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Give two examples of ML systems that caused harm, and four guidelines for reducing
+          the risk. \hfill\clo{5}
+    \item Explain why accuracy is misleading for skewed classes, using a classifier that
+          always predicts $y=0$. \hfill\clo{4}
+    \item A fraud model on $10\,000$ transactions gives TP $=40$, FP $=60$, FN $=20$.
+          Compute precision, recall, $F_1$ and accuracy. \hfill\clo{6}
+    \item Explain how raising the threshold of a logistic classifier changes precision and
+          recall, and sketch the precision--recall curve. \hfill\clo{6}
+    \item Why is $F_1$ preferred to the arithmetic mean of $P$ and $R$? Compute both for
+          $P=0.9$, $R=0.2$. \hfill\clo{5}
+    \item For transfer learning from a $784\to128\to64\to1000$ network to a 5-class task,
+          how many parameters does option 1 train? \hfill\clo{4}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design an error analysis.} A Bangla handwritten-address reader for the
+          postal service misreads $8\%$ of envelopes. Design the error analysis: sample
+          size, categories you expect, and how each finding would change what you do next.
+          \hfill\clo{12}
+    \item \textbf{Design an augmentation pipeline.} For a rice-leaf disease classifier
+          trained on photos from a few fields, design augmentations that reflect the
+          conditions farmers' phones will meet. Name one tempting augmentation you would
+          reject, and why. \hfill\clo{10}
+    \item \textbf{Design a threshold.} A dengue screening model flags patients for a blood
+          test costing Tk~$500$; a missed case costs about Tk~$50\,000$ in later treatment.
+          Design how to choose the threshold from validation data, and state what you
+          report to the hospital. \hfill\clo{12}
+    \item \textbf{Design a fairness audit.} A bank will use a model to pre-screen
+          micro-loan applications from rural and urban applicants. Design the audit you
+          would run before deployment, the metric per group, and the condition that would
+          stop the launch. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S4.4.2} --- confusion matrices, changing the
+    threshold, and the ROC curve; \textbf{\S10.3.4--10.3.5} --- data augmentation and
+    using pre-trained networks.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S1.5} --- decision theory: unequal error costs and
+    the decision threshold; \textbf{\S5.5.3} --- invariances learned from transformed
+    training data.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 6): model evaluation and selection; diagnosing bias and variance.
+  \end{center}
+\end{frame}
+
+\end{document}

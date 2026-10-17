@@ -1,0 +1,619 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 6, Part 1
+%  Advice for Applying Machine Learning: Evaluation, Model Selection,
+%  Bias and Variance, and Learning Curves
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 6, Part 1]{Advice for Applying Machine Learning}
+\subtitle{Evaluating Models, Choosing Among Them, and Diagnosing Bias and Variance}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 6 / Part 1]{Week 6 $\cdot$ Part 1}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From building models to improving them}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Weeks 1--5 gave us}
+        \footnotesize
+        Linear and logistic regression, regularisation, and neural networks trained with
+        Adam. You can now build a model for almost any supervised task.
+      \end{block}
+      \footnotesize
+      Building is the easy half. When the first model disappoints --- and it usually does ---
+      there are a dozen things you could try, and some of them cost months. This week is
+      about choosing \emph{which} one, from evidence rather than hunches.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Deciding what to try next; evaluating a model
+          \item Model selection: training, validation and test sets
+          \item Diagnosing bias and variance; the role of $\lambda$
+          \item Baselines and learning curves
+          \item What to try next, revisited; neural networks
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize Part 2 covers the development process itself: error analysis, adding
+      data, transfer learning, deployment, fairness, and metrics for skewed classes.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Evaluating a Model}
+
+\begin{frame}{Your model makes large errors. What next?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Things you could try}
+        \footnotesize
+        \begin{enumerate}
+          \item Get more training examples.
+          \item Try a smaller set of features.
+          \item Get additional features.
+          \item Add polynomial features ($x_1^2$, $x_2^2$, $x_1x_2$, \dots).
+          \item Decrease the regularisation parameter $\lambda$.
+          \item Increase $\lambda$.
+        \end{enumerate}
+      \end{block}
+      \footnotesize
+      Each is reasonable. Each helps some models and is useless for others. Collecting more
+      data alone can take a team months.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Diagnostic]
+        \small A test you run to learn what is and is not working in a learning algorithm,
+        so that you can decide how to improve it.
+      \end{defnbox}
+      \begin{keyidea}
+        Diagnostics take time to run, but much less time than pursuing the wrong fix. The
+        rest of this lecture builds the two most useful ones: the \textbf{bias/variance}
+        diagnosis and the \textbf{learning curve}.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The running example: a synthetic regression task}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize 20 training points; $y=\sin 2x+0.5x$ plus noise, $\sigma=0.25$}\par
+      \vspace{1mm}
+      \begin{tikzpicture}
+        \begin{axis}[width=7.2cm,height=4.9cm,xmin=0.15,xmax=3.05,ymin=-0.8,ymax=2.2,
+          xlabel={$x$},ylabel={$y$},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.5,1.03)},anchor=south,legend columns=4,draw=none},
+          legend cell align=left]
+          \addplot[only marks,mark=*,mark size=1.6pt,cublue] coordinates {(2.829,1.344)(1.534,0.714)(2.929,0.979)(0.243,0.702)(1.822,0.191)(1.129,1.245)(2.406,0.211)(0.524,1.321)(2.615,0.109)(1.632,1.037)(2.707,0.501)(1.431,1.033)(1.291,1.388)(2.367,0.349)(2.952,1.372)(1.109,1.395)(2.907,0.996)(2.787,0.822)(0.533,0.893)(1.827,0.727)};
+          \addlegendentry{training data}
+          \addplot[cuamber,thick] coordinates {(0.200,1.051)(0.225,1.048)(0.250,1.046)(0.275,1.043)(0.300,1.040)(0.325,1.037)(0.350,1.035)(0.375,1.032)(0.400,1.029)(0.425,1.026)(0.450,1.024)(0.475,1.021)(0.500,1.018)(0.525,1.015)(0.550,1.013)(0.575,1.010)(0.600,1.007)(0.625,1.004)(0.650,1.002)(0.675,0.999)(0.700,0.996)(0.725,0.993)(0.750,0.991)(0.775,0.988)(0.800,0.985)(0.825,0.982)(0.850,0.980)(0.875,0.977)(0.900,0.974)(0.925,0.971)(0.950,0.969)(0.975,0.966)(1.000,0.963)(1.025,0.960)(1.050,0.958)(1.075,0.955)(1.100,0.952)(1.125,0.949)(1.150,0.947)(1.175,0.944)(1.200,0.941)(1.225,0.938)(1.250,0.936)(1.275,0.933)(1.300,0.930)(1.325,0.927)(1.350,0.925)(1.375,0.922)(1.400,0.919)(1.425,0.916)(1.450,0.914)(1.475,0.911)(1.500,0.908)(1.525,0.905)(1.550,0.903)(1.575,0.900)(1.600,0.897)(1.625,0.894)(1.650,0.892)(1.675,0.889)(1.700,0.886)(1.725,0.883)(1.750,0.881)(1.775,0.878)(1.800,0.875)(1.825,0.872)(1.850,0.870)(1.875,0.867)(1.900,0.864)(1.925,0.861)(1.950,0.859)(1.975,0.856)(2.000,0.853)(2.025,0.850)(2.050,0.848)(2.075,0.845)(2.100,0.842)(2.125,0.839)(2.150,0.837)(2.175,0.834)(2.200,0.831)(2.225,0.828)(2.250,0.826)(2.275,0.823)(2.300,0.820)(2.325,0.817)(2.350,0.815)(2.375,0.812)(2.400,0.809)(2.425,0.806)(2.450,0.804)(2.475,0.801)(2.500,0.798)(2.525,0.795)(2.550,0.793)(2.575,0.790)(2.600,0.787)(2.625,0.784)(2.650,0.782)(2.675,0.779)(2.700,0.776)(2.725,0.773)(2.750,0.771)(2.775,0.768)(2.800,0.765)(2.825,0.762)(2.850,0.760)(2.875,0.757)(2.900,0.754)(2.925,0.751)(2.950,0.749)(2.975,0.746)(3.000,0.743)};
+          \addlegendentry{degree 1}
+          \addplot[cuteal,very thick] coordinates {(0.200,0.427)(0.225,0.511)(0.250,0.592)(0.275,0.668)(0.300,0.741)(0.325,0.809)(0.350,0.873)(0.375,0.934)(0.400,0.990)(0.425,1.043)(0.450,1.093)(0.475,1.138)(0.500,1.181)(0.525,1.219)(0.550,1.255)(0.575,1.287)(0.600,1.317)(0.625,1.343)(0.650,1.366)(0.675,1.386)(0.700,1.403)(0.725,1.418)(0.750,1.430)(0.775,1.439)(0.800,1.446)(0.825,1.450)(0.850,1.452)(0.875,1.452)(0.900,1.450)(0.925,1.445)(0.950,1.438)(0.975,1.430)(1.000,1.419)(1.025,1.407)(1.050,1.393)(1.075,1.377)(1.100,1.359)(1.125,1.341)(1.150,1.320)(1.175,1.299)(1.200,1.276)(1.225,1.252)(1.250,1.227)(1.275,1.201)(1.300,1.174)(1.325,1.146)(1.350,1.117)(1.375,1.087)(1.400,1.057)(1.425,1.027)(1.450,0.995)(1.475,0.964)(1.500,0.932)(1.525,0.900)(1.550,0.868)(1.575,0.836)(1.600,0.803)(1.625,0.771)(1.650,0.739)(1.675,0.707)(1.700,0.676)(1.725,0.645)(1.750,0.614)(1.775,0.584)(1.800,0.555)(1.825,0.526)(1.850,0.498)(1.875,0.471)(1.900,0.445)(1.925,0.420)(1.950,0.396)(1.975,0.373)(2.000,0.352)(2.025,0.331)(2.050,0.313)(2.075,0.295)(2.100,0.280)(2.125,0.266)(2.150,0.254)(2.175,0.243)(2.200,0.235)(2.225,0.228)(2.250,0.224)(2.275,0.221)(2.300,0.221)(2.325,0.223)(2.350,0.228)(2.375,0.235)(2.400,0.244)(2.425,0.256)(2.450,0.271)(2.475,0.288)(2.500,0.309)(2.525,0.332)(2.550,0.358)(2.575,0.388)(2.600,0.420)(2.625,0.456)(2.650,0.495)(2.675,0.538)(2.700,0.584)(2.725,0.633)(2.750,0.687)(2.775,0.743)(2.800,0.804)(2.825,0.869)(2.850,0.937)(2.875,1.010)(2.900,1.086)(2.925,1.167)(2.950,1.252)(2.975,1.342)(3.000,1.436)};
+          \addlegendentry{degree 3}
+          \addplot[curose,thick] coordinates {(0.200,-4.553)(0.225,-1.092)(0.250,1.334)(0.275,2.935)(0.300,3.888)(0.325,4.343)(0.350,4.425)(0.375,4.237)(0.400,3.864)(0.425,3.375)(0.450,2.824)(0.475,2.253)(0.500,1.695)(0.525,1.174)(0.550,0.706)(0.575,0.301)(0.600,-0.034)(0.625,-0.299)(0.650,-0.493)(0.675,-0.620)(0.700,-0.686)(0.725,-0.697)(0.750,-0.660)(0.775,-0.582)(0.800,-0.472)(0.825,-0.335)(0.850,-0.181)(0.875,-0.014)(0.900,0.158)(0.925,0.331)(0.950,0.500)(0.975,0.661)(1.000,0.811)(1.025,0.948)(1.050,1.068)(1.075,1.172)(1.100,1.258)(1.125,1.327)(1.150,1.378)(1.175,1.412)(1.200,1.430)(1.225,1.433)(1.250,1.423)(1.275,1.401)(1.300,1.369)(1.325,1.329)(1.350,1.281)(1.375,1.228)(1.400,1.172)(1.425,1.113)(1.450,1.054)(1.475,0.995)(1.500,0.938)(1.525,0.883)(1.550,0.831)(1.575,0.784)(1.600,0.740)(1.625,0.701)(1.650,0.667)(1.675,0.638)(1.700,0.613)(1.725,0.593)(1.750,0.577)(1.775,0.565)(1.800,0.556)(1.825,0.549)(1.850,0.545)(1.875,0.543)(1.900,0.541)(1.925,0.540)(1.950,0.539)(1.975,0.537)(2.000,0.534)(2.025,0.530)(2.050,0.523)(2.075,0.515)(2.100,0.503)(2.125,0.489)(2.150,0.473)(2.175,0.454)(2.200,0.432)(2.225,0.408)(2.250,0.382)(2.275,0.354)(2.300,0.326)(2.325,0.297)(2.350,0.269)(2.375,0.242)(2.400,0.218)(2.425,0.196)(2.450,0.179)(2.475,0.168)(2.500,0.163)(2.525,0.166)(2.550,0.178)(2.575,0.200)(2.600,0.233)(2.625,0.278)(2.650,0.335)(2.675,0.405)(2.700,0.486)(2.725,0.579)(2.750,0.680)(2.775,0.788)(2.800,0.897)(2.825,1.004)(2.850,1.100)(2.875,1.175)(2.900,1.218)(2.925,1.213)(2.950,1.142)(2.975,0.980)(3.000,0.701)};
+          \addlegendentry{degree 10}
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Setting}
+        50 points from a known curve plus Gaussian noise: 20 for training, 15 for validation,
+        15 for testing. Models: polynomials of degree $d=1,\dots,10$. Cost
+        $J=\frac{1}{2m}\sum_i(f(x^{(i)})-y^{(i)})^2$.
+      \end{block}
+      \begin{block}{What the picture shows}
+        Degree 1 misses the curve. Degree 10 passes close to every training point and swings
+        wildly between them --- off the chart near $x=0.3$. Degree 3 looks right.
+      \end{block}
+      \begin{pitfall}[Plots do not scale]
+        \footnotesize With one feature we can look. With $64$ pixels or $40$ weather
+        stations we cannot. We need a number that says ``degree 10 is bad''.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Evaluating on data the model has not seen}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Split the data}
+        \footnotesize
+        Train on one part (often 70--80\%); hold back the rest as a \textbf{test set}, used
+        only to measure.
+        \[ J_{\text{test}}=\frac{1}{2m_{\text{test}}}\sum_{i=1}^{m_{\text{test}}}
+           \bigl(f(\vx_{\text{test}}^{(i)})-y_{\text{test}}^{(i)}\bigr)^2 \]
+        Compute it \emph{without} the regularisation term.
+      \end{block}
+      \begin{block}{For classification}
+        \footnotesize
+        $J_{\text{test}}$ can be the logistic cost, but the more readable measure is the
+        \textbf{misclassification error}: the fraction of test examples with
+        $\yhat\ne y$.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Our example, degree 10}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lr@{}}
+          $J_{\text{train}}$ & $0.0164$\\
+          $J_{\text{test}}$  & $0.3362$\\
+        \end{tabular}\par
+        \vspace{1mm}
+        A training cost this low says the curve threads the training points. The test cost,
+        twenty times larger, says it has memorised them.
+      \end{block}
+      \begin{keyidea}
+        $J_{\text{train}}$ measures fit. Only error on held-out data estimates how the model
+        will do on new examples --- its \textbf{generalisation error}.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Model Selection and Cross-Validation}
+
+\begin{frame}{Choosing the degree: the wrong way}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Tempting procedure}
+        \footnotesize
+        Fit $d=1,2,\dots,10$ on the training set. Compute $J_{\text{test}}$ for each. Pick
+        the $d$ with the smallest $J_{\text{test}}$ and report that $J_{\text{test}}$.
+      \end{block}
+      \begin{pitfall}[The test set has been used to choose]
+        \footnotesize
+        $d$ is now a parameter fitted to the test set, exactly as $\vw$ was fitted to the
+        training set. The reported $J_{\text{test}}$ is the \emph{best of ten tries} and is
+        optimistic. In our data it would pick $d=7$ ($0.0380$), the luckiest of several
+        near-equal degrees.
+      \end{pitfall}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Three-way split]
+        \small
+        \begin{itemize}
+          \item \textbf{Training set} (e.g.\ 60\%): fit $\vw,b$.
+          \item \textbf{Cross-validation set} (validation, dev set; 20\%): choose $d$,
+                $\lambda$, the architecture.
+          \item \textbf{Test set} (20\%): report once, at the end.
+        \end{itemize}
+      \end{defnbox}
+      \footnotesize
+      Each set has one job. Any decision taken by looking at a set makes that set's error an
+      underestimate.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Choosing the degree: the right way}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=7.2cm,height=4.8cm,xmin=0.5,xmax=10.5,ymin=0,ymax=0.65,
+          xlabel={degree $d$},ylabel={cost},xtick={1,...,10},
+          tick label style={font=\scriptsize},label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.03,0.97)},anchor=north west},legend cell align=left]
+          \addplot[cublue,very thick,mark=*,mark size=1.4pt] coordinates
+            {(1,0.0806)(2,0.0777)(3,0.0219)(4,0.0209)(5,0.0203)(6,0.0203)(7,0.0201)
+             (8,0.0167)(9,0.0165)(10,0.0164)};
+          \addlegendentry{$J_{\text{train}}$}
+          \addplot[curose,very thick,mark=square*,mark size=1.4pt] coordinates
+            {(1,0.1119)(2,0.0991)(3,0.0496)(4,0.0515)(5,0.0510)(6,0.0516)(7,0.0518)
+             (8,0.1472)(9,0.3432)(10,0.6085)};
+          \addlegendentry{$J_{\text{cv}}$}
+          \draw[cuamber,dashed,thick] (axis cs:3,0) -- (axis cs:3,0.4);
+          \node[font=\tiny,cuamber,fill=white,inner sep=1pt] at (axis cs:3.2,0.43) {$d=3$};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Procedure}
+        \begin{enumerate}
+          \item Fit each degree on the training set.
+          \item Compute $J_{\text{cv}}$ for each; pick the smallest: $d=3$,
+                $J_{\text{cv}}=0.0496$.
+          \item Report $J_{\text{test}}$ for $d=3$ only: $\mathbf{0.0429}$.
+        \end{enumerate}
+      \end{block}
+      \begin{keyidea}[Two curves, two stories]
+        $J_{\text{train}}$ only falls as $d$ grows: more flexibility always fits the
+        training data better. $J_{\text{cv}}$ falls, flattens, then rises --- the classic
+        U. The bottom of the U is the model to choose.
+      \end{keyidea}
+      Same procedure for anything you choose: the number of layers and units in a network,
+      $\lambda$, the learning rate.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Diagnosing Bias and Variance}
+
+\begin{frame}{Bias and variance, read from two numbers}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}L{2.4cm}L{3.0cm}L{3.2cm}L{5.0cm}@{}}
+    \toprule
+    Diagnosis & $J_{\text{train}}$ & $J_{\text{cv}}$ & Our example\\
+    \midrule
+    \textbf{High bias} (underfit) & high & high, $\approx J_{\text{train}}$
+      & $d=1$: $0.0806$ and $0.1119$\\
+    \textbf{High variance} (overfit) & low & $\gg J_{\text{train}}$
+      & $d=10$: $0.0164$ and $0.6085$\\
+    \textbf{Just right} & low & low, near $J_{\text{train}}$
+      & $d=3$: $0.0219$ and $0.0496$\\
+    \textbf{Both} & high & $\gg J_{\text{train}}$
+      & rarer with one feature; common in networks\\
+    \bottomrule
+  \end{tabular}
+  \vspace{3mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Bias]
+        \small The model is too simple to represent the pattern, so it does poorly even on
+        the data it was trained on. More of the same data will not help.
+      \end{defnbox}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Variance]
+        \small The model is so flexible that it fits the noise in its particular training
+        set. A different training set would give a very different model.
+      \end{defnbox}
+    \end{column}
+  \end{columns}
+  \vspace{1mm}
+  {\color{cugray} ``High'' and ``low'' need a reference point: the baseline, later in this
+  lecture.}
+\end{frame}
+
+\begin{frame}{Regularisation moves a model along the same axis}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering {\scriptsize Degree 10, regularised: $J(\vw,b)+\frac{\lambda}{2m}\|\vw\|^2$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=7.2cm,height=4.7cm,xmode=log,xmin=5e-5,xmax=200,ymin=0,ymax=0.13,
+          xlabel={$\lambda$},ylabel={cost},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.03,0.97)},anchor=north west},legend cell align=left]
+          \addplot[cublue,very thick,mark=*,mark size=1.4pt] coordinates
+            {(0.0001,0.0174)(0.001,0.0189)(0.01,0.0198)(0.1,0.0211)(1,0.0299)(10,0.0525)
+             (100,0.0768)};
+          \addlegendentry{$J_{\text{train}}$}
+          \addplot[curose,very thick,mark=square*,mark size=1.4pt] coordinates
+            {(0.0001,0.0749)(0.001,0.0555)(0.01,0.0538)(0.1,0.0560)(1,0.0687)(10,0.0965)
+             (100,0.1171)};
+          \addlegendentry{$J_{\text{cv}}$}
+          \draw[cuamber,dashed,thick] (axis cs:0.01,0) -- (axis cs:0.01,0.085);
+          \node[font=\tiny,cuamber,fill=white,inner sep=1pt] at (axis cs:0.01,0.092) {$\lambda=0.01$};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Reading the curve}
+        \textbf{Small $\lambda$} (left): the degree-10 polynomial is nearly free ---
+        high variance. At $\lambda=0$, $J_{\text{cv}}=0.6085$, off the chart.\\[2pt]
+        \textbf{Large $\lambda$} (right): weights are forced towards $0$, $f$ flattens
+        --- high bias.\\[2pt]
+        In between, $J_{\text{cv}}$ is smallest at $\lambda=0.01$ ($0.0538$); its test cost
+        is $0.0397$.
+      \end{block}
+      \begin{keyidea}[Mirror image]
+        Against $d$, variance grows to the right. Against $\lambda$, variance grows to the
+        \emph{left}. Choose $\lambda$ exactly as $d$: try a range roughly doubling or
+        tenfold, and take the smallest $J_{\text{cv}}$.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Baselines and Learning Curves}
+
+\begin{frame}{``High'' compared with what? Establish a baseline}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{Speech recognition (illustrative)}
+        Some audio is so noisy that people cannot transcribe it either.\par
+        \vspace{1mm}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lccc@{}}
+          \toprule
+          & case A & case B & case C\\
+          \midrule
+          human error     & $10.6\%$ & $10.6\%$ & $10.6\%$\\
+          training error  & $10.8\%$ & $15.0\%$ & $15.0\%$\\
+          validation error & $14.8\%$ & $15.5\%$ & $19.7\%$\\
+          \midrule
+          bias gap       & $0.2$ & $4.4$ & $4.4$\\
+          variance gap   & $4.0$ & $0.5$ & $4.7$\\
+          \midrule
+          diagnosis & variance & bias & both\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{defnbox}[Baseline level of performance]
+        \small The error you can reasonably hope to reach: human-level performance, a
+        competing system, or past experience.
+      \end{defnbox}
+      \begin{block}{Two gaps}
+        \textbf{bias gap} $=$ training error $-$ baseline\\
+        \textbf{variance gap} $=$ validation error $-$ training error
+      \end{block}
+      \begin{keyidea}[Our example has a perfect baseline]
+        The noise has $\sigma=0.25$, so no model can beat
+        $J=\sigma^2/2=0.03125$ on average. Degree 3's training cost, $0.0219$, is
+        \emph{below} it: the fit has absorbed some noise.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Learning curves: error against training-set size}
+  \centering
+  {\scriptsize Median over 100 random training sets of each size; validation set of 200}\par
+  \begin{tikzpicture}
+    \begin{axis}[name=lb,width=6.6cm,height=4.4cm,xmode=log,xmin=8,xmax=500,ymin=0,ymax=0.2,
+      title={\footnotesize degree 1: high bias},xlabel={$m_{\text{train}}$},ylabel={cost},
+      tick label style={font=\scriptsize},label style={font=\scriptsize},
+      xtick={10,20,50,100,200,400},xticklabels={10,20,50,100,200,400},
+      scaled y ticks=false,ytick={0,0.05,0.1,0.15,0.2},
+      yticklabel style={/pgf/number format/fixed},
+      legend style={font=\tiny,at={(0.97,0.5)},anchor=north east},legend cell align=left]
+      \addplot[cublue,very thick,mark=*,mark size=1.2pt] coordinates
+        {(10,0.0805)(12,0.0954)(15,0.1001)(20,0.1033)(30,0.1156)(50,0.1111)(100,0.1141)
+         (200,0.1176)(400,0.1186)};
+      \addlegendentry{$J_{\text{train}}$}
+      \addplot[curose,very thick,mark=square*,mark size=1.2pt] coordinates
+        {(10,0.1331)(12,0.1362)(15,0.1268)(20,0.1234)(30,0.1201)(50,0.1179)(100,0.1169)
+         (200,0.1162)(400,0.1156)};
+      \addlegendentry{$J_{\text{cv}}$}
+      \addplot[cugray,dashed,domain=8:500,samples=2] {0.03125};
+      \addlegendentry{noise floor}
+    \end{axis}
+    \begin{axis}[at={(lb.east)},anchor=west,xshift=10mm,width=6.6cm,height=4.4cm,
+      xmode=log,xmin=15,xmax=500,ymin=0,ymax=0.2,
+      title={\footnotesize degree 8: high variance},xlabel={$m_{\text{train}}$},
+      xtick={20,50,100,200,400},xticklabels={20,50,100,200,400},
+      scaled y ticks=false,ytick={0,0.05,0.1,0.15,0.2},
+      yticklabel style={/pgf/number format/fixed},
+      tick label style={font=\scriptsize},label style={font=\scriptsize}]
+      \addplot[cublue,very thick,mark=*,mark size=1.2pt] coordinates
+        {(20,0.0151)(30,0.0205)(50,0.0234)(100,0.0280)(200,0.0305)(400,0.0311)};
+      \addplot[curose,very thick,mark=square*,mark size=1.2pt] coordinates
+        {(20,0.1831)(30,0.0645)(50,0.0470)(100,0.0402)(200,0.0374)(400,0.0365)};
+      \addplot[cugray,dashed,domain=15:500,samples=2] {0.03125};
+    \end{axis}
+  \end{tikzpicture}\par
+  \vspace{1mm}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \textbf{High bias.} Both curves flatten at about $0.117$, far above the floor, and
+      meet. From $m=100$ to $m=400$, $J_{\text{cv}}$ improves by $0.001$:
+      \alert{more data does not help}.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \textbf{High variance.} A large gap at small $m$ that closes as $m$ grows;
+      $J_{\text{cv}}$ falls from $0.183$ to $0.037$, approaching the floor:
+      \alert{more data helps}.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{What to Try Next, and Neural Networks}
+
+\begin{frame}{Deciding what to try next, revisited}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.55\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.3}
+      \begin{tabular}{@{}L{4.2cm}L{3.4cm}@{}}
+        \toprule
+        Action & Fixes\\
+        \midrule
+        Get more training examples & high variance\\
+        Try a smaller set of features & high variance\\
+        Increase $\lambda$ & high variance\\
+        \midrule
+        Get additional features & high bias\\
+        Add polynomial features & high bias\\
+        Decrease $\lambda$ & high bias\\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.41\textwidth}\raggedright
+      \begin{keyidea}[Diagnose first, then act]\raggedright
+        Compute $J_{\text{train}}$, $J_{\text{cv}}$ and a baseline. Whichever gap is larger
+        tells you which half of the table to use.
+      \end{keyidea}
+      \begin{pitfall}[Do not shrink the training set]
+        \footnotesize\raggedright Fewer examples make $J_{\text{train}}$ look better (the left end of
+        a learning curve) but never fix bias --- and they make variance worse.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Bias, variance and neural networks}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}[
+          q/.style={draw=cublue,fill=culight,rounded corners,align=center,font=\scriptsize,
+                    minimum width=3.3cm,minimum height=7mm},
+          a/.style={draw=cuamber,fill=cuamber!12,rounded corners,align=center,font=\scriptsize,
+                    minimum width=2.5cm,minimum height=7mm}]
+        \node[q] (q1) at (0,0) {Does it do well on\\the training set?};
+        \node[a] (a1) at (3.6,0) {bigger network};
+        \node[q] (q2) at (0,-1.6) {Does it do well on\\the validation set?};
+        \node[a] (a2) at (3.6,-1.6) {more data};
+        \node[draw=cuteal,fill=cuteal!12,rounded corners,font=\scriptsize] (done) at (0,-3.0) {done};
+        \draw[synapse,thick] (q1) -- node[above,font=\tiny]{no} (a1);
+        \draw[synapse,thick] (a1.north) to[bend right=40] (q1.north);
+        \draw[synapse,thick] (q1) -- node[left,font=\tiny]{yes} (q2);
+        \draw[synapse,thick] (q2) -- node[above,font=\tiny]{no} (a2);
+        \draw[synapse,thick] (a2.south) |- (-2.2,-3.55) |- (q1.west);
+        \draw[synapse,thick] (q2) -- node[left,font=\tiny]{yes} (done);
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{A recipe that rarely existed before}
+        Large networks trained on modest data are usually \emph{low-bias}. So: grow the
+        network until training error is acceptable, then add data until validation error
+        is. Bias and variance can be attacked one at a time.
+      \end{block}
+      \begin{keyidea}
+        A larger, well-regularised network almost never does worse than a smaller one. Its
+        costs are computation and data, not accuracy.
+      \end{keyidea}
+\begin{lstlisting}
+Dense(units=25, activation='relu',
+      kernel_regularizer=
+          tf.keras.regularizers.L2(0.01))
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Judge a model on data it was not trained on; $J_{\text{train}}$ only
+                measures fit.
+          \item Train / cross-validation / test: fit, choose, report. Never choose on the
+                test set.
+          \item High bias: $J_{\text{train}}$ high. High variance:
+                $J_{\text{cv}}\gg J_{\text{train}}$. Measure both against a baseline.
+          \item $J_{\text{cv}}$ is U-shaped in $d$ and in $\lambda$ (mirrored).
+          \item Learning curves: bias plateaus, more data does not help; variance gap
+                closes, more data helps.
+          \item Neural networks: bigger network for bias, more data for variance.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ J_{\text{cv}}=\frac{1}{2m_{\text{cv}}}\sum_{i}\bigl(f(\vx_{\text{cv}}^{(i)})-y_{\text{cv}}^{(i)}\bigr)^2 \]
+        \[ \text{bias gap}=J_{\text{train}}-\text{baseline} \]
+        \[ \text{variance gap}=J_{\text{cv}}-J_{\text{train}} \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Part 2: the iterative loop of development, error analysis, adding
+        data, transfer learning, deployment, fairness, and precision and recall.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item List six actions you might take when a model makes large errors. Explain why a
+          diagnostic should come first. \hfill\clo{5}
+    \item Why is $J_{\text{train}}$ a poor estimate of a model's performance on new data?
+          Define $J_{\text{test}}$ for regression and the misclassification error for
+          classification. \hfill\clo{5}
+    \item Explain why selecting the polynomial degree with the test set makes the reported
+          test error optimistic. State the role of each part of a three-way split.
+          \hfill\clo{6}
+    \item Sketch $J_{\text{train}}$ and $J_{\text{cv}}$ against polynomial degree, label
+          the high-bias and high-variance regions, and explain the shape of each curve.
+          \hfill\clo{6}
+    \item Using the slide's numbers, diagnose degrees 1, 3 and 10 of the running example.
+          \hfill\clo{5}
+    \item Sketch $J_{\text{train}}$ and $J_{\text{cv}}$ against $\lambda$ and explain why
+          it is a mirror image of the degree plot. \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Define a baseline level of performance and give three ways of obtaining one.
+          \hfill\clo{4}
+    \item Human error is $2.0\%$, training error $2.3\%$, validation error $7.1\%$. Compute
+          both gaps, give the diagnosis, and name two remedies. \hfill\clo{6}
+    \item Draw typical learning curves for a high-bias and a high-variance model. For each,
+          state whether collecting more data will help, and why. \hfill\clo{8}
+    \item For each action in the ``what to try next'' table, state which problem it
+          addresses and explain why. \hfill\clo{6}
+    \item Describe the bias/variance recipe for neural networks and explain why it did not
+          apply to small, classical models. \hfill\clo{5}
+    \item In the running example, degree 3 reaches $J_{\text{train}}=0.0219$, below the
+          noise floor of $0.03125$. Explain how this is possible and what it implies.
+          \hfill\clo{6}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design an evaluation protocol.} A Chattogram hospital has $3000$ labelled
+          chest X-rays from $900$ patients and wants to choose among five network
+          architectures and three values of $\lambda$. Design the split (including how you
+          keep one patient's images together), the selection procedure, and what you report.
+          \hfill\clo{12}
+    \item \textbf{Design a diagnosis.} A crop-yield model has training $R^2=0.62$ and
+          validation $R^2=0.60$, while an agronomist's estimate achieves $0.75$. Diagnose
+          the model, and design the next three experiments in priority order, with the
+          result that would make you stop each one. \hfill\clo{10}
+    \item \textbf{Design a data-collection decision.} Collecting $1000$ more labelled
+          examples will cost Tk~$5$ lakh. Design an experiment, using only the data you
+          already have, that predicts whether it is worth paying for. \hfill\clo{12}
+    \item \textbf{Design a $\lambda$ search.} Design a procedure to choose $\lambda$ for a
+          network whose training takes four hours, under a one-week compute budget. Justify
+          your grid and how you will use partial results. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S2.2.2} --- the bias--variance trade-off;
+    \textbf{\S5.1} --- the validation-set approach and $k$-fold cross-validation;
+    \textbf{\S6.2.1} --- choosing the ridge $\lambda$.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S1.3} --- model selection and cross-validation;
+    \textbf{\S3.2} --- the bias--variance decomposition.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 6): model evaluation and selection; diagnosing bias and variance.
+  \end{center}
+\end{frame}
+
+\end{document}

@@ -1,0 +1,593 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 2, Week 5, Part 1
+%  Training Neural Networks: Loss, compile/fit, and Activation Functions
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 5, Part 1]{Training Neural Networks}
+\subtitle{Loss Functions, \texttt{compile} and \texttt{fit}, and Choosing Activation Functions}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 5 / Part 1]{Week 5 $\cdot$ Part 1}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{From inference to training}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Week 4 gave us}
+        \[ \mathbf{A}^{[l]} = g\bigl(\mathbf{A}^{[l-1]}\mW^{[l]}+\mathbf{b}^{[l]}\bigr),
+           \quad \mathbf{A}^{[0]}=\mathbf{X} \]
+        forward propagation with weights that someone else supplied.
+      \end{block}
+      \footnotesize
+      Two questions were left open. Where do good values of $\mW$ and $\mathbf{b}$ come
+      from? And why should every unit use the sigmoid? Today answers both: training is the
+      Week 3 recipe applied to the whole network, and $g$ is a design choice with a small set
+      of good defaults.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Training in TensorFlow: \texttt{compile} and \texttt{fit}
+          \item Training details: model, loss, minimisation
+          \item Alternatives to the sigmoid: ReLU and linear
+          \item Choosing an activation for each layer
+          \item Why a network needs non-linear activations at all
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize Part 2 extends the output layer to many classes (softmax), replaces
+      plain gradient descent with Adam, and opens up back-propagation.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{TensorFlow Implementation}
+
+\begin{frame}[fragile]{Three statements train a network}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.losses import BinaryCrossentropy
+
+model = Sequential([                          # 1
+    Dense(units=25, activation='sigmoid'),
+    Dense(units=15, activation='sigmoid'),
+    Dense(units=1,  activation='sigmoid')])
+
+model.compile(loss=BinaryCrossentropy())      # 2
+
+model.fit(X, y, epochs=100)                   # 3
+\end{lstlisting}
+      \vspace{1mm}
+      \footnotesize
+      The digit network of Week 4 ($64\to25\to15\to1$), now trained on \texttt{X} of shape
+      $(m, 64)$ and labels \texttt{y} of shape $(m,)$.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{What each statement does}
+        \begin{enumerate}
+          \item \textbf{Specify the model}: architecture and activations, so TensorFlow
+                knows how to compute $f(\vx)$.
+          \item \textbf{Specify the loss}: how wrong one prediction is.
+          \item \textbf{Minimise the cost}: run gradient descent for \texttt{epochs}
+                passes over the training set.
+        \end{enumerate}
+      \end{block}
+      \begin{defnbox}[Epoch]
+        \small One full pass through all $m$ training examples. \texttt{epochs=100} means
+        the optimiser sees every example $100$ times.
+      \end{defnbox}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Training Details}
+
+\begin{frame}{The same three steps as logistic regression}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.35}
+  \begin{tabular}{@{}L{2.2cm}L{4.9cm}L{6.1cm}@{}}
+    \toprule
+    Step & Logistic regression (Week 3) & Neural network (today)\\
+    \midrule
+    1.\ Model: how to compute $f(\vx)$
+      & $f_{\vw,b}(\vx)=g(\vw\cdot\vx+b)$
+      & \texttt{Sequential([Dense(...), ...])}\\
+    2.\ Loss and cost
+      & $L=-y\log f-(1-y)\log(1-f)$\newline $J(\vw,b)=\frac1m\sum_i L\bigl(f(\xii i),\yii i\bigr)$
+      & \texttt{model.compile(loss=BinaryCrossentropy())}\\
+    3.\ Minimise $J$
+      & repeat: $w_j \leftarrow w_j-\alpha\,\partial J/\partial w_j$, \ $b\leftarrow b-\alpha\,\partial J/\partial b$
+      & \texttt{model.fit(X, y, epochs=100)}\\
+    \bottomrule
+  \end{tabular}
+  \vspace{3mm}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{keyidea}[Nothing new in principle]
+        A network is a more flexible $f$. The loss, the cost, and gradient descent are the
+        ones you already implemented by hand in the Week 3 lab.
+      \end{keyidea}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{What \emph{is} new}
+        $J$ now depends on every $\mW^{[l]}$ and $\mathbf{b}^{[l]}$ --- for the digit
+        network, $2031$ parameters. Computing all $2031$ partial derivatives efficiently is
+        the job of \textbf{back-propagation} (Part 2).
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Step 2: the loss, and the cost}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{defnbox}[Binary cross-entropy]
+        \small
+        For a label $y\in\{0,1\}$ and output $f(\vx)\in(0,1)$:
+        \[ L\bigl(f(\vx),y\bigr) = -y\log f(\vx)-(1-y)\log\bigl(1-f(\vx)\bigr) \]
+        The name comes from information theory; it is exactly the logistic loss of Week 3.
+      \end{defnbox}
+      \footnotesize
+      The cost averages the loss over the training set:
+      \[ J\bigl(\mW,\mathbf{B}\bigr)=\frac1m\sum_{i=1}^{m}L\bigl(f(\xii i),\yii i\bigr) \]
+      where $\mW,\mathbf{B}$ stand for all weights and biases of all layers.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Worked numbers (Week 4 network)}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}cccc@{}}
+          \toprule
+          $\vx$ & $f(\vx)$ & $L$ if $y=1$ & $L$ if $y=0$\\
+          \midrule
+          $[1,2]$   & $0.8094$ & $0.2115$ & $1.6576$\\
+          $[-1,-1]$ & $0.0562$ & $2.8788$ & $0.0578$\\
+          \bottomrule
+        \end{tabular}\par
+        \vspace{1mm}
+        Confident and right: small loss. Confident and wrong: large loss.
+      \end{block}
+      \begin{block}{Regression instead?}
+        To predict a number, use the squared error:
+        \[ L=\tfrac12\bigl(f(\vx)-y\bigr)^2 \]
+        \texttt{model.compile(loss=MeanSquaredError())}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Step 3: minimise the cost}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Gradient descent, for every layer}
+        repeat \{
+        \[ \mW^{[l]} \leftarrow \mW^{[l]} - \alpha\,\frac{\partial J}{\partial \mW^{[l]}},\qquad
+           \mathbf{b}^{[l]} \leftarrow \mathbf{b}^{[l]} - \alpha\,\frac{\partial J}{\partial \mathbf{b}^{[l]}} \]
+        for $l=1,\dots,L$ \}
+      \end{block}
+      \footnotesize
+      \texttt{fit} does exactly this. It computes the partial derivatives by
+      \textbf{back-propagation}, and by default uses a better update rule than the plain one
+      above (Adam, Part 2).
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{keyidea}[Libraries do the calculus]
+        In 2010 a researcher derived and coded every gradient by hand. Today TensorFlow and
+        PyTorch differentiate any network you can write --- the library builds the
+        derivatives from the forward computation.
+      \end{keyidea}
+      \begin{pitfall}[Mature libraries, but understand them]
+        \footnotesize Use the library the way you use a sort routine --- but, as with
+        sorting, know what it computes, its cost, and how it can fail. When training
+        diverges or stalls, the diagnosis needs Weeks 1--3, not a different library.
+      \end{pitfall}
+\begin{lstlisting}
+history = model.fit(X, y, epochs=100)
+history.history['loss']      # J per epoch
+\end{lstlisting}
+      Plot this curve; it is the learning curve of Week 2.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Alternatives to the Sigmoid}
+
+\begin{frame}{Why not sigmoid everywhere?}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Demand prediction, revisited}
+        \footnotesize
+        One hidden unit was meant to estimate \emph{awareness} of a product. The sigmoid
+        forces $0<a<1$: barely aware, or fully aware. But awareness can grow without limit
+        --- a product can go viral.
+      \end{block}
+      \footnotesize
+      What we want for such a unit: $0$ when the input is negative, and free to grow
+      without bound otherwise. That function is
+      \[ g(z)=\max(0,z). \]
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[ReLU --- rectified linear unit]
+        \small
+        \[ g(z)=\max(0,z) \]
+        Zero for $z<0$; the identity for $z\ge0$. The name is historical; just say ReLU.
+      \end{defnbox}
+      \begin{defnbox}[Linear activation]
+        \small
+        \[ g(z)=z \]
+        Often described as ``no activation''. A unit with it computes $\vw\cdot\vx+b$ ---
+        linear regression.
+      \end{defnbox}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The three activations you will use most}
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[name=s,width=4.6cm,height=3.8cm,title={\footnotesize sigmoid},
+      xmin=-4,xmax=4,ymin=-1.2,ymax=4,axis lines=middle,
+      tick label style={font=\tiny},xtick={-4,-2,2,4},ytick={1,2,3}]
+      \addplot[cublue,very thick,domain=-4:4,samples=80]{1/(1+exp(-x))};
+    \end{axis}
+    \begin{axis}[at={(s.east)},anchor=west,xshift=6mm,name=r,width=4.6cm,height=3.8cm,
+      title={\footnotesize ReLU},
+      xmin=-4,xmax=4,ymin=-1.2,ymax=4,axis lines=middle,
+      tick label style={font=\tiny},xtick={-4,-2,2,4},ytick={1,2,3}]
+      \addplot[cuteal,very thick,domain=-4:0]{0};
+      \addplot[cuteal,very thick,domain=0:4]{x};
+    \end{axis}
+    \begin{axis}[at={(r.east)},anchor=west,xshift=6mm,width=4.6cm,height=3.8cm,
+      title={\footnotesize linear},
+      xmin=-4,xmax=4,ymin=-4,ymax=4,axis lines=middle,
+      tick label style={font=\tiny},xtick={-4,-2,2,4},ytick={-2,2}]
+      \addplot[cuamber,very thick,domain=-4:4]{x};
+    \end{axis}
+  \end{tikzpicture}
+  \vspace{2mm}
+
+  \footnotesize
+  \renewcommand{\arraystretch}{1.2}
+  \begin{tabular}{@{}lllL{5.2cm}@{}}
+    \toprule
+    & $g(z)$ & range & where it is used\\
+    \midrule
+    sigmoid & $1/(1+e^{-z})$ & $(0,1)$ & output of a binary classifier\\
+    ReLU    & $\max(0,z)$     & $[0,\infty)$ & hidden layers (default); non-negative outputs\\
+    linear  & $z$             & $(-\infty,\infty)$ & output of a regression with any sign\\
+    \bottomrule
+  \end{tabular}\par
+  \vspace{1mm}
+  {\color{cugray} Others exist --- tanh, leaky ReLU, swish --- and occasionally help; these
+  three cover most needs. Part 2 adds softmax.}
+\end{frame}
+
+\begin{frame}{Worked example: ReLU in the hidden layer}
+  \footnotesize
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.4\textwidth}
+      \begin{block}{Setting}
+        The $2\to3\to1$ network of Week 4, with the \emph{same} weights, but the hidden
+        layer now uses ReLU. The output stays sigmoid.
+        \[ \mW^{[1]}=\begin{bmatrix}1&-3&5\\2&4&-6\end{bmatrix},\ \mathbf{b}^{[1]}=[-1,1,2] \]
+        \[ \vw^{[2]}=[2,-1,-3],\quad b^{[2]}=0.5 \]
+      \end{block}
+      \begin{keyidea}
+        $\vz^{[1]}$ is unchanged --- only $g$ changed. ReLU zeros out the negative entries
+        and passes the rest through \emph{unsquashed}.
+      \end{keyidea}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \renewcommand{\arraystretch}{1.25}\setlength{\tabcolsep}{4pt}
+      \begin{tabular}{@{}lcc@{}}
+        \toprule
+        & $\vx=[1,2]$ & $\vx=[-1,-1]$\\
+        \midrule
+        $\vz^{[1]}$ & $[4,\,6,\,-5]$ & $[-4,\,0,\,3]$\\
+        $\va^{[1]}$, sigmoid (Wk 4) & $[0.982,\,0.998,\,0.007]$ & $[0.018,\,0.5,\,0.953]$\\
+        $\va^{[1]}$, ReLU & $[4,\,6,\,0]$ & $[0,\,0,\,3]$\\
+        $z^{[2]}$ & $8-6-0+0.5=2.5$ & $0-0-9+0.5=-8.5$\\
+        $a^{[2]}=g(z^{[2]})$ & $\mathbf{0.9241}$ & $\mathbf{0.0002}$\\
+        \bottomrule
+      \end{tabular}
+      \vspace{2mm}
+
+      Same predictions as Week 4 ($\yhat=1$, then $\yhat=0$), but more confident: the
+      hidden activations are no longer capped at $1$.
+      \begin{pitfall}[A dead unit]
+        \footnotesize If a ReLU unit's $z$ is negative for \emph{every} training example,
+        it outputs $0$ always, and its gradient is $0$: it never learns. Unit 3 above is
+        off for the first input --- harmless as long as some inputs switch it on.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Choosing Activation Functions}
+
+\begin{frame}{The output layer: let the target decide}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.56\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.35}
+      \begin{tabular}{@{}L{2.0cm}L{1.3cm}L{2.0cm}L{1.8cm}@{}}
+        \toprule
+        Target $y$ & output $g$ & loss & example\\
+        \midrule
+        $0$ or $1$ & sigmoid & binary cross-entropy & spam or not\\
+        any real number & linear & mean squared error & tomorrow's change in a share price\\
+        non-negative number & ReLU & mean squared error & house price, rainfall\\
+        one of $N$ classes & softmax & sparse categorical cross-entropy & digit $0$--$9$ (Part 2)\\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.4\textwidth}
+      \begin{keyidea}[Match the range]
+        Choose the output activation whose range is the set of values $y$ can take. Then
+        choose the loss that goes with it --- the two come as a pair.
+      \end{keyidea}
+      \begin{pitfall}[Mismatch]
+        \footnotesize A sigmoid output with house prices as targets can never exceed $1$:
+        the loss stays huge and no amount of training fixes it. A linear output with
+        binary cross-entropy can produce $f\le0$, where $\log f$ is undefined.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}[fragile]{Hidden layers: ReLU by default}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize Gradient $g'(z)$: sigmoid flattens at both ends}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.6cm,height=4.2cm,xmin=-6,xmax=6,ymin=-0.1,ymax=1.15,
+          xlabel={$z$},ylabel={$g'(z)$},tick label style={font=\scriptsize},
+          label style={font=\scriptsize},
+          legend style={font=\tiny,at={(0.02,0.97)},anchor=north west},legend cell align=left]
+          \addplot[cublue,very thick,domain=-6:6,samples=100]{exp(-x)/(1+exp(-x))^2};
+          \addlegendentry{sigmoid: at most $0.25$}
+          \addplot[cuteal,very thick,domain=-6:0,samples=2]{0};
+          \addlegendentry{ReLU: $0$ or $1$}
+          \addplot[cuteal,very thick,domain=0:6,samples=2,forget plot]{1};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Why ReLU wins in hidden layers}
+        \begin{itemize}
+          \item \textbf{Cheaper}: a comparison, not an exponential.
+          \item \textbf{Flat on one side only.} The sigmoid is flat for large $|z|$ in both
+                directions, so its gradient is tiny there and gradient descent crawls.
+                ReLU's gradient is $1$ for every $z>0$.
+        \end{itemize}
+        In practice networks with ReLU hidden layers train noticeably faster.
+      \end{block}
+\begin{lstlisting}
+model = Sequential([
+    Dense(units=25, activation='relu'),
+    Dense(units=15, activation='relu'),
+    Dense(units=1,  activation='sigmoid')])
+\end{lstlisting}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Why Do We Need Activation Functions?}
+
+\begin{frame}{A network of linear units is one linear unit}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{The algebra}
+        \footnotesize
+        Let every layer use $g(z)=z$. Two layers give
+        \begin{align*}
+          \va^{[1]} &= \vx\mW^{[1]}+\mathbf{b}^{[1]}\\
+          \va^{[2]} &= \va^{[1]}\mW^{[2]}+\mathbf{b}^{[2]}\\
+                    &= \vx\underbrace{\mW^{[1]}\mW^{[2]}}_{\mW'}
+                       + \underbrace{\mathbf{b}^{[1]}\mW^{[2]}+\mathbf{b}^{[2]}}_{\mathbf{b}'}
+        \end{align*}
+        --- a single linear layer with parameters $\mW',\mathbf{b}'$. By induction, the
+        same holds for any number of layers.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Our network, all linear}
+        $\mW'=\mW^{[1]}\vw^{[2]\top}=[-10,\ 18]^{\top}$,\quad
+        $b'=\mathbf{b}^{[1]}\cdot\vw^{[2]}+b^{[2]}=-8.5$.\par
+        \vspace{1mm}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lcc@{}}
+          \toprule
+          $\vx$ & two layers & $-10x_1+18x_2-8.5$\\
+          \midrule
+          $[1,2]$   & $17.5$  & $17.5$\\
+          $[-1,-1]$ & $-16.5$ & $-16.5$\\
+          \bottomrule
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}[Consequences]
+        \begin{itemize}
+          \item Linear hidden layers $+$ linear output $=$ linear regression.
+          \item Linear hidden layers $+$ sigmoid output $=$ logistic regression.
+        \end{itemize}
+        Depth buys nothing without a non-linear $g$.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{What the non-linearity buys}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering {\scriptsize Sum of shifted ReLUs: $f(x)=r(x)-2\,r(x-1)+2\,r(x-2.5)$}\par
+      \begin{tikzpicture}
+        \begin{axis}[width=6.6cm,height=4.2cm,xmin=-0.5,xmax=4,ymin=-1.3,ymax=2.2,
+          axis lines=middle,tick label style={font=\scriptsize},xtick={1,2.5},ytick={-1,1,2}]
+          \addplot[cugray!70,dashed,domain=-0.5:4,samples=50]{max(0,x)};
+          \addplot[cugray!70,dashed,domain=-0.5:4,samples=50]{-2*max(0,x-1)};
+          \addplot[cugray!70,dashed,domain=-0.5:4,samples=50]{2*max(0,x-2.5)};
+          \addplot[curose,very thick,domain=-0.5:4,samples=200]
+            {max(0,x)-2*max(0,x-1)+2*max(0,x-2.5)};
+        \end{axis}
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{block}{Piecewise-linear building blocks}
+        Each ReLU unit contributes one ``hinge'' at the point where its $z$ crosses $0$.
+        The next layer adds hinges with weights: the slope is $1$ on $(0,1)$, $1-2=-1$ on
+        $(1,2.5)$, and $-1+2=1$ beyond $2.5$.
+      \end{block}
+      \begin{keyidea}[Universal approximation]
+        With enough hidden units, sums of hinges approximate any continuous function on a
+        bounded region as closely as you like. ``Enough'' can be very large --- which is
+        why depth, data and training still matter.
+      \end{keyidea}
+      \begin{pitfall}[Rule of thumb]
+        \footnotesize Never use a linear activation in a hidden layer. Use ReLU there, and
+        pick the output activation from the target.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item Training $=$ specify the model, specify the loss, minimise the cost ---
+                \texttt{Sequential}, \texttt{compile}, \texttt{fit}.
+          \item Binary cross-entropy is the logistic loss; mean squared error for
+                regression.
+          \item \texttt{fit} runs gradient descent; back-propagation supplies the
+                gradients.
+          \item ReLU $\max(0,z)$ in hidden layers; output activation chosen from the range
+                of $y$.
+          \item Without a non-linear activation, any depth collapses to one linear layer.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ L=-y\log f-(1-y)\log(1-f) \]
+        \[ \text{ReLU}(z)=\max(0,z),\quad \text{linear}(z)=z \]
+        \[ \mW'=\mW^{[1]}\mW^{[2]},\quad \mathbf{b}'=\mathbf{b}^{[1]}\mW^{[2]}+\mathbf{b}^{[2]} \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Part 2: multiclass classification and softmax, a numerically safer
+        implementation, the Adam optimiser, convolutional layers, and back-propagation.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item List the three steps of training a model. For each, give the logistic-regression
+          version and the TensorFlow statement that performs it. \hfill\clo{6}
+    \item Define an epoch. If $m=60\,000$ and \texttt{epochs=20}, how many times is each
+          example seen during training? \hfill\clo{4}
+    \item Write the binary cross-entropy loss. Compute it for $f(\vx)=0.9$ when $y=1$ and
+          when $y=0$, and explain the difference. \hfill\clo{6}
+    \item Define ReLU and the linear activation, sketch both, and state their ranges.
+          \hfill\clo{5}
+    \item For each target, choose the output activation and loss, with a reason: (a) whether
+          a loan defaults; (b) tomorrow's temperature in $^\circ$C; (c) the number of
+          visitors to a website. \hfill\clo{6}
+    \item Give two reasons ReLU is preferred over the sigmoid in hidden layers.
+          \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Prove that a two-layer network whose layers both use $g(z)=z$ computes a linear
+          function of $\vx$. Give $\mW'$ and $\mathbf{b}'$ in terms of the layers'
+          parameters. \hfill\clo{8}
+    \item A network has linear hidden layers and a sigmoid output. Which model from
+          Module 1 is it equivalent to, and why? \hfill\clo{5}
+    \item Using the worked-example weights with a ReLU hidden layer, compute $a^{[2]}$ for
+          $\vx=[0,0]$ and for $\vx=[2,0]$. \hfill\clo{8}
+    \item What is a ``dead'' ReLU unit? Why does gradient descent not revive it?
+          \hfill\clo{5}
+    \item Sketch $f(x)=r(x)-r(x-2)$, where $r$ is ReLU. Which familiar shape is it, and
+          how many hidden units does it need? \hfill\clo{6}
+    \item Explain why \texttt{model.fit} can train a network without you writing any
+          derivative, and what you must still understand to debug it. \hfill\clo{5}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a rainfall model.} The Bangladesh Meteorological Department wants
+          tomorrow's rainfall (mm) at Chattogram from today's readings at $40$ stations.
+          Choose the architecture, every layer's activation, and the loss. Explain what
+          would go wrong with a sigmoid output, and with a linear output.
+          \hfill\clo{12}
+    \item \textbf{Design an experiment: sigmoid vs.\ ReLU.} Design a fair experiment that
+          tests the claim ``ReLU hidden layers train faster than sigmoid ones'' on the digit
+          data. Specify what you hold fixed, what you measure, and how many runs you need.
+          \hfill\clo{12}
+    \item \textbf{Design a test for a collapsed network.} A colleague's 5-layer model
+          performs exactly as well as logistic regression. Design a diagnostic --- using
+          the model's weights and a few inputs --- that tests whether its hidden layers
+          are accidentally linear. \hfill\clo{10}
+    \item \textbf{Design a piecewise-linear fit.} Using ReLU hidden units and a linear
+          output, design (by hand) a network that outputs $0$ for $x<0$, rises with slope
+          $2$ up to $x=1$, and is flat at $2$ after that. Give every weight.
+          \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S10.1} --- activation functions, ReLU, and why the
+    non-linearity is essential; \textbf{\S10.7} --- fitting a network by gradient
+    descent.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S5.2} --- network training: matching the output
+    activation and error function to the target, and gradient-based optimisation.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 5): ReLU activation; softmax; multiclass; practice lab on neural
+    networks for multiclass classification.\\
+    Practice quizzes: \emph{Neural Network Training}; \emph{Activation Functions}.
+  \end{center}
+\end{frame}
+
+\end{document}

@@ -163,9 +163,34 @@
 \newcommand{\vw}{\mathbf{w}}
 \newcommand{\vx}{\mathbf{x}}
 \newcommand{\yhat}{\hat{y}}
+\newcommand{\va}{\mathbf{a}}
+\newcommand{\vz}{\mathbf{z}}
+\newcommand{\mW}{\mathbf{W}}
 \newcommand{\R}{\mathbb{R}}
 \DeclareMathOperator*{\argmin}{arg\,min}
 \DeclareMathOperator*{\argmax}{arg\,max}
+
+% ---------------- code listings ----------------
+% Python on slides. Frames containing a listing must be [fragile].
+\RequirePackage{listings}
+\lstdefinestyle{cupython}{
+  language=Python, basicstyle=\ttfamily\scriptsize, columns=fullflexible,
+  keepspaces=true, keywordstyle=\color{cublue}\bfseries,
+  commentstyle=\color{cugray}\itshape, stringstyle=\color{cuteal},
+  backgroundcolor=\color{culight}, frame=l, framerule=1.5pt, rulecolor=\color{cuteal},
+  xleftmargin=6pt, framexleftmargin=4pt, aboveskip=2pt, belowskip=2pt,
+  showstringspaces=false, upquote=true}
+\lstset{style=cupython}
+
+% ---------------- network diagrams ----------------
+% Node and edge styles for hand-drawn neural network diagrams.
+\tikzset{
+  neuron/.style={circle, draw=cublue, fill=culight, thick, minimum size=6mm,
+                 inner sep=0pt, font=\scriptsize},
+  inneuron/.style={neuron, draw=cuteal, fill=cuteal!12},
+  outneuron/.style={neuron, draw=cuamber, fill=cuamber!15},
+  synapse/.style={-{Stealth[length=1.4mm]}, cugray!60, semithick},
+}
 
 % ---------------- cost-surface contours ----------------
 % Level sets of J drawn by pgfplots' gnuplot backend. Requires
