@@ -1,17 +1,886 @@
 %% ch16.tex --- Principal Component Analysis
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch16_pca.py.
+%% C30 is the dataset of the companion lecture's axis-search animation.
+%% Figure data (C30 points, digit scatter, reconstructions) come from the same
+%% script's output.
 
 \chapter{Principal Component Analysis}
 \label{ch:ch16}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{The purpose of computing is insight, not numbers.}{---\ Richard Hamming}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Explain why and when to reduce the number of features.
+  \item State the principal-components problem as maximising the variance of a
+        projection, and derive its solution with a Lagrange multiplier.
+  \item Carry out PCA --- centre, scale, decompose, project --- by hand on a
+        small dataset, and check the result with the singular value
+        decomposition.
+  \item Reconstruct data from its principal components, and choose the number of
+        components from the variance explained.
+  \item Use PCA to visualise high-dimensional data and to compress it.
+  \item Explain why PCA is not linear regression, and why it is a poor remedy for
+        overfitting.
+  \item Say what t-SNE and UMAP do differently.
+\end{enumerate}
+\end{chapterlearning}
+
+A dataset with fifty features cannot be plotted, and is often more complicated
+than it needs to be. Features tend to come in correlated groups --- a car's length
+and width, a country's income and energy use, neighbouring pixels in an image ---
+so that the data lies close to a surface of much lower dimension than the number
+of features. Principal component analysis finds the best flat such surface: a few
+new axes along which the data varies most. It is the oldest method in this book,
+and still one of the most used.
+
+\section{Reducing the Number of Features}
+\label{sec:reduce}
+
+\begin{defbox}{Dimensionality reduction}
+\term{Dimensionality reduction} replaces each example $\vx \in \Real{n}$ by a
+shorter vector $\mathbf{z} \in \Real{k}$, $k < n$, that retains as much of the
+information in $\vx$ as possible. \term{Principal component analysis} (PCA) does
+so with a linear map: $\mathbf{z}$ is the coordinates of $\vx$ along $k$ new
+orthogonal axes, the \term{principal components}.
+\end{defbox}
+
+The uses are three: \emph{visualisation}, by reducing to two or three dimensions
+and plotting; \emph{compression}, by storing $k$ numbers instead of $n$; and,
+less often now than when computers were slower, \emph{speeding up} a supervised
+learner by giving it fewer inputs. PCA is unsupervised: it looks only at the
+features, never at a label.
+
+\section{The Idea: Keep the Most Variance}
+\label{sec:pca-idea}
+
+Project the data onto a line through its mean. Each point is replaced by its
+coordinate along the line, and the information kept is the spread of those
+coordinates: a line along which the points are spread out preserves their
+differences; a line along which they bunch together destroys them. PCA chooses
+the line that maximises the variance of the projections.
+
+\begin{defbox}{Dataset C30}
+Thirty points with two strongly correlated features (correlation $0.85$), both
+standardised to mean $0$ and variance $1$.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=\linewidth, axis equal image,
+        xmin=-3, xmax=3, ymin=-3, ymax=3, xlabel={$x_1$}, ylabel={$x_2$}]
+        \addplot[MLTeal, very thick, domain=-3:3, forget plot] {x};
+        \draw[MLGray!60] (axis cs:-1.726,-1.542) -- (axis cs:-1.634,-1.634); \draw[MLGray!60] (axis cs:-1.799,-1.496) -- (axis cs:-1.647,-1.647); \draw[MLGray!60] (axis cs:-1.138,-0.810) -- (axis cs:-0.974,-0.974); \draw[MLGray!60] (axis cs:0.261,-0.470) -- (axis cs:-0.104,-0.104); \draw[MLGray!60] (axis cs:-2.136,-1.390) -- (axis cs:-1.763,-1.763); \draw[MLGray!60] (axis cs:0.438,-0.332) -- (axis cs:0.053,0.053); \draw[MLGray!60] (axis cs:-0.255,-1.012) -- (axis cs:-0.633,-0.633); \draw[MLGray!60] (axis cs:0.653,0.592) -- (axis cs:0.623,0.622); \draw[MLGray!60] (axis cs:0.203,1.050) -- (axis cs:0.627,0.626); \draw[MLGray!60] (axis cs:0.986,1.264) -- (axis cs:1.125,1.125); \draw[MLGray!60] (axis cs:1.187,1.170) -- (axis cs:1.179,1.178); \draw[MLGray!60] (axis cs:-0.188,-0.293) -- (axis cs:-0.240,-0.240); \draw[MLGray!60] (axis cs:0.417,0.835) -- (axis cs:0.626,0.626); \draw[MLGray!60] (axis cs:1.056,2.038) -- (axis cs:1.547,1.547); \draw[MLGray!60] (axis cs:-0.473,-0.701) -- (axis cs:-0.587,-0.587); \draw[MLGray!60] (axis cs:0.661,0.709) -- (axis cs:0.685,0.685); \draw[MLGray!60] (axis cs:0.355,0.534) -- (axis cs:0.445,0.444); \draw[MLGray!60] (axis cs:1.733,1.447) -- (axis cs:1.590,1.590); \draw[MLGray!60] (axis cs:-0.933,-1.014) -- (axis cs:-0.974,-0.974); \draw[MLGray!60] (axis cs:-0.204,-1.093) -- (axis cs:-0.648,-0.648); \draw[MLGray!60] (axis cs:0.087,1.207) -- (axis cs:0.647,0.647); \draw[MLGray!60] (axis cs:0.374,0.360) -- (axis cs:0.367,0.367); \draw[MLGray!60] (axis cs:-1.728,-0.991) -- (axis cs:-1.360,-1.359); \draw[MLGray!60] (axis cs:0.064,0.100) -- (axis cs:0.082,0.082); \draw[MLGray!60] (axis cs:0.683,0.563) -- (axis cs:0.623,0.623); \draw[MLGray!60] (axis cs:-0.088,-0.044) -- (axis cs:-0.066,-0.066); \draw[MLGray!60] (axis cs:0.181,-0.151) -- (axis cs:0.015,0.015); \draw[MLGray!60] (axis cs:1.119,-0.188) -- (axis cs:0.466,0.466); \draw[MLGray!60] (axis cs:-1.275,-1.490) -- (axis cs:-1.383,-1.382); \draw[MLGray!60] (axis cs:1.485,1.146) -- (axis cs:1.316,1.315);
+        \addplot[only marks, mark=*, mark size=1.4pt, MLBlue, forget plot] coordinates {(-1.726,-1.542)(-1.799,-1.496)(-1.138,-0.810)(0.261,-0.470)(-2.136,-1.390)(0.438,-0.332)(-0.255,-1.012)(0.653,0.592)(0.203,1.050)(0.986,1.264)(1.187,1.170)(-0.188,-0.293)(0.417,0.835)(1.056,2.038)(-0.473,-0.701)(0.661,0.709)(0.355,0.534)(1.733,1.447)(-0.933,-1.014)(-0.204,-1.093)(0.087,1.207)(0.374,0.360)(-1.728,-0.991)(0.064,0.100)(0.683,0.563)(-0.088,-0.044)(0.181,-0.151)(1.119,-0.188)(-1.275,-1.490)(1.485,1.146)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=\linewidth,
+        xmin=0, xmax=180, ymin=0, ymax=2.05, xtick={0,45,90,135,180},
+        xlabel={axis angle (degrees)}, ylabel={variance of projections}]
+        \addplot[MLBlue, very thick] coordinates {(0,1.0000)(5,1.1470)(10,1.2896)(15,1.4233)(20,1.5442)(25,1.6486)(30,1.7332)(35,1.7956)(40,1.8338)(45,1.8467)(50,1.8338)(55,1.7956)(60,1.7332)(65,1.6486)(70,1.5442)(75,1.4233)(80,1.2896)(85,1.1470)(90,1.0000)(95,0.8530)(100,0.7104)(105,0.5767)(110,0.4558)(115,0.3514)(120,0.2668)(125,0.2044)(130,0.1662)(135,0.1533)(140,0.1662)(145,0.2044)(150,0.2668)(155,0.3514)(160,0.4558)(165,0.5767)(170,0.7104)(175,0.8530)(180,1.0000)};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLTeal] coordinates {(45,1.8467)};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLAmber] coordinates {(135,0.1533)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{Left: C30, with the first principal component (teal) and each point's
+  projection onto it (grey segments). Right: the variance of the projections as
+  the axis turns through $180^\circ$ (the companion lecture animates this search).
+  It peaks at $1.8467$ at $45^\circ$ --- the first component --- and is least,
+  $0.1533$, at $135^\circ$, the perpendicular axis.}
+  \label{fig:c30}
+\end{figure}
+
+Two observations from \cref{fig:c30} generalise. The best axis is where the
+variance curve peaks, and the worst is perpendicular to it. And the two extreme
+variances add to $2$, the total variance of two standardised features: rotating
+the axes redistributes variance between them but cannot create or destroy it.
+
+\section{Deriving the Principal Components}
+\label{sec:pca-derivation}
+
+\begin{derivation}{The first principal component}
+Let the data be centred, $\frac1m\sum_i\xii{i} = \mathbf{0}$, and let
+$\Sigma = \frac1m\sum_i\xii{i}\xii{i}{}^{\mathsf T} = \frac1m\Xmat^{\mathsf T}\Xmat$
+be its \term{covariance matrix}. The projection of $\xii{i}$ onto a unit vector
+$\mathbf{u}$ is $z^{(i)} = \mathbf{u}\cdot\xii{i}$, which has mean $0$ and variance
+\[
+  \frac1m\sum_i\bigl(\mathbf{u}^{\mathsf T}\xii{i}\bigr)^2
+  = \mathbf{u}^{\mathsf T}\Bigl(\frac1m\sum_i\xii{i}\xii{i}{}^{\mathsf T}\Bigr)\mathbf{u}
+  = \mathbf{u}^{\mathsf T}\Sigma\,\mathbf{u} .
+\]
+Maximise it subject to $\mathbf{u}^{\mathsf T}\mathbf{u} = 1$; without the
+constraint the variance could be made arbitrarily large by lengthening
+$\mathbf{u}$. Introduce a Lagrange multiplier $\lambda$
+(\cref{ch:appA}):
+\[
+  \mathcal{L}(\mathbf{u},\lambda) = \mathbf{u}^{\mathsf T}\Sigma\mathbf{u}
+    - \lambda\bigl(\mathbf{u}^{\mathsf T}\mathbf{u} - 1\bigr),
+  \qquad
+  \nabla_{\mathbf{u}}\mathcal{L} = 2\Sigma\mathbf{u} - 2\lambda\mathbf{u} = \mathbf{0}.
+\]
+So the optimal $\mathbf{u}$ satisfies
+\[
+  \boxed{\;\Sigma\,\mathbf{u} = \lambda\,\mathbf{u}\;}
+\]
+--- it is an \term{eigenvector} of the covariance matrix. Its variance is then
+$\mathbf{u}^{\mathsf T}\Sigma\mathbf{u} = \lambda\,\mathbf{u}^{\mathsf T}\mathbf{u}
+= \lambda$, the eigenvalue, so the maximum is attained by the eigenvector with the
+\emph{largest} eigenvalue.
+\end{derivation}
+
+Further components follow the same pattern. The second component maximises the
+projected variance subject to being a unit vector \emph{orthogonal} to the first;
+repeating the argument with a second multiplier for the orthogonality constraint
+shows it is the eigenvector with the second-largest eigenvalue, and so on. Because
+$\Sigma$ is symmetric, its eigenvectors can be chosen orthonormal and its
+eigenvalues are real and non-negative. The components are therefore
+\[
+  \mathbf{u}_1, \mathbf{u}_2, \dots, \mathbf{u}_n, \qquad
+  \lambda_1 \ge \lambda_2 \ge \dots \ge \lambda_n \ge 0,
+\]
+with $\lambda_j$ the variance captured by component $j$, and the eigenvalues sum to
+the total variance $\operatorname{tr}\Sigma$.
+
+\section{The Algorithm}
+\label{sec:pca-algorithm}
+
+\begin{algorithmbox}{Principal component analysis}
+\begin{lstlisting}[style=pseudocode]
+centre:   subtract each feature's mean (training set)
+scale:    divide by each feature's standard deviation,
+          if the features have different units
+decompose: Sigma = X^T X / m;  eigenvectors u_1..u_n,
+           eigenvalues l_1 >= ... >= l_n
+          (or SVD X = U S V^T: u_j = row j of V^T,
+           l_j = s_j^2 / m)
+project:  z_j = x . u_j  for j = 1..k
+\end{lstlisting}
+The singular value decomposition route avoids forming $\Xmat^{\mathsf T}\Xmat$
+explicitly, which is more accurate numerically, and is what libraries use.
+\end{algorithmbox}
+
+\begin{workedexample}{Five points by hand}
+Take the centred points $(2,1)$, $(1,1)$, $(0,0)$, $(-1,-1)$, $(-2,-1)$. Then
+$\sum x_1^2 = 10$, $\sum x_1x_2 = 6$, $\sum x_2^2 = 4$, so
+\[
+  \Sigma = \frac15\begin{bmatrix}10 & 6\\ 6 & 4\end{bmatrix}
+         = \begin{bmatrix}2 & 1.2\\ 1.2 & 0.8\end{bmatrix}.
+\]
+\textbf{Eigenvalues.} For a $2\times2$ matrix they are
+$\bigl(\operatorname{tr}\pm\sqrt{\operatorname{tr}^2 - 4\det}\bigr)/2$; here
+$\operatorname{tr} = 2.8$, $\det = 1.6 - 1.44 = 0.16$, and
+$\sqrt{7.84 - 0.64} = 2.6833$, so
+\[
+  \lambda_1 = 2.7416, \qquad \lambda_2 = 0.0584 .
+\]
+\textbf{Eigenvector.} From $(\Sigma - \lambda_1 I)\mathbf{u} = \mathbf{0}$, the
+first row gives $(2 - 2.7416)u_1 + 1.2\,u_2 = 0$, so $u_2/u_1 = 0.6180$ --- the
+golden ratio's reciprocal, by a happy accident of these numbers. Normalising,
+$\mathbf{u}_1 = (0.8507,\ 0.5257)$.
+
+\textbf{Project.} $z = \vx\cdot\mathbf{u}_1$ gives
+$(2.2270,\ 1.3764,\ 0,\ -1.3764,\ -2.2270)$, whose variance is $2.7416$, as the
+derivation promised. The first component keeps $\lambda_1/(\lambda_1 +
+\lambda_2) = 97.92\%$ of the variance.
+
+\textbf{Check with the SVD.} The singular values of the $5\times2$ data matrix are
+$3.7025$ and $0.5402$; their squares divided by $m = 5$ are $2.7416$ and $0.0584$,
+and the first right singular vector is $(-0.8507,\ -0.5257)$ --- the same
+direction, with the opposite sign. The sign of an eigenvector is arbitrary;
+implementations may return either.
+\end{workedexample}
+
+\begin{pitfall}{PCA without centring or scaling}
+The covariance formula assumes centred data. Without centring, the first
+``component'' points from the origin towards the data's mean rather than along its
+spread. Without scaling, features measured in large units dominate: a length in
+millimetres has a variance a million times that of the same length in metres, and
+PCA will declare it the most important direction for no reason but the choice of
+unit. Centre always; scale whenever the features are in different units. Compute
+the means and standard deviations on the training set, and reuse them for new
+data.
+\end{pitfall}
+
+\begin{researchspotlight}{Pearson (1901) --- On lines and planes of closest fit}
+\textbf{The problem.} Given a cloud of points in many dimensions, find the line ---
+or plane --- that fits it best, where every coordinate is measured with error and
+none is singled out as the one to be predicted.
+
+\textbf{The idea.} Minimise the sum of squared \emph{perpendicular} distances from
+the points to the line, rather than the vertical distances of regression. Pearson
+showed that the best line passes through the centroid along the direction of
+greatest spread, and that the best plane contains it.
+
+\textbf{The result.} The first statement of principal component analysis, with
+geometric arguments and worked figures. Hotelling (1933) later gave the
+algebraic, eigenvector formulation and the name.
+
+\textbf{Why it is here.} Pearson's ``closest fit'' and the ``maximum variance'' of
+\cref{sec:pca-derivation} are the same line --- the reconstruction view of
+\cref{sec:reconstruction} --- and his contrast with regression is the pitfall of
+\cref{sec:pca-misuse}.
+\parencite{pearson1901}
+\end{researchspotlight}
+
+\section{Reconstruction and Choosing \texorpdfstring{$k$}{k}}
+\label{sec:reconstruction}
+
+From the $k$ coordinates $z_j = \vx\cdot\mathbf{u}_j$, the best approximation of
+$\vx$ is
+\[
+  \hat\vx = \sum_{j=1}^{k} z_j\,\mathbf{u}_j .
+\]
+For the first of the five points, $z = 2.2270$ gives $\hat\vx = 2.2270\,(0.8507,\
+0.5257) = (1.8944,\ 1.1708)$, against the original $(2,\ 1)$. Averaged over the
+points, the squared reconstruction error is $0.0584 = \lambda_2$: the variance
+PCA discards is exactly the error it makes. In general,
+\[
+  \frac1m\sum_i\bigl\|\xii{i} - \hat\vx^{(i)}\bigr\|^2 = \sum_{j=k+1}^{n}\lambda_j ,
+\]
+so maximising the variance kept and minimising the reconstruction error are the
+same problem --- Pearson's view and Hotelling's, reconciled.
+
+\begin{defbox}{Variance explained}
+The fraction of the total variance kept by the first $k$ components is
+\[
+  \frac{\lambda_1 + \dots + \lambda_k}{\lambda_1 + \dots + \lambda_n} .
+\]
+A common rule is to choose the smallest $k$ that keeps $90\%$, $95\%$ or $99\%$,
+depending on how much loss the application tolerates.
+\end{defbox}
+
+\begin{workedexample}{The digits: 64 features}
+Each of the $1797$ handwritten digits in \tool{scikit-learn}'s \code{load\_digits}
+is an $8\times8$ greyscale image, a point in $\Real{64}$. With brightness scaled to
+$[0,1]$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$k$ & variance kept & mean squared error per pixel & storage\\
+\midrule
+$2$  & $28.5\%$ & $0.0524$ & $3.1\%$\\
+$5$  & $54.5\%$ & $0.0334$ & $7.8\%$\\
+$10$ & $73.8\%$ & $0.0192$ & $15.6\%$\\
+$15$ & $83.5\%$ & $0.0121$ & $23.4\%$\\
+$30$ & $95.9\%$ & $0.0030$ & $46.9\%$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Keeping $90\%$ of the variance needs $21$ components, $95\%$ needs $29$, and $99\%$
+needs $41$ --- the data is genuinely spread over many directions, but a third of
+the original size keeps nearly everything.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[x=2.6mm,y=2.6mm]
+    \fill[black!0] (0,0) rectangle ++(1,1);
+    \fill[black!0] (1,0) rectangle ++(1,1);
+    \fill[black!44] (2,0) rectangle ++(1,1);
+    \fill[black!94] (3,0) rectangle ++(1,1);
+    \fill[black!81] (4,0) rectangle ++(1,1);
+    \fill[black!6] (5,0) rectangle ++(1,1);
+    \fill[black!0] (6,0) rectangle ++(1,1);
+    \fill[black!0] (7,0) rectangle ++(1,1);
+    \fill[black!0] (0,-1) rectangle ++(1,1);
+    \fill[black!50] (1,-1) rectangle ++(1,1);
+    \fill[black!81] (2,-1) rectangle ++(1,1);
+    \fill[black!38] (3,-1) rectangle ++(1,1);
+    \fill[black!94] (4,-1) rectangle ++(1,1);
+    \fill[black!25] (5,-1) rectangle ++(1,1);
+    \fill[black!0] (6,-1) rectangle ++(1,1);
+    \fill[black!0] (7,-1) rectangle ++(1,1);
+    \fill[black!0] (0,-2) rectangle ++(1,1);
+    \fill[black!12] (1,-2) rectangle ++(1,1);
+    \fill[black!6] (2,-2) rectangle ++(1,1);
+    \fill[black!81] (3,-2) rectangle ++(1,1);
+    \fill[black!81] (4,-2) rectangle ++(1,1);
+    \fill[black!0] (5,-2) rectangle ++(1,1);
+    \fill[black!0] (6,-2) rectangle ++(1,1);
+    \fill[black!0] (7,-2) rectangle ++(1,1);
+    \fill[black!0] (0,-3) rectangle ++(1,1);
+    \fill[black!0] (1,-3) rectangle ++(1,1);
+    \fill[black!12] (2,-3) rectangle ++(1,1);
+    \fill[black!94] (3,-3) rectangle ++(1,1);
+    \fill[black!69] (4,-3) rectangle ++(1,1);
+    \fill[black!6] (5,-3) rectangle ++(1,1);
+    \fill[black!0] (6,-3) rectangle ++(1,1);
+    \fill[black!0] (7,-3) rectangle ++(1,1);
+    \fill[black!0] (0,-4) rectangle ++(1,1);
+    \fill[black!0] (1,-4) rectangle ++(1,1);
+    \fill[black!0] (2,-4) rectangle ++(1,1);
+    \fill[black!6] (3,-4) rectangle ++(1,1);
+    \fill[black!75] (4,-4) rectangle ++(1,1);
+    \fill[black!75] (5,-4) rectangle ++(1,1);
+    \fill[black!6] (6,-4) rectangle ++(1,1);
+    \fill[black!0] (7,-4) rectangle ++(1,1);
+    \fill[black!0] (0,-5) rectangle ++(1,1);
+    \fill[black!0] (1,-5) rectangle ++(1,1);
+    \fill[black!0] (2,-5) rectangle ++(1,1);
+    \fill[black!0] (3,-5) rectangle ++(1,1);
+    \fill[black!6] (4,-5) rectangle ++(1,1);
+    \fill[black!62] (5,-5) rectangle ++(1,1);
+    \fill[black!50] (6,-5) rectangle ++(1,1);
+    \fill[black!0] (7,-5) rectangle ++(1,1);
+    \fill[black!0] (0,-6) rectangle ++(1,1);
+    \fill[black!0] (1,-6) rectangle ++(1,1);
+    \fill[black!50] (2,-6) rectangle ++(1,1);
+    \fill[black!25] (3,-6) rectangle ++(1,1);
+    \fill[black!31] (4,-6) rectangle ++(1,1);
+    \fill[black!88] (5,-6) rectangle ++(1,1);
+    \fill[black!56] (6,-6) rectangle ++(1,1);
+    \fill[black!0] (7,-6) rectangle ++(1,1);
+    \fill[black!0] (0,-7) rectangle ++(1,1);
+    \fill[black!0] (1,-7) rectangle ++(1,1);
+    \fill[black!44] (2,-7) rectangle ++(1,1);
+    \fill[black!81] (3,-7) rectangle ++(1,1);
+    \fill[black!81] (4,-7) rectangle ++(1,1);
+    \fill[black!56] (5,-7) rectangle ++(1,1);
+    \fill[black!0] (6,-7) rectangle ++(1,1);
+    \fill[black!0] (7,-7) rectangle ++(1,1);
+    \draw[MLGray!60] (0,-7) rectangle ++(8,8);
+    \node[font=\small] at (4,-8.3) {original};
+    \fill[black!0] (11,0) rectangle ++(1,1);
+    \fill[black!6] (12,0) rectangle ++(1,1);
+    \fill[black!56] (13,0) rectangle ++(1,1);
+    \fill[black!88] (14,0) rectangle ++(1,1);
+    \fill[black!75] (15,0) rectangle ++(1,1);
+    \fill[black!44] (16,0) rectangle ++(1,1);
+    \fill[black!6] (17,0) rectangle ++(1,1);
+    \fill[black!0] (18,0) rectangle ++(1,1);
+    \fill[black!0] (11,-1) rectangle ++(1,1);
+    \fill[black!25] (12,-1) rectangle ++(1,1);
+    \fill[black!88] (13,-1) rectangle ++(1,1);
+    \fill[black!62] (14,-1) rectangle ++(1,1);
+    \fill[black!69] (15,-1) rectangle ++(1,1);
+    \fill[black!69] (16,-1) rectangle ++(1,1);
+    \fill[black!12] (17,-1) rectangle ++(1,1);
+    \fill[black!0] (18,-1) rectangle ++(1,1);
+    \fill[black!0] (11,-2) rectangle ++(1,1);
+    \fill[black!25] (12,-2) rectangle ++(1,1);
+    \fill[black!56] (13,-2) rectangle ++(1,1);
+    \fill[black!19] (14,-2) rectangle ++(1,1);
+    \fill[black!56] (15,-2) rectangle ++(1,1);
+    \fill[black!62] (16,-2) rectangle ++(1,1);
+    \fill[black!6] (17,-2) rectangle ++(1,1);
+    \fill[black!0] (18,-2) rectangle ++(1,1);
+    \fill[black!0] (11,-3) rectangle ++(1,1);
+    \fill[black!12] (12,-3) rectangle ++(1,1);
+    \fill[black!38] (13,-3) rectangle ++(1,1);
+    \fill[black!56] (14,-3) rectangle ++(1,1);
+    \fill[black!75] (15,-3) rectangle ++(1,1);
+    \fill[black!50] (16,-3) rectangle ++(1,1);
+    \fill[black!12] (17,-3) rectangle ++(1,1);
+    \fill[black!0] (18,-3) rectangle ++(1,1);
+    \fill[black!0] (11,-4) rectangle ++(1,1);
+    \fill[black!0] (12,-4) rectangle ++(1,1);
+    \fill[black!12] (13,-4) rectangle ++(1,1);
+    \fill[black!38] (14,-4) rectangle ++(1,1);
+    \fill[black!50] (15,-4) rectangle ++(1,1);
+    \fill[black!56] (16,-4) rectangle ++(1,1);
+    \fill[black!19] (17,-4) rectangle ++(1,1);
+    \fill[black!0] (18,-4) rectangle ++(1,1);
+    \fill[black!0] (11,-5) rectangle ++(1,1);
+    \fill[black!0] (12,-5) rectangle ++(1,1);
+    \fill[black!12] (13,-5) rectangle ++(1,1);
+    \fill[black!12] (14,-5) rectangle ++(1,1);
+    \fill[black!19] (15,-5) rectangle ++(1,1);
+    \fill[black!56] (16,-5) rectangle ++(1,1);
+    \fill[black!31] (17,-5) rectangle ++(1,1);
+    \fill[black!0] (18,-5) rectangle ++(1,1);
+    \fill[black!0] (11,-6) rectangle ++(1,1);
+    \fill[black!6] (12,-6) rectangle ++(1,1);
+    \fill[black!56] (13,-6) rectangle ++(1,1);
+    \fill[black!50] (14,-6) rectangle ++(1,1);
+    \fill[black!44] (15,-6) rectangle ++(1,1);
+    \fill[black!75] (16,-6) rectangle ++(1,1);
+    \fill[black!31] (17,-6) rectangle ++(1,1);
+    \fill[black!0] (18,-6) rectangle ++(1,1);
+    \fill[black!0] (11,-7) rectangle ++(1,1);
+    \fill[black!0] (12,-7) rectangle ++(1,1);
+    \fill[black!56] (13,-7) rectangle ++(1,1);
+    \fill[black!88] (14,-7) rectangle ++(1,1);
+    \fill[black!81] (15,-7) rectangle ++(1,1);
+    \fill[black!56] (16,-7) rectangle ++(1,1);
+    \fill[black!19] (17,-7) rectangle ++(1,1);
+    \fill[black!6] (18,-7) rectangle ++(1,1);
+    \draw[MLGray!60] (11,-7) rectangle ++(8,8);
+    \node[font=\small] at (15,-8.3) {$k = 2$};
+    \fill[black!0] (22,0) rectangle ++(1,1);
+    \fill[black!6] (23,0) rectangle ++(1,1);
+    \fill[black!50] (24,0) rectangle ++(1,1);
+    \fill[black!75] (25,0) rectangle ++(1,1);
+    \fill[black!62] (26,0) rectangle ++(1,1);
+    \fill[black!25] (27,0) rectangle ++(1,1);
+    \fill[black!0] (28,0) rectangle ++(1,1);
+    \fill[black!0] (29,0) rectangle ++(1,1);
+    \fill[black!0] (22,-1) rectangle ++(1,1);
+    \fill[black!25] (23,-1) rectangle ++(1,1);
+    \fill[black!75] (24,-1) rectangle ++(1,1);
+    \fill[black!62] (25,-1) rectangle ++(1,1);
+    \fill[black!75] (26,-1) rectangle ++(1,1);
+    \fill[black!44] (27,-1) rectangle ++(1,1);
+    \fill[black!0] (28,-1) rectangle ++(1,1);
+    \fill[black!0] (29,-1) rectangle ++(1,1);
+    \fill[black!0] (22,-2) rectangle ++(1,1);
+    \fill[black!25] (23,-2) rectangle ++(1,1);
+    \fill[black!50] (24,-2) rectangle ++(1,1);
+    \fill[black!56] (25,-2) rectangle ++(1,1);
+    \fill[black!81] (26,-2) rectangle ++(1,1);
+    \fill[black!38] (27,-2) rectangle ++(1,1);
+    \fill[black!0] (28,-2) rectangle ++(1,1);
+    \fill[black!0] (29,-2) rectangle ++(1,1);
+    \fill[black!0] (22,-3) rectangle ++(1,1);
+    \fill[black!6] (23,-3) rectangle ++(1,1);
+    \fill[black!38] (24,-3) rectangle ++(1,1);
+    \fill[black!88] (25,-3) rectangle ++(1,1);
+    \fill[black!94] (26,-3) rectangle ++(1,1);
+    \fill[black!31] (27,-3) rectangle ++(1,1);
+    \fill[black!0] (28,-3) rectangle ++(1,1);
+    \fill[black!0] (29,-3) rectangle ++(1,1);
+    \fill[black!0] (22,-4) rectangle ++(1,1);
+    \fill[black!0] (23,-4) rectangle ++(1,1);
+    \fill[black!0] (24,-4) rectangle ++(1,1);
+    \fill[black!44] (25,-4) rectangle ++(1,1);
+    \fill[black!62] (26,-4) rectangle ++(1,1);
+    \fill[black!50] (27,-4) rectangle ++(1,1);
+    \fill[black!6] (28,-4) rectangle ++(1,1);
+    \fill[black!0] (29,-4) rectangle ++(1,1);
+    \fill[black!0] (22,-5) rectangle ++(1,1);
+    \fill[black!0] (23,-5) rectangle ++(1,1);
+    \fill[black!0] (24,-5) rectangle ++(1,1);
+    \fill[black!12] (25,-5) rectangle ++(1,1);
+    \fill[black!25] (26,-5) rectangle ++(1,1);
+    \fill[black!69] (27,-5) rectangle ++(1,1);
+    \fill[black!38] (28,-5) rectangle ++(1,1);
+    \fill[black!0] (29,-5) rectangle ++(1,1);
+    \fill[black!0] (22,-6) rectangle ++(1,1);
+    \fill[black!6] (23,-6) rectangle ++(1,1);
+    \fill[black!50] (24,-6) rectangle ++(1,1);
+    \fill[black!38] (25,-6) rectangle ++(1,1);
+    \fill[black!50] (26,-6) rectangle ++(1,1);
+    \fill[black!100] (27,-6) rectangle ++(1,1);
+    \fill[black!56] (28,-6) rectangle ++(1,1);
+    \fill[black!6] (29,-6) rectangle ++(1,1);
+    \fill[black!0] (22,-7) rectangle ++(1,1);
+    \fill[black!0] (23,-7) rectangle ++(1,1);
+    \fill[black!50] (24,-7) rectangle ++(1,1);
+    \fill[black!81] (25,-7) rectangle ++(1,1);
+    \fill[black!100] (26,-7) rectangle ++(1,1);
+    \fill[black!94] (27,-7) rectangle ++(1,1);
+    \fill[black!31] (28,-7) rectangle ++(1,1);
+    \fill[black!6] (29,-7) rectangle ++(1,1);
+    \draw[MLGray!60] (22,-7) rectangle ++(8,8);
+    \node[font=\small] at (26,-8.3) {$k = 5$};
+    \fill[black!0] (33,0) rectangle ++(1,1);
+    \fill[black!6] (34,0) rectangle ++(1,1);
+    \fill[black!50] (35,0) rectangle ++(1,1);
+    \fill[black!81] (36,0) rectangle ++(1,1);
+    \fill[black!75] (37,0) rectangle ++(1,1);
+    \fill[black!25] (38,0) rectangle ++(1,1);
+    \fill[black!0] (39,0) rectangle ++(1,1);
+    \fill[black!0] (40,0) rectangle ++(1,1);
+    \fill[black!0] (33,-1) rectangle ++(1,1);
+    \fill[black!25] (34,-1) rectangle ++(1,1);
+    \fill[black!62] (35,-1) rectangle ++(1,1);
+    \fill[black!56] (36,-1) rectangle ++(1,1);
+    \fill[black!81] (37,-1) rectangle ++(1,1);
+    \fill[black!19] (38,-1) rectangle ++(1,1);
+    \fill[black!0] (39,-1) rectangle ++(1,1);
+    \fill[black!0] (40,-1) rectangle ++(1,1);
+    \fill[black!0] (33,-2) rectangle ++(1,1);
+    \fill[black!6] (34,-2) rectangle ++(1,1);
+    \fill[black!12] (35,-2) rectangle ++(1,1);
+    \fill[black!56] (36,-2) rectangle ++(1,1);
+    \fill[black!88] (37,-2) rectangle ++(1,1);
+    \fill[black!0] (38,-2) rectangle ++(1,1);
+    \fill[black!0] (39,-2) rectangle ++(1,1);
+    \fill[black!0] (40,-2) rectangle ++(1,1);
+    \fill[black!0] (33,-3) rectangle ++(1,1);
+    \fill[black!0] (34,-3) rectangle ++(1,1);
+    \fill[black!12] (35,-3) rectangle ++(1,1);
+    \fill[black!81] (36,-3) rectangle ++(1,1);
+    \fill[black!88] (37,-3) rectangle ++(1,1);
+    \fill[black!6] (38,-3) rectangle ++(1,1);
+    \fill[black!0] (39,-3) rectangle ++(1,1);
+    \fill[black!0] (40,-3) rectangle ++(1,1);
+    \fill[black!0] (33,-4) rectangle ++(1,1);
+    \fill[black!0] (34,-4) rectangle ++(1,1);
+    \fill[black!0] (35,-4) rectangle ++(1,1);
+    \fill[black!25] (36,-4) rectangle ++(1,1);
+    \fill[black!50] (37,-4) rectangle ++(1,1);
+    \fill[black!69] (38,-4) rectangle ++(1,1);
+    \fill[black!19] (39,-4) rectangle ++(1,1);
+    \fill[black!0] (40,-4) rectangle ++(1,1);
+    \fill[black!0] (33,-5) rectangle ++(1,1);
+    \fill[black!0] (34,-5) rectangle ++(1,1);
+    \fill[black!0] (35,-5) rectangle ++(1,1);
+    \fill[black!0] (36,-5) rectangle ++(1,1);
+    \fill[black!0] (37,-5) rectangle ++(1,1);
+    \fill[black!69] (38,-5) rectangle ++(1,1);
+    \fill[black!50] (39,-5) rectangle ++(1,1);
+    \fill[black!0] (40,-5) rectangle ++(1,1);
+    \fill[black!0] (33,-6) rectangle ++(1,1);
+    \fill[black!6] (34,-6) rectangle ++(1,1);
+    \fill[black!38] (35,-6) rectangle ++(1,1);
+    \fill[black!31] (36,-6) rectangle ++(1,1);
+    \fill[black!44] (37,-6) rectangle ++(1,1);
+    \fill[black!88] (38,-6) rectangle ++(1,1);
+    \fill[black!44] (39,-6) rectangle ++(1,1);
+    \fill[black!0] (40,-6) rectangle ++(1,1);
+    \fill[black!0] (33,-7) rectangle ++(1,1);
+    \fill[black!6] (34,-7) rectangle ++(1,1);
+    \fill[black!56] (35,-7) rectangle ++(1,1);
+    \fill[black!88] (36,-7) rectangle ++(1,1);
+    \fill[black!100] (37,-7) rectangle ++(1,1);
+    \fill[black!56] (38,-7) rectangle ++(1,1);
+    \fill[black!12] (39,-7) rectangle ++(1,1);
+    \fill[black!0] (40,-7) rectangle ++(1,1);
+    \draw[MLGray!60] (33,-7) rectangle ++(8,8);
+    \node[font=\small] at (37,-8.3) {$k = 15$};
+  \end{tikzpicture}
+  \caption{One handwritten $3$ (left) and its reconstructions from $2$, $5$ and
+  $15$ principal components, drawn as $8\times8$ grids of grey cells. Even two
+  components give a recognisable outline, because the reconstruction starts from
+  the average digit; the strokes sharpen as components are added. Squared error per
+  pixel: $0.0423$, $0.0235$ and $0.0097$.}
+  \label{fig:recon}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.66\linewidth, height=4.6cm,
+      xlabel={number of components $k$}, ylabel={variance kept},
+      xmin=0, xmax=41, ymin=0, ymax=1.02]
+      \addplot[MLAmber, very thick, mark=*, mark size=0.9pt] coordinates {(1,0.1489)(2,0.2851)(3,0.4030)(4,0.4871)(5,0.5450)(6,0.5941)(7,0.6373)(8,0.6739)(9,0.7074)(10,0.7382)(11,0.7620)(12,0.7847)(13,0.8029)(14,0.8206)(15,0.8353)(16,0.8494)(17,0.8626)(18,0.8751)(19,0.8852)(20,0.8943)(21,0.9032)(22,0.9112)(23,0.9188)(24,0.9261)(25,0.9330)(26,0.9390)(27,0.9447)(28,0.9499)(29,0.9548)(30,0.9591)(31,0.9628)(32,0.9664)(33,0.9697)(34,0.9730)(35,0.9761)(36,0.9790)(37,0.9816)(38,0.9839)(39,0.9861)(40,0.9882)};
+      \addplot[MLGray, dashed, domain=0:41, samples=2] {0.9};
+      \node[font=\tiny, MLGray, anchor=south east] at (axis cs:40,0.9) {$90\%$};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Cumulative variance explained for the $64$-dimensional digits. The curve
+  rises steeply and then slowly; $21$ components reach $90\%$.}
+  \label{fig:cumvar}
+\end{figure}
+
+\section{PCA for Visualisation}
+\label{sec:pca-vis}
+
+Reduce to two components and plot. Take the digits $0$, $1$ and $7$ only ---
+$539$ images --- and fit PCA without using the labels.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.72\linewidth, height=5.6cm,
+      xlabel={first component $z_1$}, ylabel={second component $z_2$},
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[only marks, mark=*, mark size=1.4pt, MLBlue] coordinates {(-1.557,0.171)(-1.678,-0.264)(-1.190,0.016)(-1.758,-0.231)(-1.543,0.088)(-1.680,0.017)(-1.479,-0.159)(-1.796,0.015)(-1.258,-0.350)(-1.791,0.368)(-1.560,0.280)(-1.790,-0.218)(-2.056,-0.348)(-1.528,-0.291)(-0.810,0.294)(-1.954,-0.275)(-1.846,0.073)(-1.681,0.107)(-1.551,0.578)(-1.770,0.443)(-1.697,-0.189)(-1.573,-0.224)(-1.642,-0.241)(-1.668,-0.650)(-1.815,-0.414)(-0.838,0.786)(-1.775,-0.098)(-1.648,0.421)(-1.826,-0.336)(-2.034,-0.186)(-2.050,-0.017)(-1.679,0.256)(-2.092,0.093)(-1.403,0.117)(-1.726,-0.367)(-1.781,-0.243)(-1.909,0.091)(-1.848,-0.531)(-1.786,-0.184)(-1.738,0.228)};
+      \addlegendentry{digit 0}
+      \addplot[only marks, mark=square*, mark size=1.4pt, MLRose] coordinates {(1.387,0.658)(0.491,1.758)(1.316,1.228)(1.458,1.073)(0.657,1.783)(1.560,1.024)(0.294,1.646)(1.206,0.663)(0.445,0.944)(0.920,1.313)(0.240,1.695)(1.042,0.783)(1.178,0.893)(1.247,0.862)(1.273,1.026)(1.365,0.856)(0.530,1.099)(0.556,1.245)(0.889,1.004)(1.504,0.703)(0.692,0.699)(0.530,1.425)(0.210,1.751)(0.653,0.751)(0.285,1.848)(1.501,1.198)(0.012,0.602)(1.105,0.968)(-0.506,0.438)(-0.766,0.164)(0.423,1.313)(-0.079,0.306)(0.045,0.952)(1.481,0.627)(0.012,0.306)(0.848,0.744)(1.064,0.995)(1.454,1.131)(0.018,0.827)(0.991,0.835)};
+      \addlegendentry{digit 1}
+      \addplot[only marks, mark=triangle*, mark size=1.7pt, MLTeal] coordinates {(0.749,-0.473)(0.854,-1.002)(0.651,-1.455)(0.888,-0.458)(0.580,-1.371)(0.574,-1.000)(0.753,-0.922)(0.928,-1.310)(1.060,-1.135)(1.246,-0.687)(1.036,-1.271)(0.882,-0.689)(0.825,-1.315)(0.584,-0.940)(1.198,-0.195)(0.965,-0.292)(0.876,-1.103)(0.256,-0.919)(0.877,-1.525)(0.705,-1.314)(0.351,-0.723)(1.068,-0.686)(0.891,-0.805)(0.829,-0.742)(1.188,-1.263)(0.212,-1.009)(1.002,-1.012)(0.968,-1.011)(0.784,-1.341)(0.387,-0.585)(1.337,-0.092)(1.127,-1.058)(0.595,-0.762)(1.116,-0.502)(1.344,-0.564)(0.998,-0.535)(0.531,-1.106)(0.919,-0.863)(0.438,-1.136)(0.703,-0.539)};
+      \addlegendentry{digit 7}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{$40$ images of each digit, projected onto the first two principal
+  components of the $539$ images of $0$, $1$ and $7$. The components were found
+  without labels, and keep only $47.3\%$ of the variance, yet the three digits
+  form three clear groups --- the colours are added afterwards.}
+  \label{fig:digits-pca}
+\end{figure}
+
+A two-dimensional PCA plot is a standard first look at any new dataset: it shows
+clusters, outliers and gradients that no table of numbers reveals. Its axes are
+combinations of all the original features, and part of the analysis is to inspect
+which features weigh most in each.
+
+\section{What PCA Is Not}
+\label{sec:pca-misuse}
+
+\subsection{It is not linear regression}
+
+Both fit a line through a cloud of points, and they fit different lines.
+Regression predicts one designated variable from the others and minimises
+\emph{vertical} distances. PCA treats all features symmetrically and minimises
+\emph{perpendicular} distances. On the five points of \cref{sec:pca-algorithm}, the
+least-squares regression of $x_2$ on $x_1$ has slope $0.6000$; the first principal
+component has slope $0.6180$. The difference grows with the noise.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.62\linewidth, height=5.2cm, axis equal image,
+      xmin=-2.6, xmax=2.6, ymin=-1.8, ymax=1.8, xlabel={$x_1$}, ylabel={$x_2$},
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[MLAmber, thick, dashed, domain=-2.6:2.6] {0.6*x};
+      \addlegendentry{regression, slope $0.6000$}
+      \addplot[MLTeal, very thick, domain=-2.6:2.6] {0.6180*x};
+      \addlegendentry{PCA, slope $0.6180$}
+      \draw[MLAmber!70] (axis cs:2,1) -- (axis cs:2,1.2);
+      \draw[MLAmber!70] (axis cs:-2,-1) -- (axis cs:-2,-1.2);
+      \draw[MLAmber!70] (axis cs:1,1) -- (axis cs:1,0.6);
+      \draw[MLAmber!70] (axis cs:-1,-1) -- (axis cs:-1,-0.6);
+      \draw[MLTeal!70] (axis cs:2,1) -- (axis cs:1.8944,1.1708);
+      \draw[MLTeal!70] (axis cs:1,1) -- (axis cs:1.1708,0.7236);
+      \draw[MLTeal!70] (axis cs:-1,-1) -- (axis cs:-1.1708,-0.7236);
+      \draw[MLTeal!70] (axis cs:-2,-1) -- (axis cs:-1.8944,-1.1708);
+      \addplot[only marks, mark=*, mark size=2pt, MLBlue, forget plot]
+        coordinates {(2,1)(1,1)(0,0)(-1,-1)(-2,-1)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Regression and PCA on the same five points. Regression (dashed) minimises
+  the vertical distances (amber segments); PCA (solid) minimises the perpendicular
+  ones (teal segments). Only PCA treats $x_1$ and $x_2$ alike.}
+  \label{fig:pca-vs-reg}
+\end{figure}
+
+\subsection{It is not a cure for overfitting}
+
+It is tempting to reduce the features with PCA before training, to give the model
+fewer parameters and so less room to overfit. But PCA chooses the directions of
+greatest variance without looking at the labels, and the direction that best
+separates the classes may have little variance.
+
+\begin{workedexample}{PCA versus regularization on the digits}
+Train ten-class logistic regression on $200$ digit images --- few enough that
+overfitting threatens --- and test on $899$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+model & train accuracy & test accuracy\\
+\midrule
+all $64$ pixels, almost no penalty ($C = 10^4$) & $1.0000$ & $0.9121$\\
+all $64$ pixels, penalty $C = 1$                 & $1.0000$ & $\mathbf{0.9155}$\\
+all $64$ pixels, strong penalty $C = 0.1$        & $0.9300$ & $0.8843$\\
+PCA to $5$ components, no penalty                & $0.8700$ & $0.8120$\\
+PCA to $10$ components, no penalty               & $1.0000$ & $0.8676$\\
+PCA to $20$ components, no penalty               & $1.0000$ & $0.9121$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+(\tool{scikit-learn}'s $C$ is the inverse of the regularization strength,
+$C = 1/\lambda$.) Ten components throw away enough information to cost almost
+five percentage points; twenty recover the unregularized model's accuracy but no
+more. The best model keeps every pixel and controls overfitting with the L2 penalty
+of \cref{ch:ch07}.
+\end{workedexample}
+
+\begin{pitfall}{Using PCA to prevent overfitting}
+Use regularization, more data, or a simpler model class for overfitting. Use PCA
+for visualisation and compression --- and if it is used to speed up training,
+choose $k$ by validation performance of the downstream model, not by variance
+explained alone.
+\end{pitfall}
+
+\section{Beyond PCA: t-SNE and UMAP}
+\label{sec:tsne}
+
+PCA is linear: it can only rotate and project. Data lying on a curved surface ---
+a spiral, or the many distorted versions of a handwritten digit --- is not well
+summarised by any flat projection. Two non-linear methods are widely used for
+visualisation instead.
+
+\term{t-SNE} places points in two dimensions so that each point's nearest
+neighbours in the original space remain near it, and \term{UMAP} pursues a similar
+goal with a different mathematical foundation and greater speed. Both reveal
+clusters that PCA misses. Both also distort: distances between clusters and the
+sizes of clusters in their plots carry little meaning, and the result changes with
+their hyperparameters and random seed. Use them to look, not to measure; use PCA
+when the axes must mean something or when new data must be projected the same way.
+
+\begin{researchspotlight}{van der Maaten \& Hinton (2008) --- Visualizing data using t-SNE}
+\textbf{The problem.} Existing methods for visualising high-dimensional data in two
+dimensions either preserved global structure and lost local neighbourhoods (like
+PCA), or crowded points together in the centre of the map.
+
+\textbf{The idea.} Convert distances in the original space into probabilities that
+points are neighbours, do the same in two dimensions using a heavy-tailed
+Student-$t$ distribution, and move the two-dimensional points to make the two sets
+of probabilities match. The heavy tail relieves the crowding.
+
+\textbf{The result.} Maps of handwritten digits, faces and text in which the
+classes separate strikingly; t-SNE became the default visualisation for
+high-dimensional data, including the internal representations of neural networks.
+
+\textbf{Why it is here.} It is the non-linear alternative of \cref{sec:tsne}, and a
+lesson in reading plots: its clusters are real, but their spacing is not.
+\parencite{vandermaaten2008}
+\end{researchspotlight}
+
+\begin{labbox}{Lab 16 --- PCA and data visualisation}
+Implement PCA from scratch: centre, form $\Sigma$, compute its eigenvectors with
+\code{np.linalg.eigh}, sort by eigenvalue, and project. Reproduce the five-point
+example of \cref{sec:pca-algorithm} and confirm it against \code{np.linalg.svd}
+and \code{sklearn.decomposition.PCA}.
+
+Then apply PCA to the digits: plot the cumulative variance explained, reconstruct
+one image from $2$, $5$ and $15$ components, and draw the two-dimensional map of
+\cref{fig:digits-pca}. Finally fit t-SNE to the same images and compare the two
+maps.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item Reducing the Number of Features
-  \item The Variance-Maximising Direction
-  \item Eigenvectors and the SVD
-  \item The PCA Algorithm
-  \item Choosing the Number of Components
-  \item Reconstruction
-  \item Uses and Misuses
+  \item PCA replaces $n$ correlated features by $k$ coordinates along the
+        directions of greatest variance, for visualisation and compression.
+  \item The variance of a projection onto unit $\mathbf{u}$ is
+        $\mathbf{u}^{\mathsf T}\Sigma\mathbf{u}$; maximising it under
+        $\|\mathbf{u}\| = 1$ gives $\Sigma\mathbf{u} = \lambda\mathbf{u}$. The
+        components are the eigenvectors of the covariance matrix in order of
+        eigenvalue, and each eigenvalue is the variance its component keeps.
+  \item Algorithm: centre, scale if units differ, decompose (eigen or SVD),
+        project. On five points, $\lambda_1 = 2.7416$ keeps $97.92\%$ of the
+        variance along $\mathbf{u}_1 = (0.8507,\ 0.5257)$.
+  \item Reconstruction $\hat\vx = \sum_j z_j\mathbf{u}_j$ has mean squared error
+        equal to the discarded eigenvalues, so keeping variance and minimising
+        reconstruction error are the same goal.
+  \item Choose $k$ by variance explained: $21$ of the digits' $64$ components keep
+        $90\%$. Two components already separate the digits $0$, $1$ and $7$.
+  \item PCA minimises perpendicular, not vertical, distances: it is not regression.
+        It ignores labels, so it is a poor cure for overfitting --- regularization
+        beat every PCA model on the digits.
+  \item t-SNE and UMAP are non-linear maps for looking at data; their inter-cluster
+        distances should not be read as measurements.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Give three uses of dimensionality reduction.
+
+\sq Why must data be centred before PCA, and when must it be scaled?
+
+\sq What does the eigenvalue of a principal component measure?
+
+\sq Why are the principal components orthogonal?
+
+\sq Define the variance explained by the first $k$ components.
+
+\sq How is an example reconstructed from its first $k$ components?
+
+\sq How does PCA differ from linear regression?
+
+\sq Why is PCA a poor remedy for overfitting?
+
+\sq Why may two implementations of PCA return components of opposite sign?
+
+\sq What do t-SNE and UMAP do that PCA cannot, and what should not be read from
+their plots?
+
+\exercisesection{Analytical Problems}
+
+\ap Derive the first principal component by maximising $\mathbf{u}^{\mathsf T}
+\Sigma\mathbf{u}$ subject to $\mathbf{u}^{\mathsf T}\mathbf{u} = 1$, and show that
+the maximum variance is the largest eigenvalue.
+
+\ap Carry out PCA by hand on the points $(3,1)$, $(1,1)$, $(-1,-1)$, $(-3,-1)$:
+compute $\Sigma$, its eigenvalues, the first component, the projections and the
+variance explained.
+
+\ap Show that the mean squared reconstruction error from $k$ components is
+$\sum_{j>k}\lambda_j$.
+
+\ap Show that if $\Xmat = \mathbf{U}\mathbf{S}\mathbf{V}^{\mathsf T}$ is the SVD of
+centred data, the eigenvectors of $\Sigma$ are the columns of $\mathbf{V}$ and the
+eigenvalues are $s_j^2/m$.
+
+\ap Find the slope of the least-squares regression of $x_2$ on $x_1$, of $x_1$ on
+$x_2$, and of the first principal component, for the five points of
+\cref{sec:pca-algorithm}. Explain why the three differ.
+
+\ap A dataset has eigenvalues $4.0$, $2.5$, $0.9$, $0.4$, $0.2$. How many
+components keep at least $90\%$ of the variance, and what is the mean squared
+reconstruction error with that many?
+
+\exercisesection{Design Problems}
+
+\dpr Survey data has $40$ numeric answers from $2000$ respondents. Design a
+PCA-based visualisation: preprocessing, the choice of $k$, and how you would explain
+the axes to a non-technical audience.
+
+\dpr A sensor network records $500$ correlated readings per second. Design a PCA
+compression scheme, including how you would choose $k$ and how you would detect when
+the components need to be recomputed.
+
+\dpr A colleague proposes PCA to $10$ components before training a classifier
+``to avoid overfitting''. Design the experiment that tests the proposal against
+regularization, and say what result would justify it.
+
+\dpr Design an exploratory analysis of an unfamiliar dataset of $10{,}000$ examples
+with $100$ features, using PCA and t-SNE together, and say which conclusions each
+can and cannot support.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement PCA with \code{np.linalg.eigh} and with \code{np.linalg.svd}, and
+confirm that both reproduce the five-point example.
+
+\pe Reproduce the digits table of \cref{sec:reconstruction}, the reconstructions of
+\cref{fig:recon} and the cumulative curve of \cref{fig:cumvar}.
+
+\pe Reproduce \cref{fig:digits-pca}, then do the same for all ten digits, and
+compare with a t-SNE map of the same images.
+
+\pe Reproduce the PCA-versus-regularization table, and add a curve of test accuracy
+against $k$ from $1$ to $64$.
+
+\exercisesection{Self-Test}
+
+\qz The first principal component is the eigenvector of the covariance matrix
+with: (a)~the smallest eigenvalue; (b)~the largest eigenvalue; (c)~eigenvalue $1$;
+(d)~any eigenvalue.
+
+\qz The variance of the projections onto a principal component equals:
+(a)~$1$; (b)~its eigenvalue; (c)~the number of features; (d)~zero.
+
+\qz Before PCA the data must be: (a)~labelled; (b)~centred; (c)~clustered;
+(d)~binary.
+
+\qz The mean squared reconstruction error from $k$ components equals:
+(a)~$\lambda_1$; (b)~the sum of the discarded eigenvalues; (c)~$k$;
+(d)~zero always.
+
+\qz PCA minimises: (a)~vertical distances; (b)~perpendicular distances;
+(c)~horizontal distances; (d)~classification error.
+
+\qz To control overfitting, prefer: (a)~PCA; (b)~regularization;
+(c)~more features; (d)~t-SNE.
+
+\qz In a t-SNE plot, the distances between clusters: (a)~are exact; (b)~carry
+little meaning; (c)~equal PCA distances; (d)~are always zero.
+
+\furtherreading
+
+\textcite{james2021} §12.2 is the primary reading: it develops principal components
+both as directions of maximum variance and as the closest low-dimensional surface,
+discusses the proportion of variance explained and the scree plot, and insists on
+scaling with a worked example of what goes wrong without it. \textcite{bishop2006}
+§12.1 derives PCA by both routes --- maximum variance with a Lagrange multiplier,
+exactly as in \cref{sec:pca-derivation}, and minimum reconstruction error --- and
+applies it to digit images with reconstructions like those of \cref{fig:recon}.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch17} opens Part~VII, reinforcement learning: an
+agent that learns not from labels or structure but from rewards.

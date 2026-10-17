@@ -176,8 +176,8 @@ reading list, so exam preparation stays two books wide.
 | | 12 | Decision Trees and Ensembles | 34 | **DONE** (22) |
 | **V — Unsupervised Learning** | 13 | Clustering with *k*-Means | 30 | **DONE** (14) |
 | | 14 | Anomaly Detection | 30 | **DONE** (18) |
-| **VI — Recommenders and Dimensionality Reduction** | 15 | Recommender Systems | 40 | PLANNED |
-| | 16 | Principal Component Analysis | 26 | PLANNED |
+| **VI — Recommenders and Dimensionality Reduction** | 15 | Recommender Systems | 40 | **DONE** (18) |
+| | 16 | Principal Component Analysis | 26 | **DONE** (18) |
 | **VII — Reinforcement Learning** | 17 | Reinforcement Learning and Deep Q-Networks | 42 | PLANNED |
 | **VIII — Transformers and Language Models** | 18 | Sequence Models and the Transformer | 36 | PLANNED |
 | | 19 | Large Language Models in Practice | 34 | PLANNED |
@@ -656,6 +656,18 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
 - Ch 14 reads ISLR §4.4.1–4.4.2 (Gaussian densities) rather than the outline's "§12.4
   (context)", which does not cover the material.
 
+### Notes from writing Ch 15–16 (2026-10-20)
+
+- **Datasets**: **R54** (five dishes × four users of a food-delivery app, shared with the Week 8
+  lecture, which replaced its earlier movie example), **S80** (synthetic, 200 users × 80 dishes,
+  3 latent tastes, 30% observed; held-out evaluation), **P5** (five points, PCA by hand — the
+  eigenvector ratio happens to be the golden ratio), **C30** (the lecture's axis-search data).
+- Ch 15's hand-worked factorization uses n = 1 and two steps on R54 (the outline asked for a
+  4×5 matrix; R54 is 5×4, the same thing transposed).
+- Ch 15 reads ISLR §12.3 (matrix completion) rather than the outline's "§12.5 (context)".
+- Ch 16's PCA-vs-regularization table shows PCA to 10 components costing ~5 points of test
+  accuracy on 200 training digits; regularization wins.
+
 ### Known gaps to resolve (raise, do not silently fix)
 
 - **G1** `plan.md` headers say 12 weeks; 9 weeks of content are listed. Ch 12, Ch 18–19 and
@@ -688,7 +700,7 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
 | **M3** | Appendices A–B | Written early; Ch 8 onward leans on them. |
 | **M4** | Part III (Ch 8–9) | **COMPLETE.** Heaviest derivations. |
 | **M5** | Part IV (Ch 10–12) | **COMPLETE.** Ch 12 written on request (see G3). |
-| **M6** | Parts V–VII (Ch 13–17) | Ch 13–14 **DONE**. |
+| **M6** | Parts V–VII (Ch 13–17) | Ch 13–16 **DONE**; Ch 17 outstanding. |
 | **M7** | Ch 18–19 | Depend on Ch 9 and Ch 16 being final; Ch 19 depends on Ch 18. |
 | **M8** | Part IX (Ch 20–22) | Depends on Ch 10–11 for the modelling/engineering boundary. |
 | **M9** | Back matter and polish | Appendices C–E, index pass, `make check` clean, cover. |

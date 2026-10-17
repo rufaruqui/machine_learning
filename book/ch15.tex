@@ -1,18 +1,740 @@
 %% ch15.tex --- Recommender Systems
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch15_recommenders.py.
+%% R54 (five dishes x four users of a food-delivery app) is shared with the
+%% companion lecture, which animates the collaborative-filtering run of 15.3.
 
 \chapter{Recommender Systems}
 \label{ch:ch15}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{People who liked this also liked \dots}{---\ every online shop}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Describe a recommendation problem as a ratings matrix with missing
+        entries, in standard notation.
+  \item Predict ratings from known item features with one linear model per user.
+  \item Derive and run collaborative filtering, which learns item features and
+        user preferences together from the ratings alone.
+  \item Adapt it to binary feedback such as likes and clicks.
+  \item Use mean normalization to give new users sensible predictions.
+  \item Find related items from learned features.
+  \item Compare collaborative and content-based filtering, and design a
+        two-tower network and a retrieval-and-ranking pipeline for a large
+        catalogue.
+  \item Evaluate a recommender honestly, and say what it should and should not
+        optimise.
+\end{enumerate}
+\end{chapterlearning}
+
+A recommender system decides what to show a user next: which product, which
+song, which video, which restaurant dish. It is arguably the most commercially
+important application of machine learning, because so much of what people buy,
+watch and read online is chosen for them by one. It is also a good place to see
+the ideas of the book combine: linear regression, regularization, gradient
+descent, learned features and neural networks all appear in this one chapter.
+
+\section{The Ratings Matrix}
+\label{sec:ratings}
+
+\begin{defbox}{Dataset R54}
+A food-delivery app records how four users rated five dishes, from $0$ to $5$
+stars. A dash means the user has not rated the dish.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+dish & Alice & Bob & Carol & Dave\\
+\midrule
+Chicken Curry   & $5$ & $5$ & $0$ & $0$\\
+Chilli Noodles  & $5$ & --- & --- & $0$\\
+Pepper Soup     & --- & $4$ & $0$ & ---\\
+Ginger Cake     & $0$ & $0$ & $5$ & $4$\\
+Mango Ice Cream & $0$ & $0$ & $5$ & ---\\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{defbox}
+
+\begin{defbox}{Recommender notation}
+$n_u$ is the number of users and $n_m$ the number of items ($n_u = 4$, $n_m = 5$
+in R54). $r(i,j) = 1$ if user $j$ has rated item $i$, and then $y^{(i,j)}$ is
+the rating. The task is to predict $y^{(i,j)}$ wherever $r(i,j) = 0$, and to
+recommend each user the unrated items with the highest predictions.
+\end{defbox}
+
+Even by eye, Alice and Bob like spicy food and dislike sweets, and Carol and Dave
+the reverse, so Alice should probably be offered the Pepper Soup. Real matrices
+are enormous and almost empty --- millions of users, millions of items, and each
+user rating a tiny fraction --- but the structure of the problem is the same.
+
+\section{Content-Based Prediction with Item Features}
+\label{sec:content-based}
+
+Suppose each dish has been described by two features: how spicy it is, $x_1$,
+and how sweet, $x_2$.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+dish & $x_1$ spicy & $x_2$ sweet\\
+\midrule
+Chicken Curry   & $0.90$ & $0$\\
+Chilli Noodles  & $1.00$ & $0.01$\\
+Pepper Soup     & $0.99$ & $0$\\
+Ginger Cake     & $0.10$ & $1.00$\\
+Mango Ice Cream & $0$    & $0.90$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Then each user can be modelled by linear regression on those features.
+
+\begin{defbox}{Content-based prediction}
+Predict user $j$'s rating of item $i$ as
+\[
+  \hat y^{(i,j)} = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)},
+\]
+with parameters $\vw^{(j)}, b^{(j)}$ for each user, fitted by minimising
+\[
+  J\bigl(\vw^{(j)}, b^{(j)}\bigr) = \frac12\sum_{i:\,r(i,j)=1}\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2
+    + \frac{\lambda}{2}\sum_{k=1}^{n}\bigl(w^{(j)}_k\bigr)^2 .
+\]
+To learn all users at once, sum this cost over $j$.
+\end{defbox}
+
+The $\frac1m$ of earlier chapters is dropped by convention here, because each
+user has a different number of ratings; it would only rescale $\lambda$.
+
+\begin{workedexample}{Predicting Alice's rating}
+If Alice's parameters were $\vw^{(1)} = (5,\ 0)$ and $b^{(1)} = 0$ --- loving
+spice, indifferent to sweetness --- her predicted rating of Pepper Soup,
+$\vx^{(3)} = (0.99,\ 0)$, would be $5(0.99) + 0 = 4.95$.
+
+Actually fitting each user with $\lambda = 1$ gives Alice
+$\vw = (1.66,\ -1.75)$, $b = 2.506$, and a predicted Pepper Soup rating of
+$4.15$; Dave gets $\vw = (-1.06,\ 1.24)$ and a predicted Mango Ice Cream rating
+of $2.74$. With only three ratings per user the penalty shrinks the fits
+noticeably.
+\end{workedexample}
+
+The prediction is a dot product, which has a useful geometric reading:
+$\vw^{(j)}\cdot\vx^{(i)}$ is large when the item's feature vector points the way
+the user's preference vector points. Alice's vector points towards spicy and away
+from sweet; Carol's the opposite.
+
+\begin{pitfall}{Who scores the features?}
+Content-based prediction needs every item described by hand. For five dishes and
+two qualities that is easy; for millions of items, and for qualities nobody
+thought to name, it is impossible. The next section removes the requirement.
+\end{pitfall}
+
+\section{Collaborative Filtering}
+\label{sec:collab}
+
+Turn the problem around. If we knew every user's $\vw^{(j)}$ and $b^{(j)}$, we
+could \emph{learn} each item's features from the ratings it received, by the
+same least squares:
+\[
+  \min_{\vx^{(i)}}\ \frac12\sum_{j:\,r(i,j)=1}\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2
+    + \frac{\lambda}{2}\sum_{k=1}^{n}\bigl(x^{(i)}_k\bigr)^2 .
+\]
+This works only because many users rated each item: their ratings, together,
+say what the item is like. Neither the features nor the preferences are known in
+practice, so learn both at once.
+
+\begin{defbox}{Collaborative filtering}
+Learn item features $\vx^{(1)},\dots,\vx^{(n_m)}$ and user parameters
+$\vw^{(1)},b^{(1)},\dots,\vw^{(n_u)},b^{(n_u)}$ by minimising
+\[
+  J = \frac12\!\!\sum_{(i,j):\,r(i,j)=1}\!\!\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2
+    + \frac{\lambda}{2}\sum_{j=1}^{n_u}\sum_{k=1}^{n}\bigl(w^{(j)}_k\bigr)^2
+    + \frac{\lambda}{2}\sum_{i=1}^{n_m}\sum_{k=1}^{n}\bigl(x^{(i)}_k\bigr)^2 .
+\]
+The number of features $n$ is a hyperparameter. The method is
+\term{collaborative} because every user's ratings help learn every item's
+features, which in turn help predict every other user's ratings.
+\end{defbox}
+
+\begin{derivation}{The collaborative-filtering gradient}
+Write $e^{(i,j)} = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}$ for a rated pair.
+A weight $w^{(j)}_k$ appears in the error of every item user $j$ rated, with
+coefficient $x^{(i)}_k$, and in one penalty term:
+\[
+  \frac{\partial J}{\partial w^{(j)}_k} = \sum_{i:\,r(i,j)=1} e^{(i,j)}\,x^{(i)}_k + \lambda\,w^{(j)}_k ,
+  \qquad
+  \frac{\partial J}{\partial b^{(j)}} = \sum_{i:\,r(i,j)=1} e^{(i,j)} .
+\]
+By symmetry, a feature $x^{(i)}_k$ appears in the error of every user who rated
+item $i$, with coefficient $w^{(j)}_k$:
+\[
+  \frac{\partial J}{\partial x^{(i)}_k} = \sum_{j:\,r(i,j)=1} e^{(i,j)}\,w^{(j)}_k + \lambda\,x^{(i)}_k .
+\]
+In matrix form, with $\mathbf{X}$ the $n_m\times n$ matrix of item features,
+$\mathbf{W}$ the $n_u\times n$ matrix of user weights, $\mathbf{R}$ the
+indicator matrix and $\odot$ the entrywise product,
+\[
+  \mathbf{E} = \bigl(\mathbf{X}\mathbf{W}^{\mathsf T} + \mathbf{1}\mathbf{b}^{\mathsf T} - \mathbf{Y}\bigr)\odot\mathbf{R},
+  \qquad
+  \frac{\partial J}{\partial\mathbf{X}} = \mathbf{E}\mathbf{W} + \lambda\mathbf{X},
+  \qquad
+  \frac{\partial J}{\partial\mathbf{W}} = \mathbf{E}^{\mathsf T}\mathbf{X} + \lambda\mathbf{W} .
+\]
+Multiplying by $\mathbf{R}$ zeroes the unrated entries, so they contribute
+nothing. Gradient descent updates all three blocks simultaneously.
+\end{derivation}
+
+\begin{workedexample}{Two gradient steps by hand}
+Use one feature ($n = 1$), start from $\vx^{(i)} = 1$ for every dish,
+$w^{(j)} = 1$ and $b^{(j)} = 0$ for every user, with $\lambda = 0$ and
+$\alpha = 0.1$. Every prediction is then $1$, and the cost is $J = 53$.
+
+\textbf{Step 1.} For Chicken Curry the errors on its four ratings are
+$1-5,\ 1-5,\ 1-0,\ 1-0 = (-4,\ -4,\ 1,\ 1)$, so
+$\partial J/\partial x^{(1)} = \sum_j e^{(1,j)}w^{(j)} = -6$. All five feature
+gradients are $(-6,\ -3,\ -2,\ -5,\ -2)$, and the user gradients for $w$ are
+$(-6,\ -5,\ -6,\ -1)$ --- equal, at this step, to those for $b$, because every
+$x^{(i)}$ is $1$. After the update,
+\[
+  \vx = (1.6,\ 1.3,\ 1.2,\ 1.5,\ 1.2),\quad
+  \vw = (1.6,\ 1.5,\ 1.6,\ 1.1),\quad
+  \mathbf{b} = (0.6,\ 0.5,\ 0.6,\ 0.1).
+\]
+\textbf{Step 2.} The cost is now $40.8102$. The new gradients overshoot in places
+--- the feature gradient for Mango Ice Cream is $+3.514$ --- and the update gives
+\[
+  \vx = (1.4992,\ 1.5029,\ 1.0518,\ 1.1750,\ 0.8486),\quad
+  \vw = (1.4436,\ 1.3515,\ 1.3896,\ 0.9410),
+\]
+with cost $39.3652$. One feature cannot separate the spicy-lovers from the
+sweet-lovers; the next run uses two.
+\end{workedexample}
+
+With $n = 2$, $\lambda = 0.1$, $\alpha = 0.01$ and a small random start, the
+cost falls from $79.61$ to $11.17$ in $40$ steps, to $1.37$ in $80$, and to
+$1.060$ after $2000$. The learned model fills in the matrix:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{\qquad}lr@{}}
+\toprule
+missing rating & prediction & missing rating & prediction\\
+\midrule
+Bob, Chilli Noodles   & $4.47$  & Dave, Pepper Soup     & $0.30$\\
+Carol, Chilli Noodles & $-0.19$ & Dave, Mango Ice Cream & $3.94$\\
+Alice, Pepper Soup    & $4.62$  &                       & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Recommend the Pepper Soup to Alice and the Mango Ice Cream to Dave. The observed
+ratings are reproduced closely --- $4.99$ for Alice's $5$ --- but not exactly,
+because of the penalty.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=5.0cm, title={random start},
+        xmin=-2.0, xmax=2.0, ymin=-1.4, ymax=1.4, xtick={-1,0,1}, ytick={-1,0,1}]
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(0.173,0.411)};
+        \node[font=\tiny, MLBlue, anchor=south] at (axis cs:0.173,0.411) {Curry};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(0.165,-0.652)};
+        \node[font=\tiny, MLBlue, anchor=north] at (axis cs:0.165,-0.652) {Noodles};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(0.453,0.223)};
+        \node[font=\tiny, MLBlue, anchor=west] at (axis cs:0.453,0.223) {Soup};
+        \addplot[only marks, mark=square*, mark size=2.2pt, MLRose, forget plot] coordinates {(-0.268,0.291)};
+        \node[font=\tiny, MLRose, anchor=east] at (axis cs:-0.268,0.291) {Ginger Cake};
+        \addplot[only marks, mark=square*, mark size=2.2pt, MLRose, forget plot] coordinates {(0.182,0.147)};
+        \node[font=\tiny, MLRose, anchor=north west] at (axis cs:0.182,0.147) {Ice Cream};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=5.0cm, title={after 2000 steps},
+        xmin=-2.0, xmax=2.0, ymin=-1.4, ymax=1.4, xtick={-1,0,1}, ytick={-1,0,1}]
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(1.418,0.193)};
+        \node[font=\tiny, MLBlue, anchor=south east] at (axis cs:1.418,0.193) {Curry};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(1.170,-0.429)};
+        \node[font=\tiny, MLBlue, anchor=south west] at (axis cs:1.170,-0.429) {Noodles};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLBlue, forget plot] coordinates {(0.907,-0.578)};
+        \node[font=\tiny, MLBlue, anchor=north east] at (axis cs:0.907,-0.578) {Soup};
+        \addplot[only marks, mark=square*, mark size=2.2pt, MLRose, forget plot] coordinates {(-1.572,0.635)};
+        \node[font=\tiny, MLRose, anchor=south west] at (axis cs:-1.572,0.635) {Ginger Cake};
+        \addplot[only marks, mark=square*, mark size=2.2pt, MLRose, forget plot] coordinates {(-1.567,0.628)};
+        \node[font=\tiny, MLRose, anchor=north west] at (axis cs:-1.567,0.628) {Ice Cream};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{The five dishes' learned feature vectors $\vx^{(i)}$, before and after
+  collaborative filtering (the companion lecture animates the motion between).
+  The algorithm was never told which dishes are spicy and which sweet, yet the
+  three spicy dishes (circles) end up on one side and the two sweet ones
+  (squares) on the other.}
+  \label{fig:cf-features}
+\end{figure}
+
+\begin{pitfall}{Learned features have no fixed meaning}
+The learned axes are not ``spicy'' and ``sweet''. If $\mathbf{Q}$ is any
+invertible $n\times n$ matrix, replacing $\mathbf{X}$ by $\mathbf{X}\mathbf{Q}$
+and $\mathbf{W}$ by $\mathbf{W}\mathbf{Q}^{-\mathsf T}$ leaves every prediction
+$\mathbf{X}\mathbf{W}^{\mathsf T}$ unchanged. Only quantities invariant to such
+changes --- predictions, and distances when $\mathbf{Q}$ is a rotation ---
+mean anything.
+\end{pitfall}
+
+\begin{researchspotlight}{Koren, Bell \& Volinsky (2009) --- Matrix factorization for recommender systems}
+\textbf{The problem.} The Netflix Prize offered a million dollars for a $10\%$
+improvement in predicting movie ratings, on a matrix of $100$ million ratings
+from half a million users of $17{,}770$ films.
+
+\textbf{The idea.} Model each rating as a user vector dotted with an item vector,
+plus user and item biases, learned by stochastic gradient descent or alternating
+least squares with L2 regularization --- collaborative filtering as matrix
+factorization --- and extend the model with implicit feedback and time-varying
+effects.
+
+\textbf{The result.} Latent-factor models were the backbone of the winning
+entries, which blended hundreds of models. The paper, by members of the winning
+team, became the standard reference for the method.
+
+\textbf{Why it is here.} It is \cref{sec:collab}, with the explicit item and user
+biases that this chapter folds into $b^{(j)}$ and the mean normalization of
+\cref{sec:mean-norm}.
+\parencite{koren2009}
+\end{researchspotlight}
+
+\section{Binary Labels}
+\label{sec:binary-cf}
+
+Many systems never ask for ratings. They observe instead whether a user bought
+an item, liked a post, watched a video past $30$ seconds, or clicked an item when
+it was shown. The labels become $1$ (engaged), $0$ (shown, not engaged) and
+missing (never shown). Thresholding R54's ratings at $4$ stars gives such a
+matrix: Alice and Bob ``like'' Chicken Curry, Carol likes Ginger Cake and Mango
+Ice Cream, and so on.
+
+\begin{defbox}{Collaborative filtering with binary labels}
+Model the probability of engagement with the sigmoid,
+$\Prob(y^{(i,j)} = 1) = \gsig\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)}\bigr)$, and
+replace the squared error by the binary cross-entropy of \cref{ch:ch06}:
+\[
+  J = \!\!\sum_{(i,j):\,r(i,j)=1}\!\!\Bigl[-y^{(i,j)}\ln f^{(i,j)} - \bigl(1-y^{(i,j)}\bigr)\ln\bigl(1-f^{(i,j)}\bigr)\Bigr]
+    + \frac{\lambda}{2}\bigl(\|\mathbf{W}\|^2 + \|\mathbf{X}\|^2\bigr).
+\]
+\end{defbox}
+
+The step from regression to classification is exactly the step from
+\cref{ch:ch05} to \cref{ch:ch06}, and the gradient keeps the same form with
+$e^{(i,j)} = f^{(i,j)} - y^{(i,j)}$.
+
+\begin{pitfall}{A zero is not a dislike, and missing is not zero}
+``Shown but not clicked'' may mean the user never noticed the item. And items
+never shown must be treated as \emph{missing}: recording them as $0$ teaches the
+model that whatever it did not recommend is unwanted, and it will go on not
+recommending it.
+\end{pitfall}
+
+\section{Mean Normalization}
+\label{sec:mean-norm}
+
+A new user, Eve, has rated nothing. Her parameters appear only in the penalty, so
+gradient descent drives $\vw^{(5)}$ to $\mathbf{0}$, and $b^{(5)}$ --- whose
+gradient is an empty sum --- stays at its initial $0$. Every prediction for Eve is
+$0$: the system concludes she dislikes everything.
+
+\begin{defbox}{Mean normalization}
+Compute each item's mean rating over the users who rated it, $\mu_i$. Subtract it
+from that item's ratings before training, and add it back when predicting:
+\[
+  \hat y^{(i,j)} = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)} + \mu_i .
+\]
+\end{defbox}
+
+For R54 the dish means are $(2.50,\ 2.50,\ 2.00,\ 2.25,\ 1.67)$. With
+normalization Eve's predictions are these means --- the most sensible guess
+until her own ratings arrive --- and training also tends to converge faster.
+Normalizing by user instead would help a new \emph{item}, which collaborative
+filtering cannot otherwise recommend at all.
+
+\section{Finding Related Items}
+\label{sec:related}
+
+Collaborative filtering gives every item a feature vector, and items liked by the
+same people end up close together. The items most related to item $i$ are
+therefore those with the smallest $\|\vx^{(k)} - \vx^{(i)}\|^2$. From the
+learned features of \cref{fig:cf-features}, the squared distances from Pepper Soup
+are $0.091$ to Chilli Noodles, $0.856$ to Chicken Curry, $7.573$ to Mango Ice
+Cream and $7.617$ to Ginger Cake: ``because you ordered Pepper Soup, try the
+Chilli Noodles''. No description of any dish was used.
+
+\begin{researchspotlight}{Sarwar et al.\ (2001) --- Item-based collaborative filtering}
+\textbf{The problem.} Early recommenders compared each user with every other user
+to find similar tastes, which became too slow as user bases grew to millions, and
+was unstable because users' tastes change.
+
+\textbf{The idea.} Compare \emph{items} instead: compute similarities between
+items from the ratings they received in common, offline, and recommend items
+similar to those a user already rated highly.
+
+\textbf{The result.} Item-based methods were faster and, on their benchmarks, more
+accurate than user-based ones, and item similarities change slowly enough to be
+precomputed. The approach underlies the ``customers who bought this also bought''
+features of large online shops.
+
+\textbf{Why it is here.} It is the related-items computation of \cref{sec:related},
+with similarities computed directly from co-ratings rather than from learned
+feature vectors --- and the idea of precomputing item relationships reappears in
+the large-catalogue design of \cref{sec:large-catalogue}.
+\parencite{sarwar2001}
+\end{researchspotlight}
+
+\section{Content-Based Filtering with Neural Networks}
+\label{sec:two-tower}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{2.6cm}L{4.2cm}L{4.2cm}@{}}
+\toprule
+ & collaborative filtering & content-based filtering\\
+\midrule
+uses & ratings of similar users & features of users and items\\
+item features & learned from ratings & given: cuisine, price, spice level, photos\\
+new item & cannot be recommended until rated & recommended at once\\
+new user & needs ratings or normalization & needs profile features\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Collaborative filtering's weakness is the \term{cold-start} problem: it knows
+nothing about an item or user until ratings arrive. Content-based filtering uses
+side information instead --- a user's age, location and past orders per cuisine;
+a dish's cuisine, price, spice level and average rating --- and modern systems do
+this with neural networks.
+
+\begin{defbox}{Two-tower model}
+A user network maps user features $\vx_u$ to a vector $\mathbf{v}_u$, and an item
+network maps item features $\vx_m$ to a vector $\mathbf{v}_m$ of the same length.
+The prediction is $\mathbf{v}_u\cdot\mathbf{v}_m$ (or $\gsig(\mathbf{v}_u\cdot
+\mathbf{v}_m)$ for binary labels), and both networks are trained together on
+\[
+  J = \!\!\sum_{(i,j):\,r(i,j)=1}\!\!\bigl(\mathbf{v}_u^{(j)}\cdot\mathbf{v}_m^{(i)} - y^{(i,j)}\bigr)^2
+    + \text{penalty} .
+\]
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      box/.style={draw=MLBlue, fill=MLBlue!6, rounded corners, align=center,
+                  font=\small, minimum width=2.6cm, minimum height=8mm},
+      ar/.style={-{Stealth[length=2mm]}, MLGray, thick}]
+    \node[box, draw=MLTeal, fill=MLTeal!12] (xu) at (0,0) {user features $\vx_u$};
+    \node[box] (nu) at (0,-1.4) {user network};
+    \node[box, draw=MLAmber, fill=MLAmber!12] (vu) at (0,-2.8) {$\mathbf{v}_u\in\Real{32}$};
+    \node[box, draw=MLTeal, fill=MLTeal!12] (xm) at (4.4,0) {item features $\vx_m$};
+    \node[box] (nm) at (4.4,-1.4) {item network};
+    \node[box, draw=MLAmber, fill=MLAmber!12] (vm) at (4.4,-2.8) {$\mathbf{v}_m\in\Real{32}$};
+    \node[box, draw=MLRose, fill=MLRose!8, minimum width=4.2cm] (dot) at (2.2,-4.2)
+      {prediction $\mathbf{v}_u\cdot\mathbf{v}_m$};
+    \draw[ar] (xu) -- (nu); \draw[ar] (nu) -- (vu);
+    \draw[ar] (xm) -- (nm); \draw[ar] (nm) -- (vm);
+    \draw[ar] (vu) -- (dot); \draw[ar] (vm) -- (dot);
+  \end{tikzpicture}
+  \caption{The two-tower model. It is the dot product of
+  \cref{sec:content-based}, with both vectors now computed by networks from side
+  information, so a new item gets a vector from its features alone.}
+  \label{fig:two-tower}
+\end{figure}
+
+Related items are again those with nearby vectors, $\|\mathbf{v}_m^{(k)} -
+\mathbf{v}_m^{(i)}\|^2$, and because $\mathbf{v}_m$ depends only on the item, every
+item's vector can be computed in advance. Normalizing both vectors to unit length,
+so that the dot product is a cosine similarity, often makes training more stable.
+
+\begin{researchspotlight}{Covington, Adams \& Sargin (2016) --- Deep neural networks for YouTube recommendations}
+\textbf{The problem.} Recommend videos to over a billion users from a corpus of
+hundreds of millions, within a strict latency budget, with fresh content
+arriving every second.
+
+\textbf{The idea.} Two stages, each a deep network. A \emph{candidate generation}
+network embeds users and videos so that a few hundred candidates can be retrieved
+by nearest-neighbour search; a \emph{ranking} network scores those candidates with
+many more features. The paper also trains on watch time rather than clicks, to
+discourage clickbait.
+
+\textbf{The result.} Substantial gains over the previous matrix-factorization
+system, and a design that became the template for industrial recommenders.
+
+\textbf{Why it is here.} It is \cref{sec:two-tower} and \cref{sec:large-catalogue}
+in production --- and its choice of objective is an instance of
+\cref{sec:rec-ethics}: what a system optimises shapes what users see.
+\parencite{covington2016}
+\end{researchspotlight}
+
+\section{Recommending from a Large Catalogue}
+\label{sec:large-catalogue}
+
+Scoring every item for every request does not scale. With $5$ million items and
+$32$-dimensional vectors, one request would need $160$ million multiply-adds
+before any network is run. Large systems split the work.
+
+\begin{algorithmbox}{Retrieval and ranking}
+\begin{lstlisting}[style=pseudocode]
+retrieval (cheap, high recall):
+    10 most similar items to each of the last 10 orders
+    most popular items in the 3 favourite categories
+    top items in the user's region
+    drop duplicates, items ordered, items unavailable
+ranking (accurate, on a few hundred candidates):
+    v_u <- user network(x_u)            # once per request
+    score each candidate: v_u . v_m     # v_m precomputed
+show the top-scoring items
+\end{lstlisting}
+\end{algorithmbox}
+
+Ranking $500$ candidates costs $16{,}000$ multiply-adds, ten thousand times fewer.
+Retrieving more candidates improves recommendations and slows them down; the
+number is tuned by offline experiments that measure exactly that trade-off.
+
+\section{Evaluating a Recommender}
+\label{sec:rec-eval}
+
+\begin{defbox}{Dataset S80}
+Synthetic ratings for $200$ users and $80$ dishes, generated from three latent
+tastes plus noise of standard deviation $0.5$. Thirty percent of entries are
+observed --- $4796$ ratings --- of which $3837$ are used for training and $959$
+held out for testing.
+\end{defbox}
+
+Holding out ratings and predicting them is the recommender's version of a test
+set. Root-mean-squared error on the held-out ratings, for mean-normalized
+collaborative filtering trained with Adam:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+model & train RMSE & test RMSE\\
+\midrule
+predict the global mean rating         & ---      & $1.2131$\\
+predict each dish's mean               & ---      & $1.2173$\\
+CF, $n = 1$, $\lambda = 1$             & $0.9266$ & $1.0757$\\
+CF, $n = 3$, $\lambda = 1$             & $0.4348$ & $\mathbf{0.5801}$\\
+CF, $n = 3$, $\lambda = 10$            & $0.7191$ & $0.8826$\\
+CF, $n = 10$, $\lambda = 0$            & $0.1396$ & $3.0615$\\
+CF, $n = 10$, $\lambda = 1$            & $0.2161$ & $0.7342$\\
+CF, $n = 10$, $\lambda = 10$           & $0.7191$ & $0.8826$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Every idea from \cref{ch:ch07} and \cref{ch:ch10} reappears. One feature
+underfits. Three features with a moderate penalty --- the true number of tastes
+--- halve the baseline's error. Ten features with no penalty fit the training
+ratings almost exactly and are catastrophic on held-out ones: $3.06$, worse than
+predicting the mean. A penalty of $1$ rescues them, and a penalty of $10$ is so
+strong that the extra features are switched off entirely: with $\lambda = 10$ the
+$n = 3$ and $n = 10$ models are identical. $n$ and $\lambda$ are chosen on a
+validation set of held-out ratings, exactly as in \cref{ch:ch10}.
+
+\begin{pitfall}{Evaluating by RMSE alone}
+Users see a short ranked list, not a matrix of predicted ratings. A model can
+improve RMSE by predicting middling ratings for obscure items more accurately
+while getting the top of each user's list no better. Evaluate the list itself:
+precision and recall among the top $k$ items, and --- since a recommender changes
+what users do --- online experiments that measure what users actually choose.
+And hold out data by \emph{time}, training on the past and testing on the
+future, because a random split lets the model peek at later behaviour.
+\end{pitfall}
+
+\section{What Should a Recommender Optimise?}
+\label{sec:rec-ethics}
+
+A recommender can be trained to show users the items they are most likely to rate
+highly, to buy, to click, or to watch for longest; or the items that earn the most
+profit or advertising revenue. These goals often agree, and sometimes do not.
+
+\begin{ethicsnote}{Engagement is a choice, not a neutral target}
+Maximising watch time can amplify outrage, conspiracy and extreme content,
+because it holds attention. Advertising auctions can reward the businesses that
+pay most, not those that serve users best. And recommendations create feedback
+loops: what is shown gets clicked, so it is shown more, and the range of what
+users ever see narrows. Responsible practice includes being transparent with
+users about why an item appears, filtering harmful content and exploitative
+sellers, measuring long-term satisfaction rather than only clicks, adding
+diversity deliberately, and auditing which items and which creators are never
+recommended at all.
+\end{ethicsnote}
+
+\begin{labbox}{Lab 15 --- Recommender systems}
+Implement the collaborative-filtering cost and its gradient, vectorised, and
+check the gradient against finite differences. Reproduce the two hand-worked steps
+of \cref{sec:collab}, then train with $n = 2$ and confirm the five predictions.
+Implement mean normalization and confirm that a new user is predicted the dish
+means.
+
+Then re-implement the training loop with \code{tf.GradientTape} and Adam,
+generate a synthetic ratings matrix like S80, and reproduce the shape of the
+evaluation table: underfitting with one feature, overfitting with many features
+and no penalty. Finally build a small two-tower model in Keras with the functional
+API.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item The Ratings Matrix
-  \item Content-Based Filtering
-  \item Collaborative Filtering
-  \item Binary Labels
-  \item Mean Normalization
-  \item Finding Related Items
-  \item Deep Retrieval and Ranking
-  \item What Not to Optimise
+  \item A recommendation problem is a ratings matrix with most entries missing; the
+        task is to predict them and recommend the highest.
+  \item Content-based prediction fits one linear model per user on known item
+        features: $\hat y = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)}$.
+  \item Collaborative filtering learns item features and user parameters together,
+        with the gradient $\mathbf{E}\mathbf{W} + \lambda\mathbf{X}$ for the
+        features and $\mathbf{E}^{\mathsf T}\mathbf{X} + \lambda\mathbf{W}$ for the
+        weights. On R54 it recommends Pepper Soup to Alice ($4.62$) and Mango Ice
+        Cream to Dave ($3.94$), and separates spicy from sweet dishes unaided.
+  \item Binary feedback uses the sigmoid and cross-entropy; unshown items are
+        missing, not zero.
+  \item Mean normalization gives a new user each item's mean rating instead of
+        zero.
+  \item Related items have nearby learned vectors: Chilli Noodles is $0.091$ from
+        Pepper Soup.
+  \item Two-tower networks compute user and item vectors from side information,
+        solving cold start; retrieval then ranking makes large catalogues feasible.
+  \item Evaluate on held-out ratings: on S80, three features with $\lambda = 1$
+        halve the baseline error, while ten unregularized features overfit to
+        $3.06$. Evaluate the ranked list too, and split by time.
+  \item The objective a recommender optimises is an ethical choice.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Define $n_u$, $n_m$, $r(i,j)$ and $y^{(i,j)}$.
+
+\sq Write the content-based prediction and its cost for one user.
+
+\sq Why is collaborative filtering called collaborative?
+
+\sq Why could collaborative filtering not learn an item's features if each item
+were rated by only one user?
+
+\sq What changes for binary labels?
+
+\sq Why should items never shown to a user be treated as missing?
+
+\sq What does mean normalization predict for a user with no ratings?
+
+\sq How are related items found from learned features?
+
+\sq What is the cold-start problem, and how does content-based filtering address
+it?
+
+\sq Why is a recommender evaluated on a ranked list as well as by RMSE?
+
+\exercisesection{Analytical Problems}
+
+\ap Derive $\partial J/\partial x^{(i)}_k$, $\partial J/\partial w^{(j)}_k$ and
+$\partial J/\partial b^{(j)}$ for the collaborative-filtering cost, and write them
+in matrix form.
+
+\ap Carry out the first gradient step of the worked example of \cref{sec:collab}
+by hand and confirm $\vx = (1.6,\ 1.3,\ 1.2,\ 1.5,\ 1.2)$.
+
+\ap Show that without mean normalization a user with no ratings receives
+predictions tending to zero, and that with it they receive the item means.
+
+\ap Show that replacing $\mathbf{X}$ by $\mathbf{X}\mathbf{Q}$ and $\mathbf{W}$ by
+$\mathbf{W}\mathbf{Q}^{-\mathsf T}$ leaves predictions unchanged, and explain why
+the penalty term nevertheless prefers some choices of $\mathbf{Q}$ to others.
+
+\ap With $\lambda = 10$, the $n = 3$ and $n = 10$ models on S80 were identical.
+Explain how a strong L2 penalty can drive whole feature columns to zero in a
+matrix factorization.
+
+\ap Count the parameters of collaborative filtering with $n$ features for $n_u$
+users and $n_m$ items, and compare with the number of observed ratings in S80
+for $n = 3$ and $n = 10$.
+
+\exercisesection{Design Problems}
+
+\dpr Design a book recommender for a library from five years of borrowing records:
+the labels, the treatment of books never borrowed, the cost, and the evaluation
+before launch.
+
+\dpr A new food-delivery app has thousands of dishes and almost no users. Design how
+you combine content-based and collaborative filtering as data accumulates.
+
+\dpr Design a held-out evaluation for a recommender: which ratings you hide, the
+metrics, and why a random split of ratings can mislead.
+
+\dpr A video platform's recommender maximises watch time. Propose an alternative
+objective that better serves users, how you would measure it, and how you would
+test it safely.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement collaborative filtering with gradient descent and reproduce the R54
+predictions and related-item distances.
+
+\pe Implement the binary version and train it on R54 thresholded at $4$ stars.
+Report the predicted probabilities for the missing entries.
+
+\pe Generate S80-like data, sweep $n \in \{1, 2, 3, 5, 10\}$ and $\lambda \in \{0,
+0.3, 1, 3, 10\}$, and plot held-out RMSE.
+
+\pe Build a two-tower model in Keras on synthetic user and item features, and use
+it to find the five items most related to a given item.
+
+\exercisesection{Self-Test}
+
+\qz In collaborative filtering the item features $\vx^{(i)}$ are: (a)~given;
+(b)~learned from the ratings; (c)~random; (d)~the ratings themselves.
+
+\qz The prediction of collaborative filtering is: (a)~$\vw^{(j)}+\vx^{(i)}$;
+(b)~$\vw^{(j)}\cdot\vx^{(i)} + b^{(j)}$; (c)~$\|\vx^{(i)}\|$; (d)~$y^{(i,j)}$.
+
+\qz Without mean normalization a new user is predicted about: (a)~the item means;
+(b)~$0$; (c)~$5$; (d)~the global maximum.
+
+\qz Related items are those whose feature vectors are: (a)~orthogonal; (b)~far
+apart; (c)~close together; (d)~longest.
+
+\qz Collaborative filtering struggles most with: (a)~popular items; (b)~new items
+with no ratings; (c)~users with many ratings; (d)~binary labels.
+
+\qz In a two-tower model the prediction is: (a)~a sum of features; (b)~the dot
+product of a user vector and an item vector; (c)~a decision tree; (d)~$k$-means.
+
+\qz Ten unregularized features on S80 gave test RMSE $3.06$ because of:
+(a)~underfitting; (b)~overfitting; (c)~a bug; (d)~cold start.
+
+\furtherreading
+
+\textcite{james2021} §12.3 is the primary reading: it treats a ratings matrix with
+missing entries as a matrix-completion problem, solved by iteratively fitting a
+low-rank approximation --- the same model as collaborative filtering, derived from
+principal components --- and illustrates it on the Netflix data.
+\textcite{bishop2006} §12.2 develops probabilistic principal component analysis,
+a latent-variable model in which each observation is generated from a small
+number of hidden factors; collaborative filtering is a model of this family, and
+§12.2 explains in generality why such factors are identifiable only up to
+rotation, the point of the pitfall in \cref{sec:collab}.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch16} studies the low-dimensional representation
+behind both matrix completion and much of data visualisation: principal component
+analysis.
