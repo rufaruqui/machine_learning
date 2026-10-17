@@ -1,0 +1,1077 @@
+% =================================================================
+%  CSE 815 -- Machine Learning
+%  Module 3, Week 8, Part 1
+%  Recommender Systems: Content-Based and Collaborative Filtering
+%  (training frames are beamer overlays generated from a real run)
+% =================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage{cse815}
+
+\title[CSE 815 -- Week 8, Part 1]{Recommender Systems}
+\subtitle{Per-Item Features, Collaborative Filtering, Binary Labels, and Mean Normalization}
+\author{Rokan Uddin Faruqui\\ \small Professor, Department of CSE}
+\institute{\small University of Chittagong \\ \texttt{rufaruqui@cu.ac.bd}}
+\date[Week 8 / Part 1]{Week 8 $\cdot$ Part 1}
+
+\begin{document}
+
+\begin{frame}[plain,noframenumbering]
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{The most commercially important ML application you use daily}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Where recommenders decide what you see}
+        \footnotesize
+        \begin{itemize}
+          \item Online shops: ``customers who bought this also bought''.
+          \item Video and music streaming: the next episode, the next song.
+          \item News feeds and social media: which posts appear first.
+          \item Food delivery and ride apps: restaurants, routes, offers.
+        \end{itemize}
+      \end{block}
+      \footnotesize
+      For many large platforms a large share of sales or viewing time comes from
+      recommendations --- and a one-percent improvement is worth a great deal.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{keyidea}[Today]
+        \footnotesize
+        \begin{enumerate}
+          \item Making recommendations: the ratings matrix
+          \item Using per-item features (content-based)
+          \item Collaborative filtering --- watched as it learns
+          \item Binary labels: likes, favourites, clicks
+          \item Mean normalization and the new user
+          \item TensorFlow implementation
+        \end{enumerate}
+      \end{keyidea}
+      \footnotesize Part 2: related items, deep content-based filtering, large
+      catalogues, ethics, and principal component analysis.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Making Recommendations}
+
+\begin{frame}{The ratings matrix}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=white, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {?};
+\node[draw=curose, dashed, fill=white, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {?};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=white, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {?};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=white, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {?};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=white, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {?};
+      \end{tikzpicture}\par
+      \vspace{2mm}
+      {\scriptsize ratings $0$--$5$ stars; \textcolor{curose}{?} = not rated}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{defnbox}[Notation]
+        \small
+        $n_u$ users, $n_m$ items (here $n_u = 4$, $n_m = 5$).\\
+        $r(i,j) = 1$ if user $j$ has rated dish $i$.\\
+        $y^{(i,j)}$ = the rating, when $r(i,j) = 1$.
+      \end{defnbox}
+      \begin{block}{The task}
+        Predict the \textcolor{curose}{?} entries, then recommend each user the
+        unrated items with the highest predicted rating.
+      \end{block}
+      \begin{keyidea}
+        Even by eye: Alice and Bob love spicy food and dislike sweets; Carol and Dave
+        are the opposite. Would Alice like \emph{Pepper Soup}? Probably.
+      \end{keyidea}
+      Real matrices are huge and almost empty.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Using Per-Item Features}
+
+\begin{frame}{If we know what each dish is like \dots}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.15}
+      \begin{tabular}{@{}lcc@{}}
+        \toprule
+        dish & $x_1$ spicy & $x_2$ sweet\\
+        \midrule
+        Chicken Curry          & $0.90$ & $0$\\
+        Chilli Noodles       & $1.00$ & $0.01$\\
+        Pepper Soup  & $0.99$ & $0$\\
+        Ginger Cake    & $0.10$ & $1.00$\\
+        Mango Ice Cream    & $0$    & $0.90$\\
+        \bottomrule
+      \end{tabular}\par
+      \vspace{2mm}
+      \begin{block}{A linear model per user}
+        Predict user $j$'s rating of dish $i$ as
+        \[ \vw^{(j)}\cdot\vx^{(i)} + b^{(j)} . \]
+        Each user has their own $\vw^{(j)}, b^{(j)}$: \emph{linear regression,
+        once per user}, on the dishes that user rated.
+      \end{block}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{block}{Worked example}
+        Suppose Alice's parameters are $\vw^{(1)} = (5,\ 0)$, $b^{(1)} = 0$.
+        For \emph{Pepper Soup}, $\vx^{(3)} = (0.99,\ 0)$:
+        \[ \vw^{(1)}\cdot\vx^{(3)} + b^{(1)} = 5(0.99) + 0(0) + 0 = \mathbf{4.95} \]
+        --- recommend it.
+      \end{block}
+      \begin{defnbox}[Cost for user $j$]
+        \small
+        \[ \tfrac12\!\!\sum_{i:\,r(i,j)=1}\!\!\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2
+           + \tfrac{\lambda}{2}\sum_k \bigl(w^{(j)}_k\bigr)^2 \]
+        Sum over users to learn all $\vw^{(j)}, b^{(j)}$ at once.
+      \end{defnbox}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Picture it: users are directions, dishes are points}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=6.0cm,height=5.3cm,xmin=-1.1,xmax=1.4,ymin=-1.1,ymax=1.3,
+          axis lines=middle,xlabel={spicy $x_1$},ylabel={sweet $x_2$},
+          tick label style={font=\tiny},label style={font=\scriptsize},
+          xtick={-1,1},ytick={-1,1},clip=false]
+\addplot[only marks, mark=*, mark size=2pt, cublue] coordinates {(0.9,0)};
+\addplot[only marks, mark=*, mark size=2pt, cublue] coordinates {(1.0,0.01)};
+\addplot[only marks, mark=*, mark size=2pt, cublue] coordinates {(0.99,0)};
+\addplot[only marks, mark=square*, mark size=2pt, curose] coordinates {(0.1,1.0)};
+\addplot[only marks, mark=square*, mark size=2pt, curose] coordinates {(0,0.9)};
+\draw[-{Stealth[length=2mm]}, thick, cuteal] (axis cs:0,0) -- (axis cs:0.830,-0.875) node[font=\tiny, anchor=west] {Alice};
+\draw[-{Stealth[length=2mm]}, thick, cuteal] (axis cs:0,0) -- (axis cs:0.727,-0.798) node[font=\tiny, anchor=north] {Bob};
+\draw[-{Stealth[length=2mm]}, thick, cuteal] (axis cs:0,0) -- (axis cs:-0.826,0.879) node[font=\tiny, anchor=south] {Carol};
+\draw[-{Stealth[length=2mm]}, thick, cuteal] (axis cs:0,0) -- (axis cs:-0.527,0.620) node[font=\tiny, anchor=east] {Dave};
+\node[font=\tiny, cublue, anchor=north] at (axis cs:0.95,-0.05) {spicy dishes};
+\node[font=\tiny, curose, anchor=west] at (axis cs:0.12,0.95) {sweet dishes};
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize arrows: each user's $\vw^{(j)}$ (half length), fitted with $\lambda=1$}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{keyidea}[The dot product is agreement]
+        $\vw^{(j)}\cdot\vx^{(i)}$ is large when the dish lies in the direction of the
+        user's arrow: Alice points to spicy (blue), Carol to sweet (rose).
+      \end{keyidea}
+      \begin{block}{Fitted with $\lambda = 1$}
+        Alice: $\vw = (1.66,\ -1.75)$, $b = 2.51$; predicted rating of \emph{Pepper Soup}
+        $= 4.15$.\\[2pt]
+        Dave: $\vw = (-1.05,\ 1.24)$; predicted rating of \emph{Mango Ice Cream} $= 2.74$.
+      \end{block}
+      \begin{pitfall}[Where do the features come from?]
+        \footnotesize Someone had to score every dish by hand --- impossible for
+        millions of items. Next: learn the features too.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Collaborative Filtering}
+
+\begin{frame}{Turn the problem around}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{If we know the users \dots}
+        \footnotesize
+        Suppose we knew every user's $\vw^{(j)}, b^{(j)}$. Then for each dish $i$ we could
+        \emph{learn} its features $\vx^{(i)}$ from the ratings it received:
+        \[ \min_{\vx^{(i)}}\ \tfrac12\!\!\sum_{j:\,r(i,j)=1}\!\!\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2
+           + \tfrac{\lambda}{2}\sum_k \bigl(x^{(i)}_k\bigr)^2 \]
+        Possible only because \emph{many} users rated each dish: their ratings
+        collectively say what the dish is like.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Collaborative filtering cost]
+        \small
+        Learn $\vw$, $b$ \emph{and} $\vx$ together:
+        \begin{align*}
+          J &= \tfrac12\!\!\sum_{(i,j):\,r(i,j)=1}\!\!\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)} - y^{(i,j)}\bigr)^2\\
+            &\quad + \tfrac{\lambda}{2}\sum_{j,k}\bigl(w^{(j)}_k\bigr)^2
+               + \tfrac{\lambda}{2}\sum_{i,k}\bigl(x^{(i)}_k\bigr)^2
+        \end{align*}
+      \end{defnbox}
+      \footnotesize
+      \textbf{Gradient descent} on all three:
+      \[ w^{(j)}_k \mathrel{-}= \alpha\tfrac{\partial J}{\partial w^{(j)}_k},\quad
+         b^{(j)} \mathrel{-}= \alpha\tfrac{\partial J}{\partial b^{(j)}},\quad
+         x^{(i)}_k \mathrel{-}= \alpha\tfrac{\partial J}{\partial x^{(i)}_k} \]
+      ``Collaborative'': every user's ratings help learn every dish's features, which
+      help predict every other user's ratings.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Watch collaborative filtering fill in the matrix}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.55\textwidth}
+      \centering
+      \begin{tikzpicture}
+\only<1>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {-0.01};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.23};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {0.07};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {-0.02};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {-0.02};}%
+\only<2>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!14, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {0.34};
+\node[draw=curose, dashed, fill=curose!12, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {0.16};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!17, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {0.54};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!12, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.16};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!12, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {0.17};}%
+\only<3>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!18, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {0.63};
+\node[draw=curose, dashed, fill=curose!16, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {0.46};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!22, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {0.92};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!14, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.31};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!14, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {0.34};}%
+\only<4>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!24, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {1.07};
+\node[draw=curose, dashed, fill=curose!20, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {0.77};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!31, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {1.54};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!17, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.53};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!19, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {0.71};}%
+\only<5>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!40, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (1.575,-0.780) {2.20};
+\node[draw=curose, dashed, fill=curose!11, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {0.12};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!51, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (0.525,-1.300) {2.94};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!15, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.38};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!37, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-2.340) {1.99};}%
+\only<6>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!61, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {3.65};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.64};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!72, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.45};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!12, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.18};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!58, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.47};}%
+\only<7>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!64, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {3.86};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.56};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!74, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.57};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!13, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.27};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!63, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.85};}%
+\only<8>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!66, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {4.04};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.41};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!74, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.61};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!13, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.27};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!65, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.93};}%
+\only<9>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!69, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {4.27};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.25};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!75, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.65};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!13, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.27};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!65, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.94};}%
+\only<10>{%
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!72, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {4.47};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.19};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!74, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.62};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!14, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.30};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!65, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.94};}%
+      \end{tikzpicture}\par
+      \vspace{2mm}
+      {\scriptsize blue: observed ratings (fixed) \quad
+       \textcolor{curose}{dashed}: predictions for the \textcolor{curose}{?} entries}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \footnotesize
+      \begin{block}{Training}%
+        \noindent\begin{minipage}[t][3ex][t]{\dimexpr\linewidth-7pt\relax}
+\only<1>{iteration $t = 0$: \ $J = 79.614$}%
+\only<2>{iteration $t = 5$: \ $J = 65.451$}%
+\only<3>{iteration $t = 10$: \ $J = 55.896$}%
+\only<4>{iteration $t = 20$: \ $J = 42.985$}%
+\only<5>{iteration $t = 40$: \ $J = 11.173$}%
+\only<6>{iteration $t = 80$: \ $J = 1.369$}%
+\only<7>{iteration $t = 160$: \ $J = 1.187$}%
+\only<8>{iteration $t = 400$: \ $J = 1.123$}%
+\only<9>{iteration $t = 1000$: \ $J = 1.080$}%
+\only<10>{iteration $t = 2000$: \ $J = 1.060$}%
+        \end{minipage}%
+      \end{block}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=5.6cm,height=3.6cm,xmin=0,xmax=1000,ymin=0,ymax=85,
+          xlabel={iteration},ylabel={$J$},tick label style={font=\tiny},
+          label style={font=\scriptsize}]
+\only<1>{\addplot[cuamber, very thick] coordinates {(0,79.614)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(0,79.614)};}%
+\only<2>{\addplot[cuamber, very thick] coordinates {(0,79.614)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(5,65.451)};}%
+\only<3>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(10,55.896)};}%
+\only<4>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(20,42.985)};}%
+\only<5>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(40,11.173)};}%
+\only<6>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)(50,3.424)(60,1.910)(70,1.518)(80,1.369)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(80,1.369)};}%
+\only<7>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)(50,3.424)(60,1.910)(70,1.518)(80,1.369)(90,1.301)(100,1.263)(110,1.240)(120,1.224)(130,1.212)(140,1.202)(150,1.194)(160,1.187)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(160,1.187)};}%
+\only<8>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)(50,3.424)(60,1.910)(70,1.518)(80,1.369)(90,1.301)(100,1.263)(110,1.240)(120,1.224)(130,1.212)(140,1.202)(150,1.194)(160,1.187)(170,1.181)(180,1.176)(190,1.171)(200,1.167)(210,1.163)(220,1.160)(230,1.156)(240,1.153)(250,1.151)(260,1.148)(270,1.146)(280,1.143)(290,1.141)(300,1.139)(310,1.137)(320,1.135)(330,1.134)(340,1.132)(350,1.130)(360,1.129)(370,1.127)(380,1.126)(390,1.125)(400,1.123)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(400,1.123)};}%
+\only<9>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)(50,3.424)(60,1.910)(70,1.518)(80,1.369)(90,1.301)(100,1.263)(110,1.240)(120,1.224)(130,1.212)(140,1.202)(150,1.194)(160,1.187)(170,1.181)(180,1.176)(190,1.171)(200,1.167)(210,1.163)(220,1.160)(230,1.156)(240,1.153)(250,1.151)(260,1.148)(270,1.146)(280,1.143)(290,1.141)(300,1.139)(310,1.137)(320,1.135)(330,1.134)(340,1.132)(350,1.130)(360,1.129)(370,1.127)(380,1.126)(390,1.125)(400,1.123)(410,1.122)(420,1.121)(430,1.120)(440,1.118)(450,1.117)(460,1.116)(470,1.115)(480,1.114)(490,1.113)(500,1.112)(510,1.111)(520,1.110)(530,1.109)(540,1.108)(550,1.107)(560,1.106)(570,1.106)(580,1.105)(590,1.104)(600,1.103)(610,1.102)(620,1.102)(630,1.101)(640,1.100)(650,1.099)(660,1.099)(670,1.098)(680,1.097)(690,1.096)(700,1.096)(710,1.095)(720,1.094)(730,1.094)(740,1.093)(750,1.092)(760,1.092)(770,1.091)(780,1.091)(790,1.090)(800,1.090)(810,1.089)(820,1.088)(830,1.088)(840,1.087)(850,1.087)(860,1.086)(870,1.086)(880,1.085)(890,1.085)(900,1.084)(910,1.084)(920,1.083)(930,1.083)(940,1.082)(950,1.082)(960,1.082)(970,1.081)(980,1.081)(990,1.080)(1000,1.080)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(1000,1.080)};}%
+\only<10>{\addplot[cuamber, very thick] coordinates {(0,79.614)(10,55.896)(20,42.985)(30,28.777)(40,11.173)(50,3.424)(60,1.910)(70,1.518)(80,1.369)(90,1.301)(100,1.263)(110,1.240)(120,1.224)(130,1.212)(140,1.202)(150,1.194)(160,1.187)(170,1.181)(180,1.176)(190,1.171)(200,1.167)(210,1.163)(220,1.160)(230,1.156)(240,1.153)(250,1.151)(260,1.148)(270,1.146)(280,1.143)(290,1.141)(300,1.139)(310,1.137)(320,1.135)(330,1.134)(340,1.132)(350,1.130)(360,1.129)(370,1.127)(380,1.126)(390,1.125)(400,1.123)(410,1.122)(420,1.121)(430,1.120)(440,1.118)(450,1.117)(460,1.116)(470,1.115)(480,1.114)(490,1.113)(500,1.112)(510,1.111)(520,1.110)(530,1.109)(540,1.108)(550,1.107)(560,1.106)(570,1.106)(580,1.105)(590,1.104)(600,1.103)(610,1.102)(620,1.102)(630,1.101)(640,1.100)(650,1.099)(660,1.099)(670,1.098)(680,1.097)(690,1.096)(700,1.096)(710,1.095)(720,1.094)(730,1.094)(740,1.093)(750,1.092)(760,1.092)(770,1.091)(780,1.091)(790,1.090)(800,1.090)(810,1.089)(820,1.088)(830,1.088)(840,1.087)(850,1.087)(860,1.086)(870,1.086)(880,1.085)(890,1.085)(900,1.084)(910,1.084)(920,1.083)(930,1.083)(940,1.082)(950,1.082)(960,1.082)(970,1.081)(980,1.081)(990,1.080)(1000,1.080)(1010,1.079)(1020,1.079)(1030,1.079)(1040,1.078)(1050,1.078)(1060,1.077)(1070,1.077)(1080,1.077)(1090,1.076)(1100,1.076)(1110,1.076)(1120,1.075)(1130,1.075)(1140,1.075)(1150,1.074)(1160,1.074)(1170,1.074)(1180,1.073)(1190,1.073)(1200,1.073)(1210,1.073)(1220,1.072)(1230,1.072)(1240,1.072)(1250,1.071)(1260,1.071)(1270,1.071)(1280,1.071)(1290,1.070)(1300,1.070)(1310,1.070)(1320,1.070)(1330,1.069)(1340,1.069)(1350,1.069)(1360,1.069)(1370,1.069)(1380,1.068)(1390,1.068)(1400,1.068)(1410,1.068)(1420,1.068)(1430,1.067)(1440,1.067)(1450,1.067)(1460,1.067)(1470,1.067)(1480,1.066)(1490,1.066)(1500,1.066)(1510,1.066)(1520,1.066)(1530,1.066)(1540,1.065)(1550,1.065)(1560,1.065)(1570,1.065)(1580,1.065)(1590,1.065)(1600,1.064)(1610,1.064)(1620,1.064)(1630,1.064)(1640,1.064)(1650,1.064)(1660,1.064)(1670,1.063)(1680,1.063)(1690,1.063)(1700,1.063)(1710,1.063)(1720,1.063)(1730,1.063)(1740,1.063)(1750,1.062)(1760,1.062)(1770,1.062)(1780,1.062)(1790,1.062)(1800,1.062)(1810,1.062)(1820,1.062)(1830,1.062)(1840,1.061)(1850,1.061)(1860,1.061)(1870,1.061)(1880,1.061)(1890,1.061)(1900,1.061)(1910,1.061)(1920,1.061)(1930,1.061)(1940,1.060)(1950,1.060)(1960,1.060)(1970,1.060)(1980,1.060)(1990,1.060)(2000,1.060)};\addplot[only marks, mark=*, mark size=2pt, curose] coordinates {(2000,1.060)};}%
+        \end{axis}
+      \end{tikzpicture}\par
+      {\raggedright\scriptsize Two learned features per dish and user, $\lambda=0.1$,
+      $\alpha=0.01$, random start. No taste labels were given.\par}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{The same run, seen in feature space}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}
+        \begin{axis}[width=6.6cm,height=5.8cm,xmin=-2.0,xmax=2.2,ymin=-1.4,ymax=1.4,
+          xlabel={learned feature 1},ylabel={learned feature 2},
+          tick label style={font=\tiny},label style={font=\scriptsize},clip=false]
+\only<1>{%
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.173,0.411)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.173,0.411) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.165,-0.652)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.165,-0.652) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.453,0.223)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.453,0.223) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.268,0.291)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-0.268,0.291) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(0.182,0.147)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:0.182,0.147) {Ice Cream};}%
+\only<2>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.110,0.456)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.110,0.456) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.176,-0.586)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.176,-0.586) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.390,0.214)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.390,0.214) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.323,0.341)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-0.323,0.341) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(0.122,0.225)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:0.122,0.225) {Ice Cream};}%
+\only<3>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.102,0.502)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.102,0.502) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.202,-0.540)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.202,-0.540) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.361,0.219)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.361,0.219) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.391,0.411)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-0.391,0.411) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(0.059,0.309)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:0.059,0.309) {Ice Cream};}%
+\only<4>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.235,0.565)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.235,0.565) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.301,-0.488)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.301,-0.488) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.385,0.234)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.385,0.234) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.614,0.589)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-0.614,0.589) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.121,0.484)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-0.121,0.484) {Ice Cream};}%
+\only<5>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.143,0.488)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.143,0.488) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.714,-0.524)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:0.714,-0.524) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.767,0.189)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.767,0.189) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.370,0.941)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.370,0.941) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-0.853,0.800)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-0.853,0.800) {Ice Cream};}%
+\only<6>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)(1.590,0.559)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)(1.125,-0.544)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)(1.152,0.130)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)(-1.451,1.024)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)(-1.373,0.932)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.590,0.559)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.590,0.559) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.125,-0.544)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.125,-0.544) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.152,0.130)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:1.152,0.130) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.451,1.024)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.451,1.024) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.373,0.932)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-1.373,0.932) {Ice Cream};}%
+\only<7>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)(1.590,0.559)(1.566,0.540)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)(1.125,-0.544)(1.176,-0.459)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)(1.152,0.130)(1.144,0.056)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)(-1.451,1.024)(-1.429,1.013)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)(-1.373,0.932)(-1.427,0.948)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.566,0.540)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.566,0.540) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.176,-0.459)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.176,-0.459) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.144,0.056)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:1.144,0.056) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.429,1.013)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.429,1.013) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.427,0.948)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-1.427,0.948) {Ice Cream};}%
+\only<8>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)(1.590,0.559)(1.566,0.540)(1.536,0.465)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)(1.125,-0.544)(1.176,-0.459)(1.184,-0.406)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)(1.152,0.130)(1.144,0.056)(1.096,-0.094)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)(-1.451,1.024)(-1.429,1.013)(-1.457,0.923)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)(-1.373,0.932)(-1.427,0.948)(-1.453,0.905)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.536,0.465)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.536,0.465) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.184,-0.406)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.184,-0.406) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.096,-0.094)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:1.096,-0.094) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.457,0.923)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.457,0.923) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.453,0.905)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-1.453,0.905) {Ice Cream};}%
+\only<9>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)(1.590,0.559)(1.566,0.540)(1.536,0.465)(1.481,0.334)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)(1.125,-0.544)(1.176,-0.459)(1.184,-0.406)(1.171,-0.418)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)(1.152,0.130)(1.144,0.056)(1.096,-0.094)(1.009,-0.341)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)(-1.451,1.024)(-1.429,1.013)(-1.457,0.923)(-1.514,0.774)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)(-1.373,0.932)(-1.427,0.948)(-1.453,0.905)(-1.508,0.765)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.481,0.334)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.481,0.334) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.171,-0.418)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.171,-0.418) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.009,-0.341)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:1.009,-0.341) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.514,0.774)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.514,0.774) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.508,0.765)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-1.508,0.765) {Ice Cream};}%
+\only<10>{%
+\addplot[cublue!50, thin, dashed] coordinates {(0.173,0.411)(0.110,0.456)(0.102,0.502)(0.235,0.565)(1.143,0.488)(1.590,0.559)(1.566,0.540)(1.536,0.465)(1.481,0.334)(1.418,0.193)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.165,-0.652)(0.176,-0.586)(0.202,-0.540)(0.301,-0.488)(0.714,-0.524)(1.125,-0.544)(1.176,-0.459)(1.184,-0.406)(1.171,-0.418)(1.170,-0.429)};
+\addplot[cublue!50, thin, dashed] coordinates {(0.453,0.223)(0.390,0.214)(0.361,0.219)(0.385,0.234)(0.767,0.189)(1.152,0.130)(1.144,0.056)(1.096,-0.094)(1.009,-0.341)(0.907,-0.578)};
+\addplot[curose!50, thin, dashed] coordinates {(-0.268,0.291)(-0.323,0.341)(-0.391,0.411)(-0.614,0.589)(-1.370,0.941)(-1.451,1.024)(-1.429,1.013)(-1.457,0.923)(-1.514,0.774)(-1.572,0.635)};
+\addplot[curose!50, thin, dashed] coordinates {(0.182,0.147)(0.122,0.225)(0.059,0.309)(-0.121,0.484)(-0.853,0.800)(-1.373,0.932)(-1.427,0.948)(-1.453,0.905)(-1.508,0.765)(-1.567,0.628)};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.418,0.193)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.418,0.193) {Curry};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(1.170,-0.429)};
+\node[font=\tiny, anchor=south west, cublue] at (axis cs:1.170,-0.429) {Noodles};
+\addplot[only marks, mark=*, mark size=2.4pt, cublue] coordinates {(0.907,-0.578)};
+\node[font=\tiny, anchor=north east, cublue] at (axis cs:0.907,-0.578) {Soup};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.572,0.635)};
+\node[font=\tiny, anchor=south east, curose] at (axis cs:-1.572,0.635) {Ginger Cake};
+\addplot[only marks, mark=square*, mark size=2.4pt, curose] coordinates {(-1.567,0.628)};
+\node[font=\tiny, anchor=north east, curose] at (axis cs:-1.567,0.628) {Ice Cream};}%
+        \end{axis}
+      \end{tikzpicture}\par
+      {\scriptsize \begin{minipage}[t][2ex][t]{4cm}\centering
+\only<1>{$t = 0$}%
+\only<2>{$t = 5$}%
+\only<3>{$t = 10$}%
+\only<4>{$t = 20$}%
+\only<5>{$t = 40$}%
+\only<6>{$t = 80$}%
+\only<7>{$t = 160$}%
+\only<8>{$t = 400$}%
+\only<9>{$t = 1000$}%
+\only<10>{$t = 2000$}%
+      \end{minipage}}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \footnotesize
+      \begin{keyidea}[Features nobody named]
+        The dishes start at random points. As training proceeds the three spicy
+        dishes drift to one side and the two sweet dishes to the other ---
+        separated by the learned features, although the algorithm was never told
+        what spicy or sweet is. It discovered the distinction from who liked what.
+      \end{keyidea}
+      \begin{pitfall}[Learned features have no fixed meaning]
+        \footnotesize The axes are not ``spicy'' and ``sweet''. Any rotation of the
+        feature space, with the users rotated to match, gives the same predictions.
+        Only distances and dot products mean anything.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{What the trained model predicts}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.55\textwidth}
+      \centering
+      \begin{tikzpicture}
+\node[font=\tiny\bfseries] at (0.525,0.350) {Alice};
+\node[font=\tiny\bfseries] at (1.575,0.350) {Bob};
+\node[font=\tiny\bfseries] at (2.625,0.350) {Carol};
+\node[font=\tiny\bfseries] at (3.675,0.350) {Dave};
+\node[font=\tiny, anchor=east] at (-0.080,-0.260) {Curry};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.260) {5};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.260) {5};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-0.260) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.260) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-0.780) {Noodles};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (0.525,-0.780) {5};
+\node[draw=curose, dashed, fill=curose!72, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (1.575,-0.780) {4.47};
+\node[draw=curose, dashed, fill=curose!10, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (2.625,-0.780) {-0.19};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (3.675,-0.780) {0};
+\node[font=\tiny, anchor=east] at (-0.080,-1.300) {Soup};
+\node[draw=curose, dashed, fill=curose!74, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (0.525,-1.300) {4.62};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (1.575,-1.300) {4};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (2.625,-1.300) {0};
+\node[draw=curose, dashed, fill=curose!14, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=curose] at (3.675,-1.300) {0.30};
+\node[font=\tiny, anchor=east] at (-0.080,-1.820) {Ginger Cake};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-1.820) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-1.820) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-1.820) {5};
+\node[draw=white, fill=cublue!64, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (3.675,-1.820) {4};
+\node[font=\tiny, anchor=east] at (-0.080,-2.340) {Ice Cream};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (0.525,-2.340) {0};
+\node[draw=white, fill=cublue!8, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=black] at (1.575,-2.340) {0};
+\node[draw=white, fill=cublue!78, minimum width=1.05cm, minimum height=0.52cm, font=\scriptsize\bfseries, text=white] at (2.625,-2.340) {5};
+\node[draw=curose, dashed, fill=curose!65, minimum width=1.01cm, minimum height=0.48000000000000004cm, font=\scriptsize\bfseries, text=white] at (3.675,-2.340) {3.94};
+      \end{tikzpicture}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \footnotesize
+      \begin{block}{The five missing ratings}
+        \renewcommand{\arraystretch}{1.15}
+        \begin{tabular}{@{}lr@{}}
+          Bob, \emph{Chilli Noodles}      & $4.47$\\
+          Carol, \emph{Chilli Noodles}    & $-0.19$\\
+          Alice, \emph{Pepper Soup}       & $4.62$\\
+          Dave, \emph{Pepper Soup}        & $0.30$\\
+          Dave, \emph{Mango Ice Cream}  & $3.94$\\
+        \end{tabular}
+      \end{block}
+      \begin{keyidea}
+        Recommend \emph{Pepper Soup} to Alice and \emph{Mango Ice Cream} to Dave.
+        Observed ratings are reproduced closely (e.g.\ $4.99$ for Alice's $5$): the
+        small regularization keeps it from being exact.
+      \end{keyidea}
+      Final cost $J = 1.060$ after $2{,}000$ iterations.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Binary Labels: Likes, Favourites and Clicks}
+
+\begin{frame}{Many systems never ask for a rating}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Implicit, binary signals}
+        \footnotesize
+        \begin{itemize}
+          \item Did the user buy the item after seeing it? ($1$ / $0$)
+          \item Did they like, favourite or share the post?
+          \item Did they order the same dish again within a month?
+          \item Did they click the item when shown?
+        \end{itemize}
+        $1$ = engaged, $0$ = shown but not engaged, $?$ = never shown.
+      \end{block}
+      \begin{block}{From regression to classification}
+        \footnotesize Exactly the step from Week 1 to Week 3:
+        \[ P\bigl(y^{(i,j)} = 1\bigr) = g\bigl(\vw^{(j)}\cdot\vx^{(i)} + b^{(j)}\bigr),
+           \quad g(z)=\tfrac{1}{1+e^{-z}} \]
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{defnbox}[Binary collaborative filtering cost]
+        \small
+        \[ J = \!\!\sum_{(i,j):\,r(i,j)=1}\!\! L\bigl(f^{(i,j)},\,y^{(i,j)}\bigr)
+           + \tfrac{\lambda}{2}\|\mathbf{W}\|^2 + \tfrac{\lambda}{2}\|\mathbf{X}\|^2 \]
+        with the binary cross-entropy
+        $L(f,y) = -y\ln f - (1-y)\ln(1-f)$.
+      \end{defnbox}
+      \begin{pitfall}[A ``0'' is not a dislike]
+        \footnotesize ``Shown but not clicked'' may mean the user never noticed it. And
+        items never shown are \emph{missing}, not $0$: treating them as dislikes teaches
+        the model that whatever it did not recommend is bad.
+      \end{pitfall}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Mean Normalization}
+
+\begin{frame}{A new user, Eve, has rated nothing}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \begin{block}{Without normalization}
+        Eve's terms appear only in the penalty $\frac{\lambda}{2}\|\vw^{(5)}\|^2$, so
+        gradient descent drives $\vw^{(5)} \to \mathbf{0}$ (here $(-0.007,\ -0.002)$), and
+        $b^{(5)}$ never moves from $0$. Every prediction for Eve is $\approx 0$:
+        \[ (-0.01,\ -0.01,\ -0.00,\ 0.01,\ 0.01) \]
+        The system thinks Eve hates everything --- the worst possible start.
+      \end{block}
+      \begin{block}{With normalization}
+        Subtract each dish's mean rating $\mu_i$ (over users who rated it) before
+        training; add it back when predicting:
+        \[ \text{prediction} = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)} + \mu_i . \]
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \renewcommand{\arraystretch}{1.18}
+      \begin{tabular}{@{}lrrr@{}}
+        \toprule
+        dish & $\mu_i$ & Eve, raw & Eve, normalized\\
+        \midrule
+        Curry & $2.50$ & $-0.01$ & $2.49$\\
+        Noodles & $2.50$ & $-0.01$ & $2.49$\\
+        Soup & $2.00$ & $-0.00$ & $1.99$\\
+        Ginger Cake & $2.25$ & $0.01$ & $2.26$\\
+        Ice Cream & $1.67$ & $0.01$ & $1.68$\\
+        \bottomrule
+      \end{tabular}
+      \vspace{2mm}
+      \begin{keyidea}
+        With normalization a new user is predicted the \emph{average} rating of each
+        dish --- a sensible default until their own ratings arrive. It also helps
+        training converge faster.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{TensorFlow Implementation}
+
+\begin{frame}[fragile]{Automatic differentiation does the calculus}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.56\textwidth}
+\begin{lstlisting}
+X = tf.Variable(rng.normal(0, .5, (n_m, n)))
+W = tf.Variable(rng.normal(0, .5, (n_u, n)))
+b = tf.Variable(tf.zeros((1, n_u)))
+opt = keras.optimizers.Adam(learning_rate=0.1)
+
+for it in range(200):
+    with tf.GradientTape() as tape:
+        P = tf.matmul(X, W, transpose_b=True) + b
+        E = (P - Ynorm) * R          # only rated
+        J = 0.5 * tf.reduce_sum(E ** 2) \
+            + lam / 2 * (tf.reduce_sum(X ** 2)
+                         + tf.reduce_sum(W ** 2))
+    grads = tape.gradient(J, [X, W, b])
+    opt.apply_gradients(zip(grads, [X, W, b]))
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.4\textwidth}
+      \footnotesize
+      \begin{block}{Why a custom loop?}
+        Collaborative filtering is not a \texttt{Sequential} stack of layers: the
+        ``inputs'' $\vx^{(i)}$ are themselves parameters. So we write the cost, and let
+        \texttt{GradientTape} compute every partial derivative (Week 5's
+        back-propagation, automated).
+      \end{block}
+      \begin{keyidea}[Vectorized]
+        $\mathbf{X}\mathbf{W}^{\mathsf T} + \mathbf{b}$ predicts the whole $n_m\times n_u$
+        matrix at once; multiplying by $\mathbf{R}$ zeroes the unrated entries so they
+        contribute nothing.
+      \end{keyidea}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===============================================================
+\section{Wrap-up and Assessment}
+
+\begin{frame}{Summary}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What to remember}
+        \footnotesize
+        \begin{itemize}
+          \item The ratings matrix: $n_m$ items $\times$ $n_u$ users, mostly missing.
+          \item Content-based: known item features, one linear regression per user.
+          \item Collaborative filtering learns item features and user parameters
+                together from the ratings alone.
+          \item Binary signals (likes, clicks) use the logistic version.
+          \item Mean normalization gives new users the average prediction.
+          \item Implementation: write the cost, let \texttt{GradientTape} differentiate.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Formulas}
+        \[ \hat y^{(i,j)} = \vw^{(j)}\cdot\vx^{(i)} + b^{(j)} + \mu_i \]
+        \[ J = \tfrac12\!\!\sum_{r(i,j)=1}\!\!(\hat y^{(i,j)} - y^{(i,j)})^2
+               + \tfrac{\lambda}{2}(\|\mathbf W\|^2 + \|\mathbf X\|^2) \]
+      \end{block}
+      \begin{block}{Next}
+        \footnotesize Part 2: finding related items, deep content-based filtering,
+        recommending from millions of items, ethics, and PCA.
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Descriptive questions}
+  \footnotesize
+  \begin{enumerate}
+    \item Define $n_u$, $n_m$, $r(i,j)$ and $y^{(i,j)}$, and state the goal of a recommender
+          system in terms of the ratings matrix. \hfill\clo{4}
+    \item Explain content-based prediction with per-item features. With
+          $\vw = (5, 0)$, $b = 0$, compute the predicted rating of a dish with
+          $\vx = (0.2,\ 0.9)$. \hfill\clo{5}
+    \item Write the collaborative-filtering cost and explain why it contains penalty terms
+          for both $\vw$ and $\vx$. \hfill\clo{6}
+    \item Why is the method called \emph{collaborative}? Why could it not learn a dish's
+          features if each dish were rated by only one user? \hfill\clo{5}
+    \item Explain why learned features have no fixed meaning, using the idea of rotating
+          the feature space. \hfill\clo{5}
+    \item From the trained model, which unrated dish should be recommended to each of
+          Alice and Dave, and why? \hfill\clo{4}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Descriptive questions (continued)}
+  \footnotesize
+  \begin{enumerate}\setcounter{enumi}{6}
+    \item Give three sources of binary feedback, and write the binary collaborative-filtering
+          cost. \hfill\clo{5}
+    \item Why should items never shown to a user be treated as missing rather than as
+          $0$? \hfill\clo{4}
+    \item Show that without mean normalization a user with no ratings receives predictions
+          near $0$. What do they receive with it? \hfill\clo{6}
+    \item Compute the dish means $\mu_i$ for the lecture's matrix. \hfill\clo{4}
+    \item Why is collaborative filtering implemented with a custom training loop rather
+          than a \texttt{Sequential} model? \hfill\clo{4}
+    \item Derive $\partial J/\partial x^{(i)}_k$ for the collaborative-filtering cost.
+          \hfill\clo{8}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Design questions}
+  \footnotesize
+  \begin{enumerate}
+    \item \textbf{Design a book recommender.} A university library wants to recommend
+          books to students from five years of borrowing records (no ratings). Design the
+          labels, how you treat books never borrowed, the cost function, and how you will
+          evaluate it before launch. \hfill\clo{12}
+    \item \textbf{Design for cold start.} A new food-delivery app has thousands of dishes
+          but almost no users. Design how you combine per-item features and collaborative
+          filtering as data accumulates. \hfill\clo{10}
+    \item \textbf{Design an evaluation.} Design a held-out evaluation for a collaborative
+          filtering model: which ratings you hide, the metric, and why a random split of
+          ratings can be misleading for a recommender. \hfill\clo{12}
+    \item \textbf{Design the number of features.} Design an experiment to choose $n$ (the
+          number of learned features) and $\lambda$, and say what overfitting looks like
+          in this setting. \hfill\clo{10}
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Reading}
+  \begin{block}{Primary text}
+    G.~James, D.~Witten, T.~Hastie and R.~Tibshirani,
+    \emph{An Introduction to Statistical Learning}, 2nd ed., Springer, 2021.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S12.3} --- missing values and matrix completion,
+    with the dish-ratings (Netflix) example: the same low-rank model as collaborative
+    filtering.}
+  \end{block}
+  \begin{block}{Supplementary}
+    C.~M.~Bishop, \emph{Pattern Recognition and Machine Learning}, Springer, 2006.\\[2pt]
+    \hfill{\small$\rightarrow$ \textbf{\S12.1--12.2} --- linear latent-variable models;
+    collaborative filtering is a latent-factor model of this family.}
+  \end{block}
+  \vspace{1mm}
+  \begin{center}
+    \small\color{cugray}
+    Lab (CSE 816, Week 8): collaborative filtering recommender system.
+  \end{center}
+\end{frame}
+
+\end{document}
