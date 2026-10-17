@@ -1,16 +1,1475 @@
 %% ch06.tex --- Logistic Regression
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch06_logistic.py.
+%%
+%% Note on ordering: BOOK_PLAN lists "why squared error fails" first, but the
+%% non-convexity argument needs the sigmoid model to exist before it can be
+%% made.  The chapter therefore splits that item in two --- the failure of
+%% linear regression (Sec. 6.2, before the sigmoid) and the failure of squared
+%% error on the sigmoid model (Sec. 6.5, after it).
 
 \chapter{Logistic Regression}
 \label{ch:ch06}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{It is the mark of a truly intelligent person to be moved by
+statistics.}{---\ George Bernard Shaw}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Say why a linear model fitted by least squares is the wrong tool for a
+        binary target, and demonstrate the failure on data.
+  \item State the sigmoid function, derive its derivative, and list the four
+        properties that make it the right squashing function.
+  \item Read the output of a logistic model as a probability, and convert
+        between probability, odds and log-odds.
+  \item Find the decision boundary of a logistic model, linear or polynomial,
+        and explain why it is a property of the model rather than of the data.
+  \item Show that squared error on a sigmoid model gives a non-convex cost, and
+        say what that costs an optimizer in practice.
+  \item Derive the logistic loss from maximum likelihood, in full, and reduce
+        its two cases to one line.
+  \item Prove that the logistic cost is convex, and say what the proof requires
+        of the data.
+  \item Derive the gradient, run the update by hand, and explain why it has the
+        same \emph{form} as the linear-regression update without being the same
+        algorithm.
+  \item Choose a decision threshold from the costs of the two kinds of error
+        rather than accepting $0.5$.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch01} divided supervised learning into regression and classification
+and then spent four chapters on regression. This chapter takes up the other
+half. The target is now a category --- malignant or benign, spam or not spam,
+fraudulent or legitimate --- and almost everything has to be rebuilt: the model,
+the cost, and the way the answer is read. The optimizer, remarkably, does not
+change at all.
+
+We build it in the order of \cref{sec:four-parts}: data, hypothesis space, cost,
+optimizer. The data comes first, and it comes with a constraint the previous
+chapters did not have.
+
+\section{The Classification Problem}
+\label{sec:classification-setup}
+
+\begin{defbox}{Binary classification}
+A \term{binary classification} problem is a supervised learning problem in which
+$\Yspace = \{0,1\}$. The class labelled $1$ is called the \term{positive class}
+and the class labelled $0$ the \term{negative class}; the names are conventional
+and carry no value judgement --- in medical screening the positive class is
+usually the disease.
+
+A learner for such a problem is a \term{classifier}. It must ultimately emit a
+label in $\{0,1\}$, but as this chapter shows, the useful thing to learn first is
+a number in $[0,1]$.
+\end{defbox}
+
+The labels $0$ and $1$ are arbitrary tags. Nothing in the problem says that
+malignant is one more than benign, and the pitfall in \cref{sec:supervised}
+warned against reading arithmetic into such codes. The whole difficulty of this
+chapter follows from that: we are about to build a model that outputs a real
+number, and we must be careful about what the number means.
+
+Throughout the chapter we use a small screening dataset.
+
+\begin{defbox}{Dataset T7}
+Eight tumours, each recorded by its greatest diameter in centimetres, each
+labelled $1$ if malignant and $0$ if benign.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+$x$ (cm) & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$\\
+$y$      & $0$ & $1$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Larger tumours are more often malignant, but the rule is not perfect: the $2$~cm
+tumour was malignant and the $5$~cm one was not. That imperfection is
+deliberate, and \cref{sec:gd-logistic} shows what a dataset without it would do
+to the fit.
+\end{defbox}
+
+\section{Why Linear Regression Fails}
+\label{sec:linreg-fails}
+
+The obvious first attempt is to ignore the difficulty. The target is a number,
+$0$ or $1$; fit a straight line by least squares as in \cref{ch:ch02}, and
+predict malignant whenever the line is above $0.5$. On T7 this gives
+\[
+  f(x) = 0.119048\,x - 0.035714 ,
+\]
+which crosses $0.5$ at $x = 4.5$ and gets six of the eight labels right. It looks
+like a working classifier. It is not, for two reasons.
+
+\subsection{The output is not a probability, or anything else}
+
+The fitted values on the eight training points run from $0.0833$ to $0.9167$,
+which is at least in range. Step outside the data and the model reports
+\[
+  f(0) = -0.0357, \qquad f(12) = 1.3929, \qquad f(25) = 2.9405 .
+\]
+A tumour of zero size is $-3.6\%$ malignant and one of $25$~cm is $294\%$
+malignant. There is no reading of the output under which those are answers. The
+model has been asked for a quantity confined to $[0,1]$ and given a hypothesis
+space --- straight lines --- in which no member is confined to $[0,1]$.
+
+\subsection{The fit is driven by distance, not by correctness}
+
+The second failure is worse, because it corrupts the part of the model that did
+work. Least squares minimises squared \emph{distance} to the targets. A training
+example far out along the $x$-axis, correctly classified and never in doubt,
+still has a large residual if the line does not pass close to it, and the fit
+bends to reduce that residual.
+
+Add to T7 a single further malignant tumour, of size $20$~cm, whose class no
+method could get wrong, and refit --- with least squares and, for comparison,
+with the logistic model this chapter is about to build:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & \multicolumn{3}{c}{least squares} & logistic\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-5}
+extra example & $b$ & $w$ & boundary & boundary\\
+\midrule
+none      & $-0.035714$ & $0.119048$ & $4.5000$ & $4.5000$\\
+$x = 10$  & $ 0.003226$ & $0.108065$ & $4.5970$ & $4.4644$\\
+$x = 15$  & $ 0.164286$ & $0.069048$ & $4.8621$ & $4.4978$\\
+$x = 20$  & $ 0.266087$ & $0.046522$ & $5.0280$ & $4.4999$\\
+$x = 30$  & $ 0.362366$ & $0.026344$ & $5.2245$ & $4.5000$\\
+$x = 50$  & $ 0.427509$ & $0.013400$ & $5.4097$ & $4.5000$\\
+$x = 100$ & $ 0.467576$ & $0.005822$ & $5.5691$ & $4.5000$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The least-squares boundary walks from $4.50$ to $5.57$ as the extra tumour
+recedes, driven entirely by a point about which there was never any question.
+The logistic boundary does not move: it settles at $4.5000$ and stays there. The
+same effect flattens the line --- with the extra point at $x = 20$ the eight
+original fitted values compress into $[0.3126,\,0.6383]$, so the model is now
+mildly unsure about everything, including the $1$~cm tumour it previously called
+benign with confidence.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.6cm,
+        xlabel={tumour size $x$ (cm)}, ylabel={$f(x)$},
+        xmin=0, xmax=9.4, ymin=-0.15, ymax=1.15,
+        legend style={font=\tiny, at={(0.98,0.06)}, anchor=south east}]
+        \addplot[MLAmber, thick, dashed, domain=0:9.4] {0.119048*x - 0.035714};
+        \addlegendentry{least squares}
+        \addplot[MLBlue, very thick, domain=0:9.4, samples=120]
+          {1/(1+exp(-(0.594084*x - 2.673380)))};
+        \addlegendentry{logistic}
+        \addplot[MLGray, dotted, thick, forget plot, domain=0:9.4] {0.5};
+        \addplot[only marks, mark=*, mark size=1.7pt, MLRose, forget plot]
+          coordinates {(1,0)(3,0)(4,0)(5,0)};
+        \addplot[only marks, mark=square*, mark size=1.7pt, MLTeal, forget plot]
+          coordinates {(2,1)(6,1)(7,1)(8,1)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Both cross $0.5$ at $x = 4.5$.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.6cm,
+        xlabel={tumour size $x$ (cm)}, ylabel={$f(x)$},
+        xmin=0, xmax=21.5, ymin=-0.15, ymax=1.15,
+        legend style={font=\tiny, at={(0.98,0.06)}, anchor=south east}]
+        \addplot[MLAmber, thick, dashed, domain=0:21.5]
+          {0.046522*x + 0.266087};
+        \addlegendentry{least squares}
+        \addplot[MLBlue, very thick, domain=0:21.5, samples=160]
+          {1/(1+exp(-(0.594373*x - 2.674608)))};
+        \addlegendentry{logistic}
+        \addplot[MLGray, dotted, thick, forget plot, domain=0:21.5] {0.5};
+        \addplot[only marks, mark=*, mark size=1.7pt, MLRose, forget plot]
+          coordinates {(1,0)(3,0)(4,0)(5,0)};
+        \addplot[only marks, mark=square*, mark size=1.7pt, MLTeal, forget plot]
+          coordinates {(2,1)(6,1)(7,1)(8,1)(20,1)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize One extra example at $x = 20$ moves the line, not the curve.\par}
+  \end{minipage}
+  \caption{Least squares against logistic regression on T7. Circles are benign,
+  squares malignant. The straight line leaves $[0,1]$ on both sides, and a
+  single distant example that no method would misclassify drags its threshold
+  crossing from $4.50$ to $5.03$. The logistic curve is bounded, and its
+  crossing stays at $4.4999$, because an example it already predicts correctly
+  and confidently contributes almost nothing to the gradient.}
+  \label{fig:linreg-fails}
+\end{figure}
+
+\begin{keyinsight}{The two requirements}
+A classifier needs a hypothesis space whose members map $\R$ into $[0,1]$, and a
+cost that charges for being \emph{wrong} rather than for being \emph{far}. Linear
+regression fails both tests. The rest of this chapter supplies one replacement
+for each: the sigmoid for the first, the logistic loss for the second.
+\end{keyinsight}
+
+\section{The Sigmoid Function}
+\label{sec:sigmoid}
+
+Keep the linear part $z = \vw\cdot\vx + b$, which carries all the parameters, and
+pass it through a function that squashes $\R$ onto $(0,1)$.
+
+\begin{defbox}{The sigmoid, and the logistic model}
+The \term{sigmoid} (or \term{logistic}) function is
+\[
+  \gsig(z) \;=\; \frac{1}{1+e^{-z}}, \qquad \gsig:\R \to (0,1).
+\]
+The \term{logistic regression} model composes it with a linear function:
+\[
+  \fvwb(\vx) \;=\; \gsig(\vw\cdot\vx + b) \;=\; \frac{1}{1+e^{-(\vw\cdot\vx+b)}} .
+\]
+The parameters are the same $\vw \in \Real{n}$ and $b \in \R$ as in
+\cref{ch:ch04}. Only the last step is new.
+\end{defbox}
+
+Four properties do the work, and all four are worth verifying rather than
+memorising.
+
+\begin{enumerate}
+  \item \textbf{Range.} $e^{-z} > 0$ for every real $z$, so the denominator
+        exceeds $1$ and $0 < \gsig(z) < 1$. The endpoints are approached but
+        never attained: a logistic model is never completely certain.
+  \item \textbf{Centre.} $\gsig(0) = 1/2$. The point $z = 0$ is where the model
+        has no opinion, and it will turn out to be the decision boundary.
+  \item \textbf{Symmetry.} $1 - \gsig(z) = \gsig(-z)$. Reversing the sign of
+        every parameter swaps the two classes, so the labelling of positive and
+        negative is genuinely arbitrary.
+  \item \textbf{Monotonicity.} $\gsig$ is strictly increasing, so ordering by
+        $\gsig(z)$ is the same as ordering by $z$. This is what makes the
+        decision boundary of \cref{sec:decision-boundary} linear.
+\end{enumerate}
+
+\begin{derivation}{The derivative of the sigmoid}
+Write $\gsig(z) = (1+e^{-z})^{-1}$ and differentiate by the chain rule:
+\[
+  \gsig'(z) \;=\; -(1+e^{-z})^{-2}\cdot\bigl(-e^{-z}\bigr)
+            \;=\; \frac{e^{-z}}{(1+e^{-z})^{2}} .
+\]
+Split the fraction into two factors, one of which is $\gsig(z)$:
+\[
+  \gsig'(z) \;=\; \underbrace{\frac{1}{1+e^{-z}}}_{\gsig(z)}
+                 \cdot\underbrace{\frac{e^{-z}}{1+e^{-z}}}_{?} .
+\]
+The second factor simplifies by adding and subtracting $1$ in its numerator:
+\[
+  \frac{e^{-z}}{1+e^{-z}} = \frac{(1+e^{-z}) - 1}{1+e^{-z}}
+    = 1 - \frac{1}{1+e^{-z}} = 1 - \gsig(z).
+\]
+Hence
+\[
+  \boxed{\;\gsig'(z) = \gsig(z)\bigl(1-\gsig(z)\bigr)\;}
+\]
+The derivative is expressible in the function's own value, which is why
+implementations cache the forward pass and why the same identity reappears,
+unchanged, in the backpropagation of \cref{ch:ch09}.
+
+Two consequences follow immediately. Since $\gsig \in (0,1)$, the product
+$\gsig(1-\gsig)$ is strictly positive, so $\gsig$ is strictly increasing. And
+$p(1-p)$ is maximised at $p = 1/2$, so
+\[
+  \max_z \gsig'(z) = \tfrac12\cdot\tfrac12 = \tfrac14 \quad\text{at } z=0,
+\]
+falling away to zero in both tails. \Cref{sec:squared-error-fails} shows what
+that vanishing derivative does to a badly chosen cost.
+\end{derivation}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.74\linewidth, height=4.8cm,
+      xlabel={$z$}, ylabel={},
+      xmin=-6.4, xmax=6.4, ymin=-0.06, ymax=1.12,
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[MLBlue, very thick, domain=-6.4:6.4, samples=160]
+        {1/(1+exp(-x))};
+      \addlegendentry{$\gsig(z)$}
+      \addplot[MLAmber, thick, dashed, domain=-6.4:6.4, samples=160]
+        {1/(1+exp(-x)) * (1 - 1/(1+exp(-x)))};
+      \addlegendentry{$\gsig'(z) = \gsig(1-\gsig)$}
+      \addplot[MLGray, dotted, thick, forget plot, domain=-6.4:6.4] {0.5};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The sigmoid and its derivative. The curve passes through
+  $(0,\tfrac12)$, saturates towards $0$ and $1$, and its slope peaks at
+  $\tfrac14$ exactly where it crosses $\tfrac12$. Beyond $|z| = 4$ the slope is
+  under $0.018$: the model is not merely confident there, it is nearly
+  unresponsive.}
+  \label{fig:sigmoid}
+\end{figure}
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{7}{r}@{}}
+\toprule
+$z$        & $-6$ & $-4$ & $-2$ & $0$ & $2$ & $4$ & $6$\\
+\midrule
+$\gsig(z)$  & $0.002473$ & $0.017986$ & $0.119203$ & $0.500000$
+            & $0.880797$ & $0.982014$ & $0.997527$\\
+$\gsig'(z)$ & $0.002467$ & $0.017663$ & $0.104994$ & $0.250000$
+            & $0.104994$ & $0.017663$ & $0.002467$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{The output as a probability}
+
+The sigmoid guarantees a number in $(0,1)$, which permits a probabilistic
+reading, but does not by itself justify one. The justification is the modelling
+assumption we are about to make, and it is worth stating explicitly because
+everything in \cref{sec:logistic-loss} is derived from it.
+
+\begin{defbox}{The logistic model's assumption}
+\[
+  \Prob(y = 1 \mid \vx;\ \vw,b) \;=\; \fvwb(\vx),
+  \qquad
+  \Prob(y = 0 \mid \vx;\ \vw,b) \;=\; 1 - \fvwb(\vx).
+\]
+The two exhaust the possibilities and sum to $1$, so one number determines both.
+Read $\fvwb(\vx) = 0.7$ as ``a $70\%$ chance that this example is positive'',
+\emph{given that the assumption holds}.
+\end{defbox}
+
+The assumption is an assumption, not a theorem, and a fitted model can be
+confident and wrong. \Cref{ch:ch10} shows how to check whether the numbers a
+model calls probabilities behave like probabilities.
+
+\subsection{Odds and log-odds}
+
+The reason the sigmoid appears here rather than some other bounded increasing
+curve is best seen by inverting it. Write $p = \gsig(z)$ and solve for $z$:
+\[
+  p(1+e^{-z}) = 1 \;\Longrightarrow\;
+  e^{-z} = \frac{1-p}{p} \;\Longrightarrow\;
+  z = \ln\!\left(\frac{p}{1-p}\right).
+\]
+The quantity $p/(1-p)$ is the \term{odds} of the positive class, and its
+logarithm is the \term{log-odds}, or \term{logit}. So the model says
+\[
+  \ln\frac{\Prob(y=1\mid\vx)}{\Prob(y=0\mid\vx)} \;=\; \vw\cdot\vx + b .
+\]
+
+\begin{keyinsight}{Logistic regression is linear regression on the log-odds}
+The model is not a mangled version of linear regression. It is an exactly linear
+model of a different quantity: not $y$, and not $\Prob(y=1)$, but the logarithm
+of the odds. Everything that made linear models tractable --- one parameter per
+feature, additive effects, a convex fitting problem --- survives on that scale.
+
+The reading of a coefficient follows. Adding one to $x_j$ adds $w_j$ to the
+log-odds, hence multiplies the odds by $e^{w_j}$. The fitted model of
+\cref{sec:gd-logistic} has $w = 0.594084$ per centimetre, so each additional
+centimetre of tumour multiplies the odds of malignancy by
+$e^{0.594084} = 1.8114$ --- a little under a doubling. Note that the effect on
+the \emph{probability} is not constant: it is largest near $p = 1/2$ and
+vanishes in the tails, which is the sigmoid's shape restated.
+\end{keyinsight}
+
+\section{Decision Boundaries}
+\label{sec:decision-boundary}
+
+A probability is not yet a decision. To classify, compare it with a threshold;
+take $0.5$ for now and revisit the choice in \cref{sec:threshold}.
+
+Because $\gsig$ is increasing and $\gsig(0) = \tfrac12$,
+\[
+  \fvwb(\vx) \ge \tfrac12
+  \;\Longleftrightarrow\;
+  \vw\cdot\vx + b \ge 0 ,
+\]
+so the sigmoid disappears from the decision entirely.
+
+\begin{defbox}{Decision boundary}
+The \term{decision boundary} of a logistic model at threshold $\tfrac12$ is the
+set
+\[
+  \{\vx : \vw\cdot\vx + b = 0\},
+\]
+a hyperplane in $\Real{n}$: a point when $n=1$, a line when $n=2$, a plane when
+$n=3$. It is a property of the \emph{parameters}, not of the training data ---
+the same boundary can be drawn before any data is seen, by choosing $\vw$ and
+$b$ by hand.
+\end{defbox}
+
+With one feature the boundary is the single point $x^\star = -b/w$. For T7 the
+fitted parameters are $b = -2.673380$ and $w = 0.594084$, so
+$x^\star = 2.673380/0.594084 = 4.5000$ cm: predict malignant above $4.5$~cm,
+benign below.
+
+\begin{workedexample}{A boundary in two dimensions}
+Dataset~T8 records twenty tumours by size $x_1$ (cm) and a texture score $x_2$
+on a $0$--$10$ scale.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\toprule
+\multicolumn{11}{@{}l}{\textbf{Benign} ($y=0$)}\\
+$x_1$ & $2.4$ & $1.8$ & $2.2$ & $2.9$ & $3.8$ & $2.0$ & $2.9$ & $2.4$ & $3.0$ & $1.9$\\
+$x_2$ & $3.4$ & $0.4$ & $4.6$ & $2.7$ & $5.9$ & $3.2$ & $3.1$ & $5.0$ & $2.7$ & $2.7$\\
+\midrule
+\multicolumn{11}{@{}l}{\textbf{Malignant} ($y=1$)}\\
+$x_1$ & $3.8$ & $3.5$ & $3.8$ & $2.4$ & $3.3$ & $3.2$ & $3.9$ & $3.9$ & $4.4$ & $4.9$\\
+$x_2$ & $6.3$ & $7.2$ & $6.2$ & $4.4$ & $6.7$ & $8.2$ & $6.5$ & $6.8$ & $5.5$ & $5.2$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Fitting gives $b = -9.827806$, $w_1 = 0.931932$, $w_2 = 1.362882$, with cost
+$J = 0.262254$ and eighteen of twenty labels correct. The boundary is the line
+$0.931932\,x_1 + 1.362882\,x_2 - 9.827806 = 0$, which is easier to plot solved
+for $x_2$:
+\[
+  x_2 \;=\; 7.2110 - 0.6838\,x_1 .
+\]
+At $x_1 = 1.5$ it passes through $x_2 = 6.1854$; at $x_1 = 5.0$, through
+$x_2 = 3.7921$. The two mistakes are exactly the two points on the wrong side of
+that line: the benign tumour at $(3.8, 5.9)$, which the model calls malignant
+with probability $0.8525$, and the malignant one at $(2.4, 4.4)$, which it calls
+benign with probability $1 - 0.1688 = 0.8312$. Both are confidently wrong, and
+no straight line can rescue either.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=4.5cm, height=4.5cm, scale only axis,
+        xlabel={size $x_1$}, ylabel={texture $x_2$},
+        xmin=1.4, xmax=5.3, ymin=0, ymax=9]
+        \addplot[MLBlue, very thick, domain=1.4:5.3, forget plot]
+          {7.2110 - 0.6838*x};
+        \addplot[only marks, mark=*, mark size=1.6pt, MLRose, forget plot]
+          coordinates {(2.4,3.4)(1.8,0.4)(2.2,4.6)(2.9,2.7)(3.8,5.9)
+                       (2.0,3.2)(2.9,3.1)(2.4,5.0)(3.0,2.7)(1.9,2.7)};
+        \addplot[only marks, mark=square*, mark size=1.6pt, MLTeal, forget plot]
+          coordinates {(3.8,6.3)(3.5,7.2)(3.8,6.2)(2.4,4.4)(3.3,6.7)
+                       (3.2,8.2)(3.9,6.5)(3.9,6.8)(4.4,5.5)(4.9,5.2)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Linear: $\vw\cdot\vx + b = 0$.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=4.5cm, height=4.5cm, scale only axis,
+        xlabel={$x_1$}, ylabel={$x_2$},
+        xmin=-2.2, xmax=2.2, ymin=-2.2, ymax=2.2]
+        \addplot[MLBlue, very thick, domain=0:360, samples=120, forget plot]
+          ({cos(x)}, {sin(x)});
+        \addplot[only marks, mark=*, mark size=1.6pt, MLRose, forget plot]
+          coordinates {(0,0)(0.5,0.3)(-0.4,0.5)(0.3,-0.6)(-0.6,-0.3)(0.15,0.7)};
+        \addplot[only marks, mark=square*, mark size=1.6pt, MLTeal, forget plot]
+          coordinates {(1.6,0.4)(-1.5,0.9)(0.9,-1.5)(-0.8,-1.6)(1.2,1.3)
+                       (-1.7,-0.5)(0.2,1.8)(1.5,-0.7)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Quadratic: $x_1^2 + x_2^2 - 1 = 0$.\par}
+  \end{minipage}
+  \caption{Two decision boundaries. Left: T8 with its fitted line
+  $x_2 = 7.2110 - 0.6838\,x_1$; the two misclassified points are the two on the
+  wrong side. Right: the boundary produced by $\vw = (0,0,1,1)$ and $b=-1$ on
+  the features $(x_1,x_2,x_1^2,x_2^2)$ --- a circle, from a model that is still
+  linear in its parameters.}
+  \label{fig:boundary}
+\end{figure}
+
+\subsection{Non-linear boundaries}
+
+A hyperplane in the space of \emph{features} need not be a hyperplane in the
+space of the original measurements, and \cref{sec:feature-engineering} already
+supplied the mechanism. Give the model the four features
+$(x_1, x_2, x_1^2, x_2^2)$ and choose
+\[
+  \vw = (0,\,0,\,1,\,1), \qquad b = -1 .
+\]
+Then $z = x_1^2 + x_2^2 - 1$, and the boundary $z = 0$ is the unit circle:
+inside it the model predicts $0$, outside it predicts $1$. Higher-degree terms
+buy ellipses, then curves with several disconnected pieces, then essentially any
+shape at all.
+
+The parameters above were chosen, not fitted, so that the boundary is exactly
+the unit circle; fitting them would be the identical procedure on the identical
+machinery, since the model remains linear in $\vw$ and $b$.
+
+\begin{pitfall}{More flexibility, same trap}
+The picture of \cref{ch:ch05} repeats here. Enough polynomial features will
+separate any training set perfectly, boundary contorted to enclose each stray
+point, and the training cost will be excellent. \Cref{ch:ch07} shows what
+happens on new data, and adds the penalty term that is the standard defence ---
+for logistic regression exactly as for linear regression.
+\end{pitfall}
+
+\section{Why Squared Error Fails}
+\label{sec:squared-error-fails}
+
+The hypothesis space is now correct: every member of it maps into $(0,1)$. It is
+tempting to keep the cost of \cref{ch:ch02} and write
+\[
+  J_{\mathrm{sq}}(\vw,b)
+  \;=\; \frac{1}{2m}\sum_{i=1}^{m}\bigl(\gsig(\vw\cdot\xii{i}+b) - \yii{i}\bigr)^2 .
+\]
+This is where the second requirement of \cref{sec:linreg-fails} bites. The cost
+is bounded, well defined, and differentiable --- and it is a bad objective, for
+two independent reasons.
+
+\subsection{It is not convex}
+
+\Cref{sec:convexity} proved that the squared-error cost of linear regression is
+convex, and \cref{ch:ch03} leaned on that fact throughout: convexity is why any
+local minimum is global, and why gradient descent cannot be trapped. Composing
+the model with a sigmoid destroys it. Convexity requires a positive
+semi-definite Hessian everywhere; on T7,
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+$(b,w)$ & $J_{\mathrm{sq}}$ & $\lambda_{\min}$ & $\lambda_{\max}$\\
+\midrule
+$(0.00,\ 0.00)$  & $0.125000$ & $+0.012476$ & $+1.643774$\\
+$(2.00,\ -0.80)$ & $0.237035$ & $-0.134306$ & $+0.016137$\\
+$(4.00,\ -1.00)$ & $0.276621$ & $-0.331318$ & $-0.000688$\\
+\bottomrule
+\end{tabular}
+\end{center}
+One negative eigenvalue anywhere is enough to settle the question, and the third
+row has two: at $(b,w) = (4,-1)$ the surface is concave in \emph{every}
+direction, which is something no convex function does anywhere. Every guarantee
+\cref{ch:ch03} attached to convexity is therefore withdrawn --- a local minimum
+need no longer be global, and where a run ends may depend on where it began.
+
+\subsection{Its gradient vanishes where you most need it}
+
+The second reason is the more practical, and it follows from
+$\max \gsig' = \tfrac14$. Differentiating the per-example squared error with
+respect to $z$ gives, by the chain rule,
+\[
+  \frac{\partial}{\partial z}\,\tfrac12\bigl(\gsig(z)-y\bigr)^2
+  \;=\; (f - y)\,f(1-f), \qquad f = \gsig(z).
+\]
+The factor $f(1-f)$ is the sigmoid's derivative, and it collapses to nothing in
+both tails. A model that is confidently, catastrophically wrong sits in a tail:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+$f$ (with $y=1$) & squared loss & log loss
+                 & $\partial(\text{sq})/\partial z$
+                 & $\partial(\text{log})/\partial z$\\
+\midrule
+$0.9$   & $0.005000$ & $0.105361$ & $-0.009000$ & $-0.100000$\\
+$0.5$   & $0.125000$ & $0.693147$ & $-0.125000$ & $-0.500000$\\
+$0.1$   & $0.405000$ & $2.302585$ & $-0.081000$ & $-0.900000$\\
+$0.01$  & $0.490050$ & $4.605170$ & $-0.009801$ & $-0.990000$\\
+$0.001$ & $0.499001$ & $6.907755$ & $-0.000998$ & $-0.999000$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Read down the squared-error column. A prediction of $0.001$ when the truth is
+$1$ --- as wrong as a probability can be --- is penalised $0.499$, barely more
+than the $0.405$ charged for a mild error of $0.1$, and \emph{less} than four
+times what a coin flip costs. Worse, its gradient is $0.000998$: the algorithm
+receives almost no signal to fix it. The log-loss column, defined in the next
+section, charges $6.91$ and delivers a gradient of $0.999$, a thousand times
+larger.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.4cm,
+        xlabel={$w$}, ylabel={$J_{\mathrm{sq}}$},
+        xmin=-2.6, xmax=3.1, ymin=0.05, ymax=0.28]
+        \addplot[MLRose, very thick] coordinates {
+          (-2.50,0.2499)(-2.25,0.2499)(-2.00,0.2498)(-1.75,0.2497)
+          (-1.50,0.2496)(-1.25,0.2493)(-1.00,0.2489)(-0.75,0.2480)
+          (-0.50,0.2462)(-0.25,0.2409)(0.00,0.2198)(0.25,0.1516)
+          (0.50,0.0881)(0.75,0.1047)(1.00,0.1411)(1.25,0.1666)
+          (1.50,0.1806)(1.75,0.1879)(2.00,0.1924)(2.25,0.1962)
+          (2.50,0.2000)(2.75,0.2040)(3.00,0.2084)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Squared error: a $0.0003$ drop over $w \in [-2.5,-1.5]$.\par}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.4cm,
+        xlabel={$w$}, ylabel={$J_{\mathrm{log}}$},
+        xmin=-2.6, xmax=3.1, ymin=0, ymax=9]
+        \addplot[MLBlue, very thick] coordinates {
+          (-2.50,8.5250)(-2.25,7.8065)(-2.00,7.0880)(-1.75,6.3697)
+          (-1.50,5.6517)(-1.25,4.9339)(-1.00,4.2167)(-0.75,3.5006)
+          (-0.50,2.7871)(-0.25,2.0813)(0.00,1.4034)(0.25,0.8346)
+          (0.50,0.5483)(0.75,0.5725)(1.00,0.7703)(1.25,1.0505)
+          (1.50,1.3734)(1.75,1.7208)(2.00,2.0835)(2.25,2.4565)
+          (2.50,2.8365)(2.75,3.2217)(3.00,3.6108)};
+      \end{axis}
+    \end{tikzpicture}
+    {\scriptsize Log loss: a useful slope everywhere.\par}
+  \end{minipage}
+  \caption{The same slice through both costs on T7, at $b = -2.673380$. Note the
+  vertical scales: the squared-error curve spans $0.20$ while the log-loss curve
+  spans $8.0$. Left of $w = -1$ the squared-error cost is flat to three decimal
+  places, and the gradient there has magnitude $0.0026$ falling to $0.00013$ ---
+  a run started in that region makes no measurable progress for thousands of
+  iterations.}
+  \label{fig:nonconvex}
+\end{figure}
+
+Both defects show up in a single experiment. Start both costs at
+$(b,w) = (4,-1)$ --- a model that believes larger tumours are safer --- and run
+gradient descent with $\alpha = 0.2$ on each:
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}rrlrl@{}}
+\toprule
+iteration & $J_{\mathrm{sq}}$ & $(b,w)$ & $J_{\mathrm{log}}$ & $(b,w)$\\
+\midrule
+$1$      & $0.276342$ & $(+3.9950,\,-1.0055)$ & $1.443313$ & $(+4.0121,\,-0.6611)$\\
+$10$     & $0.272617$ & $(+3.9488,\,-1.0716)$ & $1.325978$ & $(+3.6057,\,-0.5151)$\\
+$100$    & $0.249834$ & $(+3.6886,\,-1.5762)$ & $0.703735$ & $(+0.3489,\,+0.0355)$\\
+$1{,}000$  & $0.245891$ & $(+2.9135,\,-1.3909)$ & $0.528102$ & $(-2.6585,\,+0.5913)$\\
+$10{,}000$ & $0.082297$ & $(-4.8727,\,+0.9244)$ & $0.528099$ & $(-2.6734,\,+0.5941)$\\
+$20{,}000$ & $0.075234$ & $(-8.5693,\,+1.5770)$ & $0.528099$ & $(-2.6734,\,+0.5941)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The log-loss run has essentially converged by iteration $1{,}000$ and is exact
+by $10{,}000$. The squared-error run still has the sign of $w$ wrong after a
+thousand iterations --- it is crawling across the plateau of
+\cref{fig:nonconvex} --- and after $200{,}000$ iterations it has reached
+$(b,w) = (-25.02,\,4.56)$ with a gradient norm of $1.8\times 10^{-4}$, still not
+converged, its coefficients still growing.
+
+\begin{pitfall}{``Squared error is the cost function''}
+It is not. Squared error is one cost, appropriate to one situation: a real-valued
+target whose errors are plausibly symmetric and unbounded. The cost is a
+modelling choice, made after the target and the hypothesis space are known, and
+choosing it badly can leave a perfectly good model unfittable. \Cref{ch:ch09}
+makes the same choice again for multi-class outputs, and \cref{ch:ch15} again for
+ratings.
+\end{pitfall}
+
+\section{The Logistic Loss from Maximum Likelihood}
+\label{sec:logistic-loss}
+
+Rather than patch the squared-error cost, derive the right one. The model has
+already committed to a probabilistic claim in \cref{sec:sigmoid}; the principle
+of \term{maximum likelihood} turns that claim into a cost mechanically: choose
+the parameters under which the data actually observed was most probable.
+
+\begin{derivation}{The logistic cost, from the model's own assumption}
+\textbf{Step 1: one example, two cases.} The assumption is
+\[
+  \Prob(y=1\mid\vx) = f, \qquad \Prob(y=0\mid\vx) = 1-f,
+  \qquad f = \fvwb(\vx).
+\]
+
+\textbf{Step 2: one example, one line.} Since $y$ is $0$ or $1$, the two cases
+collapse into a single expression:
+\[
+  \Prob(y\mid\vx) \;=\; f^{\,y}\,(1-f)^{\,1-y}.
+\]
+Check it: at $y=1$ this is $f^1(1-f)^0 = f$; at $y=0$ it is $f^0(1-f)^1 = 1-f$.
+The exponents act as switches, each turning off the factor that does not apply.
+
+\textbf{Step 3: the whole training set.} Treating the $m$ examples as
+independent given their inputs, the probability of observing all the labels we
+observed is the product
+\[
+  \mathcal{L}(\vw,b) \;=\; \prod_{i=1}^{m}
+    \bigl(f^{(i)}\bigr)^{\yii{i}}\bigl(1-f^{(i)}\bigr)^{1-\yii{i}},
+  \qquad f^{(i)} = \fvwb(\xii{i}).
+\]
+This is the \term{likelihood}: a function of the parameters, not of the data.
+
+\textbf{Step 4: take logarithms.} The product of $m$ numbers below $1$
+underflows for any realistic $m$, and products are awkward to differentiate.
+Since $\ln$ is increasing, maximising $\ln\mathcal{L}$ maximises $\mathcal{L}$:
+\[
+  \ln\mathcal{L}(\vw,b) \;=\; \sum_{i=1}^{m}
+    \Bigl[\yii{i}\ln f^{(i)} + (1-\yii{i})\ln\bigl(1-f^{(i)}\bigr)\Bigr].
+\]
+
+\textbf{Step 5: negate and average.} Optimizers minimise, and dividing by $m$
+makes the cost comparable across training sets of different sizes, exactly as in
+\cref{ch:ch02}:
+\[
+  J(\vw,b) \;=\; -\frac{1}{m}\ln\mathcal{L}(\vw,b)
+  \;=\; -\frac{1}{m}\sum_{i=1}^{m}
+    \Bigl[\yii{i}\ln f^{(i)} + (1-\yii{i})\ln\bigl(1-f^{(i)}\bigr)\Bigr].
+\]
+Nothing was chosen along the way except the model's own probabilistic
+assumption. The cost was not designed; it was deduced.
+\end{derivation}
+
+\begin{defbox}{Logistic loss}
+The \term{logistic loss}, or \term{binary cross-entropy}, of a single prediction
+is
+\[
+  \loss(f, y) \;=\;
+  \begin{cases}
+    -\ln f       & \text{if } y = 1,\\[2pt]
+    -\ln(1-f)    & \text{if } y = 0,
+  \end{cases}
+\]
+or, equivalently and in one line,
+\[
+  \loss(f,y) = -y\ln f - (1-y)\ln(1-f),
+\]
+and the cost is its average over the training set,
+$J(\vw,b) = \frac1m\sum_{i} \loss\bigl(f^{(i)}, \yii{i}\bigr)$.
+\end{defbox}
+
+The two-case form is the one to reason with and the one-line form the one to
+implement. Read the two cases:
 
 \begin{itemize}
-  \item Why Squared Error Fails
-  \item The Sigmoid Function
-  \item Decision Boundaries
-  \item The Logistic Loss from Maximum Likelihood
-  \item Gradient Descent for Logistic Regression
-  \item Choosing a Threshold
+  \item If $y = 1$, the loss is $-\ln f$. It is $0$ when $f = 1$, about $0.69$
+        when $f = \tfrac12$, and rises without bound as $f \to 0$: predicting
+        $0.001$ for a positive example costs $6.91$, and predicting $0$ exactly
+        would cost infinity.
+  \item If $y = 0$, the loss is $-\ln(1-f)$, the mirror image.
 \end{itemize}
+
+\begin{keyinsight}{The loss is unbounded, and that is the point}
+Squared error caps the penalty for a confidently wrong prediction at $\tfrac12$;
+the logistic loss lets it grow without limit. That is precisely what makes the
+gradient survive into the tails, and it is why a logistic model, unlike the
+least-squares line of \cref{fig:linreg-fails}, refuses to be confidently wrong
+about a training example if any parameters can avoid it.
+
+A useful reference value: at the origin every $f^{(i)} = \tfrac12$, so
+$J = -\ln\tfrac12 = \ln 2 = 0.693147$, whatever the data. A trained classifier
+whose cost is not clearly below $0.693$ has learned nothing that a coin could
+not have told you.
+\end{keyinsight}
+
+\begin{researchspotlight}{Cox (1958) --- The Regression Analysis of Binary Sequences}
+\textbf{The problem.} Statisticians had regression for continuous responses and
+contingency tables for categorical ones, but no satisfactory way to relate a
+binary outcome to several continuous explanatory variables at once. Fitting a
+straight line to a $0/1$ response gave fitted values outside $[0,1]$ and
+non-constant variance, as \cref{sec:linreg-fails} shows.
+
+\textbf{The idea.} Model not the probability but its \emph{logit},
+$\ln\{p/(1-p)\}$, as a linear function of the explanatory variables. The logit
+transformation was already in use in bioassay; what was missing, and what Cox
+supplied, was its treatment as a regression with several explanatory variables.
+The logit maps $(0,1)$ onto the whole real line, so a linear model on that scale
+can never produce an impossible probability, and the coefficients read as
+multiplicative effects on the odds.
+
+\textbf{The result.} Cox developed the estimation theory for this model --- the
+maximum-likelihood derivation of \cref{sec:logistic-loss} --- together with its
+large-sample properties and worked applications. Logistic regression became, and
+remains, the standard tool for binary outcomes in epidemiology, credit scoring
+and the social sciences.
+
+\textbf{Why it is here.} The model of this chapter is Cox's, unchanged. What
+machine learning added was scale and an optimizer: where Cox solved the
+likelihood equations by Newton's method on a handful of variables, we minimise
+the same objective by gradient descent on millions. The single logistic unit is
+also the building block of \cref{ch:ch08} --- a neural network is, at its
+simplest reading, a stack of these.
+\parencite{cox1958}
+\end{researchspotlight}
+
+\section{Convexity}
+\label{sec:logistic-convexity}
+
+Deducing the cost would be of limited comfort if the result were as hard to
+minimise as the one it replaced. It is not.
+
+\begin{derivation}{The logistic cost is convex}
+Write $z = \vw\cdot\vx + b$ and $f = \gsig(z)$, and consider the loss on one
+example as a function of $z$ alone.
+
+\textbf{Step 1: the first derivative, both cases at once.} For $y = 1$,
+$\loss = -\ln \gsig(z)$, so using $\gsig' = \gsig(1-\gsig)$,
+\[
+  \frac{\dd \loss}{\dd z} = -\frac{\gsig'(z)}{\gsig(z)}
+  = -\bigl(1-\gsig(z)\bigr) = f - 1 .
+\]
+For $y = 0$, $\loss = -\ln\bigl(1-\gsig(z)\bigr)$, so
+\[
+  \frac{\dd \loss}{\dd z} = \frac{\gsig'(z)}{1-\gsig(z)} = \gsig(z) = f - 0 .
+\]
+Both cases are $f - y$. This cancellation --- the sigmoid's derivative in the
+numerator against the logarithm's in the denominator --- is the reason the two
+choices belong together, and it is why the gradient of
+\cref{sec:gd-logistic} is so simple.
+
+\textbf{Step 2: the second derivative.}
+\[
+  \frac{\dd^2 \loss}{\dd z^2} = \frac{\dd f}{\dd z}
+  = f(1-f) \;>\; 0 \quad\text{for every } z,
+\]
+strictly, since $0 < f < 1$. So $\loss$ is a strictly convex function of $z$.
+
+\textbf{Step 3: from $z$ to the parameters.} The map $(\vw,b)\mapsto z$ is
+affine, and a convex function composed with an affine map is convex. Writing
+$\tilde{\vx} = (1, \vx)$ and $\theta = (b,\vw)$ so that $z = \theta\cdot\tilde{\vx}$,
+the Hessian of the cost is
+\[
+  H \;=\; \frac1m\sum_{i=1}^{m} f^{(i)}\bigl(1-f^{(i)}\bigr)\,
+          \tilde{\vx}^{(i)}\bigl(\tilde{\vx}^{(i)}\bigr)^{\mathsf{T}} .
+\]
+For any direction $\mathbf{v}$,
+\[
+  \mathbf{v}^{\mathsf{T}} H \mathbf{v}
+  = \frac1m\sum_{i=1}^{m} f^{(i)}\bigl(1-f^{(i)}\bigr)
+    \bigl(\tilde{\vx}^{(i)}\!\cdot\mathbf{v}\bigr)^2 \;\ge\; 0 ,
+\]
+a sum of non-negative terms. So $H$ is positive semi-definite everywhere and $J$
+is convex. It is \emph{strictly} convex --- and the minimum therefore unique ---
+exactly when the vectors $\tilde{\vx}^{(i)}$ span $\Real{n+1}$, which is the
+same full-rank condition that made $\Xmat^{\mathsf{T}}\Xmat$ invertible in
+\cref{sec:singular}.
+\end{derivation}
+
+Evaluated over a $201\times201$ grid of $(b,w)$ on T7, the smallest eigenvalue of
+the logistic Hessian is $1.3\times10^{-10}$ --- zero to within rounding, and
+never negative, in contrast to the $-0.331$ found for squared error.
+
+\begin{keyinsight}{What is preserved, and what is lost}
+Convexity means everything \cref{ch:ch03} promised still holds: no local minima
+that are not global, no dependence on initialisation, and a divergence threshold
+$\alpha < 2/\lambda_{\max}$ that means what it meant before.
+
+One thing is lost. The linear-regression cost was a \emph{quadratic}, which is
+why setting its gradient to zero gave the normal equation of
+\cref{sec:normal-equation} and a closed-form answer. The logistic cost is convex
+but not quadratic: $\grad J = \mathbf{0}$ is a system of transcendental
+equations with no solution in elementary functions. For logistic regression
+there is no closed form, and iteration is not a convenience but the only option.
+\end{keyinsight}
+
+\section{Gradient Descent for Logistic Regression}
+\label{sec:gd-logistic}
+
+\begin{derivation}{The gradient}
+By Step 1 of the previous derivation, $\partial \loss/\partial z = f - y$, and by
+the chain rule with $z = \vw\cdot\vx + b$,
+\[
+  \frac{\partial z}{\partial w_j} = x_j, \qquad \frac{\partial z}{\partial b} = 1 .
+\]
+Averaging over the training set,
+\[
+  \frac{\partial J}{\partial w_j}
+  = \frac1m\sum_{i=1}^{m}\bigl(f^{(i)}-\yii{i}\bigr)\xjj{i}{j},
+  \qquad
+  \frac{\partial J}{\partial b}
+  = \frac1m\sum_{i=1}^{m}\bigl(f^{(i)}-\yii{i}\bigr),
+\]
+or, in the vector form of \cref{sec:vector-form},
+\[
+  \grad_{\vw} J = \frac1m \Xmat^{\mathsf{T}}(\mathbf{f}-\vy),
+  \qquad
+  \frac{\partial J}{\partial b} = \frac1m \mathbf{1}^{\mathsf{T}}(\mathbf{f}-\vy),
+  \qquad \mathbf{f} = \gsig(\Xmat\vw + b\mathbf{1}).
+\]
+\end{derivation}
+
+Compare that with \cref{eq:vector-gradient}, the gradient for linear regression.
+They are the same expression. Only the definition of $\mathbf{f}$ has changed,
+from $\Xmat\vw + b\mathbf{1}$ to $\gsig(\Xmat\vw + b\mathbf{1})$.
+
+\begin{algorithmbox}{Batch gradient descent for logistic regression}
+\textbf{Input:} $\Xmat$ ($m\times n$), $\vy \in \{0,1\}^m$, learning rate
+$\alpha$, iterations $N$.\\
+\textbf{Output:} parameters $\vw, b$.
+
+\begin{enumerate}\setlength{\itemsep}{1pt}
+  \item Standardise every column of $\Xmat$, storing $\mu_j$ and $\sigma_j$
+        (\cref{sec:scaling-practice}).
+  \item $\vw \leftarrow \mathbf{0}$, \quad $b \leftarrow 0$.
+  \item \textbf{for} $k = 1,\dots,N$:
+  \begin{enumerate}\setlength{\itemsep}{1pt}
+    \item $\mathbf{f} \leftarrow \gsig(\Xmat\vw + b\mathbf{1})$
+          \hfill \emph{($O(mn)$)}
+    \item $\mathbf{r} \leftarrow \mathbf{f} - \vy$
+    \item $\vw \leftarrow \vw - \dfrac{\alpha}{m}\Xmat^{\mathsf{T}}\mathbf{r}$,
+          \quad
+          $b \leftarrow b - \dfrac{\alpha}{m}\sum_i r^{(i)}$
+          \hfill \emph{(simultaneously)}
+  \end{enumerate}
+  \item \textbf{return} $\vw, b$.
+\end{enumerate}
+
+\textbf{Cost per iteration:} $O(mn)$, identical to
+\cref{ch:ch04}. The only added work is one sigmoid per example per iteration.
+\end{algorithmbox}
+
+\begin{lstlisting}[style=pythonml,caption={Logistic regression. Line~6 is the
+only line that differs from the linear-regression implementation of
+\cref{ch:ch04}.}]
+def sigmoid(z):
+    return 1.0 / (1.0 + np.exp(-z))
+
+def fit_logistic(X, y, alpha, iters):
+    m, n = X.shape
+    w, b = np.zeros(n), 0.0
+    for _ in range(iters):
+        f  = sigmoid(X @ w + b)            # (m,)  the only change
+        r  = f - y                         # (m,)  same residual as before
+        gw = (X.T @ r) / m                 # (n,)
+        gb = r.mean()                      # scalar
+        w, b = w - alpha * gw, b - alpha * gb     # simultaneous
+    return w, b
+\end{lstlisting}
+
+\begin{pitfall}{Same update rule does not mean same algorithm}
+Students routinely conclude from the identical formula that logistic regression
+``is'' linear regression. It is not, and the differences are all examinable.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}L{2.7cm}L{3.9cm}L{3.9cm}@{}}
+\toprule
+ & \textbf{linear regression} & \textbf{logistic regression}\\
+\midrule
+$f$        & $\vw\cdot\vx + b$ & $\gsig(\vw\cdot\vx + b)$\\
+range of $f$ & all of $\R$ & $(0,1)$\\
+cost $J$   & squared error & logistic loss\\
+$J$ is     & quadratic and convex & convex, not quadratic\\
+closed form & the normal equation & none exists\\
+output means & the predicted value & $\Prob(y=1\mid\vx)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The formula is shared because both costs were derived from a probabilistic model
+in the same exponential family, and in both the derivative of the loss with
+respect to $z$ works out to $f - y$. That is a real and deep coincidence, not a
+superficial one --- but it is a coincidence about the \emph{gradient}, and two
+different functions can have gradients of the same shape.
+\end{pitfall}
+
+\begin{workedexample}{Two iterations by hand on T7}
+Eight examples, one feature, $\alpha = 0.2$, starting from $w = b = 0$.
+
+\textbf{Iteration 1.} At $w = b = 0$ every $z^{(i)} = 0$, so every
+$f^{(i)} = \gsig(0) = 0.5$ and the cost is $J = \ln 2 = 0.693147$ exactly.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{8}{r}r@{}}
+\toprule
+$x$        & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$ & sum\\
+$y$        & $0$ & $1$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$ & $4$\\
+$f$        & $0.5$ & $0.5$ & $0.5$ & $0.5$ & $0.5$ & $0.5$ & $0.5$ & $0.5$ & \\
+$f-y$      & $0.5$ & $-0.5$ & $0.5$ & $0.5$ & $0.5$ & $-0.5$ & $-0.5$ & $-0.5$ & $0$\\
+$(f-y)x$   & $0.5$ & $-1.0$ & $1.5$ & $2.0$ & $2.5$ & $-3.0$ & $-3.5$ & $-4.0$ & $-5.0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Four of the eight are positive, so the residuals cancel and
+$\partial J/\partial b = 0/8 = 0$. The weighted sum gives
+$\partial J/\partial w = -5.0/8 = -0.625$, and the update is
+\[
+  w := 0 - 0.2\,(-0.625) = 0.125, \qquad b := 0 - 0.2\,(0) = 0 .
+\]
+The cost falls to $J = 0.663502$.
+
+\textbf{Iteration 2.} Now $z^{(i)} = 0.125\,\xii{i}$, so the predictions spread
+out --- but all of them are above $\tfrac12$, since $b = 0$ and every $x$ is
+positive:
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{8}{r}r@{}}
+\toprule
+$x$      & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$ & sum\\
+$f$      & $0.5312$ & $0.5622$ & $0.5927$ & $0.6225$ & $0.6514$ & $0.6792$
+         & $0.7058$ & $0.7311$ & \\
+$f-y$    & $0.5312$ & $-0.4378$ & $0.5927$ & $0.6225$ & $0.6514$ & $-0.3208$
+         & $-0.2942$ & $-0.2689$ & $1.0759$\\
+$(f-y)x$ & $0.5312$ & $-0.8756$ & $1.7780$ & $2.4898$ & $3.2568$ & $-1.9249$
+         & $-2.0595$ & $-2.1515$ & $1.0442$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+So $\partial J/\partial b = 1.0759/8 = 0.134486$ and
+$\partial J/\partial w = 1.0442/8 = 0.130526$, and
+\[
+  \begin{aligned}
+    b &:= 0 - 0.2\,(0.134486) = -0.026897,\\
+    w &:= 0.125 - 0.2\,(0.130526) = 0.098895 ,
+  \end{aligned}
+\]
+with $J = 0.659160$. Both derivatives are now positive: the first step pushed
+every prediction above $\tfrac12$, over-predicting on the four benign cases, and
+the second step pulls the whole curve back down --- $b$ below zero, $w$ slightly
+in from $0.125$. This is the elongated-valley behaviour of \cref{ch:ch05}, and
+the next subsection measures it.
+\end{workedexample}
+
+\subsection{Everything from Chapter 5 still applies}
+
+Run that same descent to convergence and it takes $1{,}461$ iterations, which is
+a great many for eight points and two parameters. The reason is the one
+\cref{sec:scaling-problem} identified, and the cure is the same:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+features & $\lambda_{\min}$ & $\lambda_{\max}$ & $\kappa$ & $\alpha^\star$
+         & iterations\\
+\midrule
+raw           & $0.04990$ & $6.57510$ & $131.8$ & $0.3042$ & $1{,}461$\\
+standardised  & $0.25000$ & $0.25000$ & $1.0$   & $8.0000$ & $7$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+(Eigenvalues of the Hessian at the origin; each run uses $\alpha$ at $90\%$ of
+its own stability limit and stops when the gradient norm falls below $10^{-6}$.)
+
+The standardised condition number is exactly $1$, and for the same reason as in
+\cref{sec:feature-scaling}: at the origin every $f^{(i)} = \tfrac12$, so every
+weight $f(1-f)$ in the Hessian equals $\tfrac14$, and $H = \tfrac14 R$ where $R$
+is the correlation matrix of the standardised design --- the identity, for a
+single feature. The standardised optimum is $(b,w) = (0,\,1.361220)$, and
+mapping back through $w = w_z/\sigma$, $b = b_z - w_z\mu/\sigma$ with
+$\mu = 4.5$ and $\sigma = 2.291288$ recovers $w = 0.594085$ and $b = -2.673382$,
+agreeing with the raw fit to six figures.
+
+\begin{workedexample}{The fitted model on T7}
+Converged parameters: $b = -2.673380$, $w = 0.594084$, $J = 0.528099$.
+The decision boundary is $x^\star = -b/w = 4.5000$ cm, and each extra centimetre
+multiplies the odds of malignancy by $e^{0.594084} = 1.8114$.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{8}{r}@{}}
+\toprule
+$x$ (cm)         & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$\\
+$y$              & $0$ & $1$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$\\
+$f(x)$           & $0.1111$ & $0.1846$ & $0.2909$ & $0.4263$ & $0.5737$
+                 & $0.7091$ & $0.8154$ & $0.8889$\\
+prediction at $0.5$ & $0$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$ & $1$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Six of eight correct. The two errors are the two examples that broke the
+monotone pattern: the malignant $2$~cm tumour, which the model rates $0.1846$,
+and the benign $5$~cm one, which it rates $0.5737$. Both are close calls in the
+model's own terms, and \cref{sec:threshold} shows that the threshold repairs the
+second for nothing and the first only at the price of three false alarms.
+\end{workedexample}
+
+\begin{pitfall}{Perfectly separable data has no maximum-likelihood fit}
+Delete the awkward $2$~cm malignancy from T7 and the remaining seven points are
+perfectly separated by $x = 4.5$. Now consider what maximum likelihood wants: it
+can always reduce the cost further by scaling $\vw$ and $b$ up, pushing every
+prediction closer to $0$ or $1$. The optimum is at infinity, the cost approaches
+$0$ but never reaches it, and gradient descent produces coefficients that grow
+for as long as you let it run:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+iterations & $b$ & $w$ & boundary & $J$\\
+\midrule
+$1{,}000$   & $-8.2117$  & $1.5282$ & $5.3733$ & $0.144837$\\
+$10{,}000$  & $-20.3079$ & $3.7119$ & $5.4710$ & $0.042809$\\
+$100{,}000$ & $-42.0652$ & $7.6646$ & $5.4882$ & $0.006149$\\
+$200{,}000$ & $-49.5789$ & $9.0306$ & $5.4901$ & $0.003121$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The boundary settles almost at once; the parameters never do.
+
+You will meet this on small, clean, or high-dimensional datasets, and the symptom
+is enormous coefficients with a suspiciously perfect training score. A solver
+that reports convergence is reporting that it hit its iteration limit. The fix is the
+penalty of \cref{ch:ch07}, which is why \tool{scikit-learn}'s
+\code{LogisticRegression} applies an L2 penalty by default; \code{penalty=None}
+turns it off and hands this failure straight back to you.
+\end{pitfall}
+
+\begin{researchspotlight}{Rosenblatt (1958) --- The Perceptron}
+\textbf{The problem.} Build a machine that learns to classify patterns from
+examples, without being programmed with the rule, and analyse when it will
+succeed.
+
+\textbf{The idea.} A single unit computes $z = \vw\cdot\vx + b$ and outputs a
+class by thresholding $z$ at zero --- the decision boundary of
+\cref{sec:decision-boundary}. Learning is an error-driven update: on a
+misclassified example, $\vw \leftarrow \vw + \eta(y-\yhat)\vx$; on a correct one,
+nothing.
+
+\textbf{The result.} The perceptron convergence theorem: if the training data is
+linearly separable, the procedure finds a separating hyperplane in finitely many
+updates. If it is not separable --- as T7 is not --- the procedure never settles.
+
+\textbf{Why it is here.} The perceptron and logistic regression have the same
+hypothesis space and the same decision boundary, and their updates differ in one
+respect: the perceptron thresholds first and then measures error, so
+$y - \yhat \in \{-1,0,1\}$, while logistic regression measures error before
+thresholding, so $y - f \in (-1,1)$. That single change is what buys a
+differentiable cost, a probability, convergence on non-separable data, and the
+possibility of stacking units into the networks of \cref{ch:ch08} --- where the
+hard threshold has to go, precisely because it has no useful derivative.
+\parencite{rosenblatt1958}
+\end{researchspotlight}
+
+\section{Choosing a Threshold}
+\label{sec:threshold}
+
+The threshold $0.5$ has been used throughout without an argument for it, and
+there is none. It is the value at which the two classes are equally probable
+under the model, which makes it the right choice only when the two kinds of
+mistake cost the same. In screening they emphatically do not.
+
+The two mistakes have names. A \term{false positive} is a negative example
+predicted positive --- a healthy patient recalled for a biopsy. A
+\term{false negative} is a positive example predicted negative --- a
+malignancy sent home. Sweeping the threshold over the fitted T7 model trades one
+against the other:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}rrrrrrrr@{}}
+\toprule
+threshold & TP & FP & FN & TN & accuracy & precision & recall\\
+\midrule
+$0.10$ & $4$ & $4$ & $0$ & $0$ & $0.500$ & $0.500$ & $1.000$\\
+$0.15$ & $4$ & $3$ & $0$ & $1$ & $0.625$ & $0.571$ & $1.000$\\
+$0.30$ & $3$ & $2$ & $1$ & $2$ & $0.625$ & $0.600$ & $0.750$\\
+$0.50$ & $3$ & $1$ & $1$ & $3$ & $0.750$ & $0.750$ & $0.750$\\
+$0.60$ & $3$ & $0$ & $1$ & $4$ & $0.875$ & $1.000$ & $0.750$\\
+$0.70$ & $3$ & $0$ & $1$ & $4$ & $0.875$ & $1.000$ & $0.750$\\
+$0.85$ & $1$ & $0$ & $3$ & $4$ & $0.625$ & $1.000$ & $0.250$\\
+$0.90$ & $0$ & $0$ & $4$ & $4$ & $0.500$ & --- & $0.000$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three things in that table are worth stopping on.
+
+First, $0.5$ is not even the most accurate threshold. Raising it to $0.6$ turns
+the benign $5$~cm tumour from a false positive into a correct rejection and
+costs nothing, lifting accuracy from $0.750$ to $0.875$. The default was never
+optimised for anything.
+
+Second, no threshold gets everything right. The malignant $2$~cm tumour is rated
+$0.1846$, below four benign cases; catching it requires a threshold under
+$0.1846$, which by then admits three false positives. Thresholds reorder
+decisions, they do not improve the model. Improving the model means better
+features --- a texture score, as in T8 --- or a richer hypothesis space.
+
+Third, the sensible way to choose is to price the two errors. If missing a
+malignancy is judged as bad as ten unnecessary biopsies, minimise
+$10 \times \text{FN} + 1 \times \text{FP}$. On this model that quantity is
+minimised, at a cost of $3$, by any threshold in $(0.1111, 0.1846]$ --- the gap
+between the predicted probabilities of the $1$~cm and $2$~cm tumours --- so
+$t = 0.15$ is as good a choice as any, catching every malignancy at the price of
+three false alarms.
+
+\begin{keyinsight}{The model and the decision rule are separate}
+Fitting produces a probability. Turning it into an action requires a threshold,
+and the threshold is not part of the learning problem: it encodes the relative
+cost of the two errors, which is a matter for the people who bear them, and it
+can be changed after deployment without retraining.
+
+Keep the two apart. Report the probabilities, choose the threshold from the
+costs, and never let a library's default of $0.5$ stand in for a decision nobody
+made. \Cref{ch:ch10} gives the metrics for judging the probabilities themselves,
+and \cref{ch:ch11} the ones for judging thresholded decisions when the classes
+are heavily imbalanced.
+\end{keyinsight}
+
+\begin{ethicsnote}{Who bears the false negatives?}
+A threshold is a distributive decision. Moving it from $0.5$ to $0.15$ on the
+model above converts one missed cancer into three unnecessary biopsies --- and
+those are different people. The cost ratio that justifies the move is a value
+judgement about whose harm counts and how much, dressed as a hyperparameter.
+
+Two things follow for practice. State the ratio explicitly, in the model's
+documentation, alongside who chose it; a threshold recorded only as
+\code{0.5} in source code is a policy nobody can audit. And check the error rates
+\emph{separately for each group the model will be applied to}: a single threshold
+applied to a model whose probabilities are better calibrated for one group than
+another silently gives the groups different error rates.
+\Cref{ch:ch11} takes this up properly, with the measurements that make it
+concrete.
+\end{ethicsnote}
+
+\begin{labbox}{Lab 6 --- Logistic regression from scratch}
+Implement \code{sigmoid(z)} without overflow --- \code{np.exp(-z)} overflows for
+$z$ around $-750$, so branch on the sign --- and verify
+$\gsig'(z) = \gsig(z)(1-\gsig(z))$ against a finite-difference estimate to six
+decimal places. Implement the logistic cost and gradient, and check the gradient
+the same way.
+
+Reproduce the T7 numbers: $J = \ln 2$ at the origin, the two hand-worked
+iterations of \cref{sec:gd-logistic}, the converged $(b,w) =
+(-2.673380,\,0.594084)$, and the boundary at exactly $4.5$~cm. Then fit the same
+data with squared error from $(b,w) = (4,-1)$ and confirm that after $1{,}000$
+iterations the sign of $w$ is still wrong. Finally, reproduce the threshold table
+of \cref{sec:threshold} and plot precision and recall against the threshold on
+one pair of axes.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item Classification needs a hypothesis space bounded to $[0,1]$ and a cost
+        that charges for being wrong rather than far. Least squares on a $0/1$
+        target fails both: it predicts $2.94$ for a $25$~cm tumour, and one
+        distant correctly-classified example moves its boundary from $4.50$ to
+        $5.57$.
+  \item The sigmoid $\gsig(z) = 1/(1+e^{-z})$ maps $\R$ onto $(0,1)$, passes
+        through $(0,\tfrac12)$, satisfies $1-\gsig(z) = \gsig(-z)$, and has
+        derivative $\gsig' = \gsig(1-\gsig)$, whose maximum is $\tfrac14$ at
+        $z=0$.
+  \item The model $\fvwb(\vx) = \gsig(\vw\cdot\vx+b)$ is read as
+        $\Prob(y=1\mid\vx)$. Inverting the sigmoid shows it is a linear model of
+        the log-odds, so $e^{w_j}$ is the factor by which one unit of $x_j$
+        multiplies the odds --- $1.8114$ per centimetre on T7.
+  \item The decision boundary at threshold $\tfrac12$ is $\vw\cdot\vx + b = 0$,
+        a hyperplane, and a property of the parameters alone. Polynomial
+        features bend it into circles and beyond, at the cost of
+        \cref{ch:ch07}'s problem.
+  \item Squared error on a sigmoid model is non-convex --- both Hessian
+        eigenvalues are negative at $(b,w) = (4,-1)$ on T7 --- and its gradient
+        vanishes exactly where the model is most wrong: $0.000998$ for a
+        prediction of $0.001$ against a target of $1$.
+  \item Maximum likelihood on the model's own assumption yields the logistic
+        loss $\loss = -y\ln f - (1-y)\ln(1-f)$ with no further choices. It is
+        unbounded above, which is what keeps the gradient alive in the tails.
+        At the origin $J = \ln 2 = 0.693147$ for every dataset.
+  \item The logistic cost is convex, because $\dd^2\loss/\dd z^2 = f(1-f) > 0$
+        and $z$ is affine in the parameters, and strictly convex when the
+        augmented design matrix has full rank. It is not quadratic, so there is
+        no normal equation and iteration is compulsory.
+  \item The gradient is $\frac1m\Xmat^{\mathsf{T}}(\mathbf{f}-\vy)$: the same
+        expression as linear regression with a different $\mathbf{f}$. Same form,
+        different model, different cost, different guarantees.
+  \item Feature scaling matters as much as before. On T7, standardising takes
+        $\kappa$ from $131.8$ to $1.0$ and convergence from $1{,}461$ iterations
+        to $7$.
+  \item The threshold is a separate decision from the fit, chosen from the
+        relative cost of false positives and false negatives. On T7, $0.6$ is
+        more accurate than $0.5$, and $0.15$ is right if one missed malignancy
+        is worth ten false alarms.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Give two independent reasons why a straight line fitted by least squares is
+unsuitable for a binary target.
+
+\sq State the sigmoid function and its four defining properties.
+
+\sq Show that $1 - \gsig(z) = \gsig(-z)$, and say what this implies about
+swapping the labels of the two classes.
+
+\sq What is the log-odds, and in what sense is logistic regression linear?
+
+\sq Define the decision boundary of a logistic model, and explain why it is a
+property of the parameters and not of the data.
+
+\sq Why does the sigmoid disappear from the decision rule when the threshold is
+$\tfrac12$? What happens to the rule at a threshold of $0.7$?
+
+\sq Give two reasons squared error is the wrong cost for a sigmoid model, one
+about the shape of the cost and one about its gradient.
+
+\sq Write the logistic loss in its two-case form and in its one-line form, and
+show they agree for $y = 0$ and $y = 1$.
+
+\sq What is the value of the logistic cost at $\vw = \mathbf{0}$, $b = 0$, and
+why does it not depend on the data?
+
+\sq Name three respects in which logistic regression differs from linear
+regression, given that their gradient formulas are identical.
+
+\sq A fitted logistic model has $w_j = -0.7$ for a feature measured in years.
+State the effect of one additional year on the odds, and on the probability.
+
+\exercisesection{Analytical Problems}
+
+\ap Derive $\gsig'(z) = \gsig(z)(1-\gsig(z))$ from the definition, and hence show
+that $\gsig'$ attains its maximum $\tfrac14$ at $z=0$ and nowhere else.
+
+\ap Starting from $\Prob(y\mid\vx) = f^{y}(1-f)^{1-y}$, derive the logistic cost
+of \cref{sec:logistic-loss} in full, justifying the logarithm, the negation and
+the division by $m$.
+
+\ap Show that $\partial \loss/\partial z = f - y$ for both $y=0$ and $y=1$, and
+hence derive $\partial J/\partial w_j$ and $\partial J/\partial b$.
+
+\ap Prove that the logistic cost is convex by showing that its Hessian is
+$\frac1m\sum_i f^{(i)}(1-f^{(i)})\tilde{\vx}^{(i)}(\tilde{\vx}^{(i)})^{\mathsf{T}}$
+and that this matrix is positive semi-definite. State the condition under which
+it is positive definite, and relate it to \cref{sec:singular}.
+
+\ap On T7 with $\alpha = 0.2$ and $w = b = 0$, verify by hand that
+$\partial J/\partial b = 0$ and $\partial J/\partial w = -0.625$, and carry out
+the first update. Then explain, without computing it, why
+$\partial J/\partial b$ must be positive at the next step.
+
+\ap A logistic model has $\vw = (2,-1)$ and $b = -4$. Write the decision boundary
+in the form $x_2 = a + c\,x_1$, state which side is predicted positive, and find
+the probability the model assigns to $\vx = (3, 1)$.
+
+\ap Show that if the training data is linearly separable then the logistic cost
+has no minimiser: for any $(\vw,b)$ that separates it, $J(2\vw, 2b) < J(\vw,b)$.
+What does this imply about a solver that reports convergence on such data?
+
+\exercisesection{Design Problems}
+
+\dpr A bank asks you to build a model that decides which loan applications to
+approve. Say what your model should output, what the threshold should be chosen
+from, who should choose it, and what you would record so that the decision can
+be audited two years later.
+
+\dpr You are given a screening model whose accuracy is $99.2\%$ on a population
+in which $0.8\%$ of cases are positive. Explain what is wrong with that report,
+propose the measurements you would ask for instead, and describe the threshold
+analysis you would run before recommending deployment.
+
+\dpr A colleague's logistic regression returns coefficients of magnitude $10^{3}$
+and perfect training accuracy on $40$ examples with $60$ features. Diagnose the
+problem from this chapter alone, list the three checks you would run in order,
+and say what you expect each to show.
+
+\dpr Design the feature set for a logistic model predicting whether a customer
+will cancel a subscription this month. Propose eight features, say what each
+encodes, identify which need scaling and why, and state which pairs you would
+expect to be strongly correlated.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement a numerically stable \code{sigmoid} and verify the derivative
+identity against a central finite difference at $z = -40, -1, 0, 1, 40$.
+Explain why the naive implementation fails at $z = -800$ and yours does not.
+
+\pe Implement the logistic cost and gradient and check the gradient against a
+finite-difference estimate for a random $(\vw,b)$ on T8. Then reproduce the
+converged fit of \cref{sec:decision-boundary}: $b = -9.827806$,
+$w_1 = 0.931932$, $w_2 = 1.362882$, and the two misclassified points.
+
+\pe Reproduce the divergence experiment of \cref{sec:squared-error-fails}: run
+gradient descent on both costs from $(b,w) = (4,-1)$ with $\alpha = 0.2$ and
+plot both cost curves on logarithmic axes. Report the iteration at which each
+first attains $w > 0$.
+
+\pe Reproduce the conditioning table of \cref{sec:gd-logistic} for T7, raw and
+standardised, and confirm that mapping the standardised parameters back through
+$w = w_z/\sigma$, $b = b_z - w_z\mu/\sigma$ recovers the raw fit to six figures.
+
+\pe Fit a logistic model to T8 using the five quadratic features $x_1$, $x_2$,
+$x_1^2$, $x_2^2$ and $x_1x_2$, and plot the resulting boundary by evaluating the
+model on a grid and drawing its $0.5$ contour. Compare its training accuracy
+with the linear model's, and say which you would deploy and why.
+
+\exercisesection{Self-Test}
+
+\qz The sigmoid $\gsig(z) = 1/(1+e^{-z})$ has range: (a)~$[-1,1]$; (b)~$(0,1)$;
+(c)~$[0,1]$; (d)~all of $\R$.
+
+\qz The derivative of the sigmoid is: (a)~$\gsig(z)$; (b)~$\gsig(z)(1-\gsig(z))$;
+(c)~$1-\gsig(z)$; (d)~$e^{-z}$.
+
+\qz The output of a logistic model is interpreted as: (a)~the predicted class;
+(b)~$\Prob(y=1\mid\vx)$ under the model's assumption; (c)~the distance to the
+boundary; (d)~the residual.
+
+\qz Squared error applied to a sigmoid model gives a cost that is: (a)~convex;
+(b)~non-convex, with vanishing gradients in the tails; (c)~quadratic;
+(d)~undefined.
+
+\qz The logistic loss for $y=1$ is: (a)~$(f-1)^2$; (b)~$-\ln f$; (c)~$-\ln(1-f)$;
+(d)~$|f-1|$.
+
+\qz The logistic cost at $\vw = \mathbf{0}$, $b=0$ equals: (a)~$0$; (b)~$0.25$;
+(c)~$\ln 2 \approx 0.693$; (d)~it depends on the data.
+
+\qz Logistic regression has a closed-form solution analogous to the normal
+equation: (a)~yes, always; (b)~yes, when $\Xmat^{\mathsf{T}}\Xmat$ is invertible;
+(c)~no, because the cost is convex but not quadratic; (d)~no, because the cost
+is non-convex.
+
+\qz The decision boundary of a logistic model at threshold $\tfrac12$ is:
+(a)~$\gsig(\vw\cdot\vx+b) = 0$; (b)~$\vw\cdot\vx + b = 0$; (c)~$\vw\cdot\vx = 1$;
+(d)~determined by the training data alone.
+
+\qz Perfectly separable training data causes the fitted coefficients to:
+(a)~become zero; (b)~grow without bound; (c)~stay unchanged; (d)~become complex.
+
+\qz Raising the decision threshold from $0.5$ to $0.7$: (a)~always improves
+accuracy; (b)~can only raise precision and can only lower recall;
+(c)~retrains the model; (d)~changes the fitted parameters.
+
+\furtherreading
+
+\textcite{james2021} §4.1--4.3 is the primary reading for this chapter and covers
+it almost exactly: §4.2 gives the argument of \cref{sec:linreg-fails} against
+using linear regression for a binary response, and §4.3 develops the logistic
+model, the logit, maximum-likelihood estimation and the reading of coefficients
+as odds ratios, with a worked credit-default example that repays close study.
+Read §4.3.4 for the multiple-feature case alongside \cref{sec:decision-boundary}.
+\textcite{bishop2006} §4.3 is the supplementary treatment, and is worth the extra
+effort for two things this chapter states without proving in full. Its §4.2
+derives the sigmoid as the exact posterior of a natural class of probability
+models, which answers \emph{why} this squashing function and not another; and
+§4.3.3 derives the Hessian and the iteratively reweighted least squares
+algorithm --- Newton's method on the same cost --- which is how the fits quoted
+in \cref{sec:gd-logistic} were actually computed. §4.3.2 is the logistic model
+itself, including the severe over-fitting on linearly separable data that is
+this chapter's last pitfall.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch07} names the phenomenon circling since
+\cref{ch:ch05}'s degree-$9$ polynomial and this chapter's separable data ---
+overfitting --- and supplies its standard defence, regularization, for both
+models built so far.

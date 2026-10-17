@@ -120,10 +120,11 @@ A two-page notation table in the front matter lists every symbol with its first-
 
 ### A note on the page budgets
 
-The per-chapter page counts below were estimates made before any chapter existed. The five
-written so far came in at 24, 22, 20, 18 and 22 B5 pages against estimates of 30, 34, 38, 36 and
-34 — roughly **60% of estimate**, and settling near 21 pages per chapter once the template
-stabilised.
+The per-chapter page counts below were estimates made before any chapter existed. The six
+written so far came in at 24, 22, 20, 18, 22 and 31 B5 pages against estimates of 30, 34, 38, 36,
+34 and 40 — roughly **63% of estimate**. Chapters 1–5 settled near 21 pages once the template
+stabilised; Ch 6 is the first materially longer one, because it rebuilds the model, the cost and
+the decision rule in one chapter.
 The remaining estimates have *not* been revised downward individually, since the later chapters
 (neural networks, transformers, the systems part) are genuinely denser; but the whole-book figure
 above has been, from ~850 pages to ~650. Treat a chapter's number as an upper bound, not a target:
@@ -166,12 +167,12 @@ reading list, so exam preparation stays two books wide.
 | | 3 | Gradient Descent | 20 | **DONE** |
 | | 4 | Multiple Linear Regression and Vectorization | 18 | **DONE** |
 | | 5 | Making Gradient Descent Work | 22 | **DONE** |
-| **II — Classification and Generalization** | 6 | Logistic Regression | 40 | PLANNED |
-| | 7 | Overfitting and Regularization | 36 | PLANNED |
-| **III — Neural Networks** | 8 | Neural Networks: Representation and Forward Propagation | 40 | PLANNED |
-| | 9 | Training Neural Networks | 44 | PLANNED |
-| **IV — Making Learning Systems Work** | 10 | Evaluation, Bias and Variance | 38 | PLANNED |
-| | 11 | Error Analysis, Data, Skew, and Ethics | 36 | PLANNED |
+| **II — Classification and Generalization** | 6 | Logistic Regression | 40 | **DONE** (31) |
+| | 7 | Overfitting and Regularization | 36 | **DONE** (26) |
+| **III — Neural Networks** | 8 | Neural Networks: Representation and Forward Propagation | 40 | **DONE** (22) |
+| | 9 | Training Neural Networks | 44 | **DONE** (28) |
+| **IV — Making Learning Systems Work** | 10 | Evaluation, Bias and Variance | 38 | **DONE** (22) |
+| | 11 | Error Analysis, Data, Skew, and Ethics | 36 | **DONE** (20) |
 | | 12 | Decision Trees and Ensembles | 34 | PLANNED |
 | **V — Unsupervised Learning** | 13 | Clustering with *k*-Means | 30 | PLANNED |
 | | 14 | Anomaly Detection | 30 | PLANNED |
@@ -259,15 +260,28 @@ scaling the test set with test-set statistics; `algorithmbox` z-score scaling; `
 in the *parameters*, not the features".
 Reading: ISLR §3.3, §7.1; Bishop §1.1, §3.1.
 
-### Ch 6 — Logistic Regression
+### Ch 6 — Logistic Regression  *(done)*
 Why squared error fails for classification: the non-convex cost, drawn · the sigmoid and its
 derivative, derived (needed again in Ch 9) · output as a probability · decision boundaries, linear
 then polynomial · the logistic loss from maximum likelihood, derived in full · the simplified
 one-line loss · convexity · gradient descent, and why the update has the same *form* as linear
 regression · thresholds other than 0.5.
-Boxes: `derivation` ×2; `workedexample` two gradient steps by hand; `pitfall` "same update rule ⇒
-same algorithm"; `researchspotlight` Cox (1958), Rosenblatt (1958).
-Reading: ISLR §4.1–4.3; Bishop §4.3.
+Boxes: `derivation` ×4; `workedexample` ×3, including two gradient steps by hand; `pitfall` ×4,
+one of them "same update rule ⇒ same algorithm"; `researchspotlight` Cox (1958), Rosenblatt
+(1958); `ethicsnote` on who bears the false negatives.
+Reading: ISLR §4.1–4.3; Bishop §4.2, §4.3.2–4.3.3.
+
+**Deviation from this outline, as written.** "Why squared error fails" is split in two, because the
+non-convexity argument cannot be made before the sigmoid model exists. §6.2 gives the failure of
+*linear regression* on a binary target (out-of-range outputs; one distant, correctly-classified
+example dragging the boundary from 4.50 to 5.57), and §6.5 the failure of *squared error on the
+sigmoid model* (negative Hessian eigenvalues; a vanishing gradient in the tails). The chapter file
+records this in a header comment.
+
+New datasets, both defined in the chapter and belonging in Appendix D: **T7**, eight tumours by
+diameter with one label inversion — chosen so that Σy = m/2 makes the first gradient step
+hand-computable and the fitted boundary lands on exactly 4.5 cm; **T8**, twenty tumours by size
+and texture, with genuine class overlap so the fit stays finite.
 
 ### Ch 7 — Overfitting and Regularization
 The three-panel under/just-right/over figure with matching numbers · why more parameters buy
@@ -605,6 +619,29 @@ Ch 18–19 and Part IX have no lecture slot in the current 9-week plan. They are
 worth reading beyond the course, and they are the natural home for a term project. If the syllabus
 does expand to 12 weeks (gap G1), they are the three weeks to add.
 
+
+### Notes from writing Ch 7–11 (2026-10-17)
+
+- **New datasets** (defined in the chapters; belong in Appendix D): **T9**, ten training and nine
+  test points from `0.5x² − 2x + 6` plus noise σ = 1.5, printed in full in Ch 7; **T10**, fifty
+  points from `sin 2x + 0.5x` plus noise σ = 0.25, generated by a three-line seeded listing in
+  Ch 10 and shared with the companion Week 6 lecture. Ch 8–9 reuse the lecture's 2-3-1 network
+  (N231) so book and slides agree number for number. Ch 11's "screening model S" is analytic
+  (two unit-variance normals, prevalence 0.5%), so its rates are exact.
+- **Additions beyond the outline**: Ch 10 has a calibration section (reliability table, Brier
+  score, log loss), because Ch 6 promised it; Ch 10 also measures the bias–variance terms by
+  simulation. Ch 8 uses an XOR network (hand-set OR/NAND/AND) as its 2-2-1 hand-worked example.
+- **`\va` added to `mlbook.sty`** (bold activation vector), matching the slide macro name.
+- **G9** Ch 6, pitfall "Perfectly separable data has no maximum-likelihood fit", says the seven
+  points without the 2 cm malignancy are "perfectly separated by x = 4.5". They are not: the 5 cm
+  tumour is benign, so the separating gap is (5, 6), as the pitfall's own table (boundary → 5.49)
+  shows. Ch 7 states the correct interval. Ch 6 not edited — raise with the author.
+- **G10** Build environment: TeX Live is now 2026basic, but user-mode packages installed for
+  2025 in `~/Library/texmf` (notably `biblatex` 3.20 and `etoolbox` 2.5k) shadow the system
+  versions and fail with "Argument of \reserved@a has an extra }". Workaround used while writing:
+  `TEXINPUTS=/usr/local/texlive/2026basic/texmf-dist/tex/latex/biblatex//:/usr/local/texlive/2026basic/texmf-dist/tex/latex/etoolbox//: make`.
+  Permanent fix: remove or rename those two directories under `~/Library/texmf/tex/latex/`.
+
 ### Known gaps to resolve (raise, do not silently fix)
 
 - **G1** `plan.md` headers say 12 weeks; 9 weeks of content are listed. Ch 12, Ch 18–19 and
@@ -633,10 +670,10 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
 |---|---|---|
 | **M0** | Scaffolding | `mlbook.sty`, `main.tex`, `preface.tex`, `notation.tex`, `Makefile`, `bibliography.bib`, `verify/`, chapter stubs. Builds. **DONE** |
 | **M1** | Part I (Ch 1–5) | **COMPLETE.** Pattern-setting part; the chapter template is frozen here. |
-| **M2** | Part II (Ch 6–7) | Completes the linear-model core. |
+| **M2** | Part II (Ch 6–7) | **COMPLETE.** Completes the linear-model core. |
 | **M3** | Appendices A–B | Written early; Ch 8 onward leans on them. |
-| **M4** | Part III (Ch 8–9) | Heaviest derivations. |
-| **M5** | Part IV (Ch 10–12) | Ch 12 gated on G3. |
+| **M4** | Part III (Ch 8–9) | **COMPLETE.** Heaviest derivations. |
+| **M5** | Part IV (Ch 10–12) | Ch 10–11 **DONE**; Ch 12 gated on G3. |
 | **M6** | Parts V–VII (Ch 13–17) | |
 | **M7** | Ch 18–19 | Depend on Ch 9 and Ch 16 being final; Ch 19 depends on Ch 18. |
 | **M8** | Part IX (Ch 20–22) | Depends on Ch 10–11 for the modelling/engineering boundary. |

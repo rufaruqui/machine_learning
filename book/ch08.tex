@@ -1,16 +1,887 @@
 %% ch08.tex --- Neural Networks: Representation and Forward Propagation
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch08_forward.py.
+%% The 2-3-1 network (N231) is the same one used in the companion lecture
+%% slides, so that every number can be checked against either source.
 
 \chapter{Neural Networks: Representation and Forward Propagation}
 \label{ch:ch08}
+\chaptermark{Neural Networks: Forward Propagation}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{The question of whether a computer can think is no more interesting
+than the question of whether a submarine can swim.}{---\ Edsger W.~Dijkstra}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Describe the artificial neuron, say what it borrows from the biological
+        one, and say where the analogy stops being useful.
+  \item Explain the difference between engineering features by hand and
+        learning them, and say what the designer of a network still chooses.
+  \item Write the computation of one layer in vector and matrix form, using the
+        layer notation $a^{[l]}_j$, and count its parameters.
+  \item Carry out forward propagation through a network by hand, then as a
+        sequence of matrix products over a whole batch.
+  \item Show that one logistic unit cannot compute XOR and that two layers can,
+        and explain what the hidden layer did to make the problem easy.
+  \item Prove that a network with linear activations collapses to a single
+        linear layer.
+  \item State the universal approximation theorem and what it does and does not
+        promise.
+  \item Build the same network in Keras and in NumPy, with the shape conventions
+        that make the two agree.
+\end{enumerate}
+\end{chapterlearning}
+
+Every model so far has been linear in its parameters, and every non-linear
+decision boundary has come from features we built by hand: $x^2$ in
+\cref{sec:polynomial}, $x_1^2 + x_2^2$ in \cref{sec:decision-boundary}, all
+twenty-seven monomials in \cref{sec:reg-logistic}. That works when we know which
+features to build. It fails when the input is a photograph with a million
+pixels, none of which means anything on its own, and nobody can say which
+combinations of them matter.
+
+A neural network learns its own features. It does so by stacking the logistic
+unit of \cref{ch:ch06}: the first layer computes features of the input, the next
+computes features of those features, and the last is a logistic regression on
+whatever the layers below have found. This chapter defines the model and shows
+how it computes a prediction --- \emph{forward propagation}. \Cref{ch:ch09} shows
+how its weights are learned.
+
+\section{Neurons and the Brain}
+\label{sec:neurons-brain}
+
+The original motivation for neural networks was to build software that learned
+the way brains do. A biological neuron receives electrical signals from other
+neurons through its \emph{dendrites}, integrates them in its cell body, and, if
+the combined input is strong enough, fires a signal down its \emph{axon} to the
+neurons it connects to. The artificial neuron keeps the outline of that story
+and discards almost everything else.
+
+\begin{defbox}{Artificial neuron (unit)}
+A \term{unit} receives a vector of inputs $\va$, forms a weighted sum plus a
+bias, and passes the result through an \term{activation function} $\gsig$:
+\[
+  z = \vw\cdot\va + b, \qquad a_{\text{out}} = \gsig(z) .
+\]
+The output $a_{\text{out}}$ is the unit's \term{activation} --- the number it
+sends on. With $\gsig$ the sigmoid, a single unit is exactly the logistic
+regression model of \cref{ch:ch06}.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      nninp/.style={circle, draw=MLTeal, fill=MLTeal!12, thick, minimum size=7mm,
+                  inner sep=0pt, font=\small},
+      nnunit/.style={circle, draw=MLBlue, fill=MLBlue!8, thick, minimum size=13mm,
+                   inner sep=0pt, font=\small},
+      nnsyn/.style={-{Stealth[length=2mm]}, MLGray, semithick}]
+    \node[nninp] (x1) at (0, 1.1) {$x_1$};
+    \node[nninp] (x2) at (0, 0) {$x_2$};
+    \node[nninp] (x3) at (0,-1.1) {$x_3$};
+    \node[nnunit] (n) at (3.4, 0) {$\gsig(z)$};
+    \node (a) at (5.6, 0) {$a$};
+    \foreach \i in {1,2,3}
+      \draw[nnsyn] (x\i) -- node[pos=0.45, above, sloped, font=\scriptsize] {$w_\i$} (n);
+    \draw[nnsyn] (n) -- (a);
+    \node[font=\scriptsize, MLGray] at (3.4,-1.15) {$z = \vw\cdot\vx + b$};
+    \node[font=\scriptsize, MLGray, align=center] at (0,-2.0) {inputs\\(dendrites)};
+    \node[font=\scriptsize, MLGray, align=center] at (3.4,-2.0) {sum and squash\\(cell body)};
+    \node[font=\scriptsize, MLGray, align=center] at (5.6,-2.0) {activation\\(axon)};
+  \end{tikzpicture}
+  \caption{An artificial neuron. Inputs are weighted and summed with a bias, and
+  the sum is passed through an activation function. The labels in brackets are
+  the biological analogy, which is loose: real neurons communicate in timed
+  spikes, have thousands of connections with rich internal dynamics, and learn
+  by mechanisms that are still not fully understood.}
+  \label{fig:neuron}
+\end{figure}
+
+\begin{pitfall}{Do not argue from biology}
+The analogy was historically productive and is now mostly a source of confusion.
+We do not know how the brain learns, and modern networks owe their success to
+mathematics, data and computing power, not to fidelity to neuroscience. A design
+decision justified by ``that is how the brain does it'' should be treated as
+unsupported until it is shown to work on data.
+\end{pitfall}
+
+Interest in neural networks rose and collapsed twice --- once after the
+perceptron of \cref{ch:ch06} met its limits, once in the 1990s --- before the
+third rise, after about 2010, made them the dominant method for speech, images
+and text. Two things changed. Digitised records and the web made labelled data
+abundant; and graphics processors made the matrix arithmetic of large networks
+cheap. Classical models such as logistic regression improve with more data and
+then plateau. Large networks keep improving, so for the first time there was a
+family of models that could turn ever more data into ever better predictions.
+
+\section{From Features to Learned Features}
+\label{sec:learned-features}
+
+Consider a retailer trying to predict whether a new T-shirt will be a top seller.
+A single logistic unit on the price alone can do this badly. Suppose instead we
+have four inputs --- price, shipping cost, marketing spend and material quality
+--- and we reason that sales depend on three intermediate quantities:
+\emph{affordability} (from price and shipping), \emph{awareness} (from
+marketing) and \emph{perceived quality} (from price and material). A logistic
+unit for each intermediate quantity, followed by a logistic unit that combines
+them, is a neural network.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[x=3.0cm, y=1.35cm,
+      nninp/.style={circle, draw=MLTeal, fill=MLTeal!12, thick, minimum size=6mm},
+      nnhid/.style={circle, draw=MLBlue, fill=MLBlue!8, thick, minimum size=7mm},
+      nnout/.style={circle, draw=MLAmber, fill=MLAmber!15, thick, minimum size=7mm},
+      nnsyn/.style={-{Stealth[length=1.6mm]}, MLGray!70, semithick}]
+    \foreach \lab [count=\i] in {price, shipping, marketing, material} {
+      \node[nninp] (x\i) at (0,-\i) {};
+      \node[left=2pt, font=\scriptsize] at (x\i.west) {\lab};
+    }
+    \foreach \lab [count=\j] in {affordability, awareness, perceived quality} {
+      \node[nnhid] (h\j) at (1,-\j-0.5) {};
+      \node[above=1pt, font=\scriptsize, MLBlue, fill=white, inner sep=1pt] at (h\j.north) {\lab};
+    }
+    \node[nnout] (o) at (2,-2.5) {};
+    \node[right=4pt, font=\scriptsize] at (o.east) {$\Prob(\text{top seller})$};
+    \foreach \i in {1,...,4} \foreach \j in {1,2,3} \draw[nnsyn] (x\i) -- (h\j);
+    \foreach \j in {1,2,3} \draw[nnsyn] (h\j) -- (o);
+    \node[font=\scriptsize, MLGray] at (0,-4.9) {input layer $\vx$};
+    \node[font=\scriptsize, MLGray] at (1,-5.0) {hidden layer $\va^{[1]}$};
+    \node[font=\scriptsize, MLGray] at (2,-5.0) {output layer $a^{[2]}$};
+  \end{tikzpicture}
+  \caption{A $4\to3\to1$ network for demand prediction. The names on the hidden
+  units are what we \emph{hope} they will compute; nothing forces it. Every
+  hidden unit sees every input, and training decides which inputs each one
+  actually uses.}
+  \label{fig:demand-net}
+\end{figure}
+
+Two features of \cref{fig:demand-net} are essential. First, the network is
+\emph{fully connected}: every hidden unit receives every input. We do not wire
+affordability to price by hand; we let training set the weights, and if
+marketing spend is irrelevant to affordability its weight will be driven
+towards zero. Second, the hidden units' values never appear in the data. The
+training set contains only $(\vx, y)$ pairs, which is why the layer is called
+\emph{hidden}.
+
+\begin{defbox}{Layers and architecture}
+The \term{input layer} is the feature vector $\vx$; it computes nothing. Each
+\term{hidden layer} computes a vector of activations from the layer before.
+The \term{output layer} produces the prediction. The \term{architecture} is the
+set of choices made before training: how many hidden layers, how many units in
+each, and which activation function each uses. Training then chooses the weights
+and biases. A network of fully connected layers is also called a
+\term{multilayer perceptron}.
+\end{defbox}
+
+\begin{keyinsight}{Feature engineering versus feature learning}
+In \cref{sec:feature-engineering} you decided that the useful feature was
+$\text{frontage}\times\text{depth}$, computed it, and handed it to a linear
+model. A network's hidden layer computes features too, but what they are is
+chosen by gradient descent to make the output layer's job easy. The output layer
+is still a logistic regression --- on learned features instead of designed
+ones. What remains for the designer is the architecture.
+\end{keyinsight}
+
+The same idea scales to inputs nobody can engineer. A greyscale image of
+$1000\times1000$ pixels is a vector in $\Real{1{,}000{,}000}$, and no single pixel
+says anything about whose face it shows. When researchers inspect networks
+trained to recognise faces, they typically find that the first hidden layer
+responds to short edges at various orientations, the second to combinations of
+edges --- the corner of an eye, the curve of a nostril --- and the third to
+coarse whole-face shapes. Train the identical architecture on photographs of
+cars, and the intermediate layers learn wheels and windows instead. The
+architecture is generic; the features come from the data.
+
+\begin{pitfall}{Interpretations are post hoc}
+``Layer two detects eyes'' is a description attached after training, by finding
+which inputs excite a unit most strongly. It is not a guarantee, many units have
+no tidy description, and a different random initialisation can organise the
+same layer quite differently while reaching the same accuracy.
+\end{pitfall}
+
+\section{A Layer of Logistic Units}
+\label{sec:layer}
+
+A layer is several units that all receive the same input vector. Each has its
+own weights and bias, so each computes a different function of the same input.
+
+\subsection{Notation}
+
+A network has several layers, each with several units, applied to many training
+examples, so a quantity can need three indices at once. We use the convention of
+the companion lecture slides:
+
+\begin{defbox}{Layer notation}
+\begin{itemize}
+  \item A superscript in square brackets, $[l]$, refers to \textbf{layer} $l$.
+  \item A superscript in round brackets, $(i)$, refers to \textbf{training
+        example} $i$, as before.
+  \item A subscript $j$ refers to \textbf{unit} $j$ within a layer.
+\end{itemize}
+So $a^{[2](7)}_3$ is the activation of unit $3$ of layer $2$ on example
+$7$. By convention the input is layer $0$: $\va^{[0]} = \vx$. A network with
+$L-1$ hidden layers and one output layer is said to have $L$ layers; the input
+layer is not counted.
+\end{defbox}
+
+With this notation, the whole of a network's computation is one equation applied
+repeatedly.
+
+\begin{keyinsight}{The one equation}
+\[
+  a^{[l]}_j \;=\; \gsig\bigl(\vw^{[l]}_j\cdot\va^{[l-1]} + b^{[l]}_j\bigr).
+\]
+Unit $j$ of layer $l$ takes the \emph{entire} activation vector of the previous
+layer, forms a weighted sum, adds its bias, and applies the activation function.
+Everything in this chapter is this equation, organised.
+\end{keyinsight}
+
+\subsection{The layer in matrix form}
+
+Stack the weight vectors of a layer's $n_l$ units as the columns of a matrix:
+\[
+  \Wl{l} = \bigl[\,\vw^{[l]}_1\ \ \vw^{[l]}_2\ \ \cdots\ \ \vw^{[l]}_{n_l}\,\bigr]
+  \in \Real{n_{l-1}\times n_l},
+  \qquad
+  \bl{l} = \bigl(b^{[l]}_1, \dots, b^{[l]}_{n_l}\bigr).
+\]
+Treat an activation vector as a row. Then all $n_l$ weighted sums are one
+vector--matrix product, and the activation function is applied entrywise:
+\[
+  \mathbf{z}^{[l]} = \va^{[l-1]}\Wl{l} + \bl{l}, \qquad
+  \va^{[l]} = \gsig\bigl(\mathbf{z}^{[l]}\bigr).
+\]
+Entry $j$ of $\va^{[l-1]}\Wl{l}$ is $\va^{[l-1]}$ dotted with column $j$ of
+$\Wl{l}$, which is $\vw^{[l]}_j\cdot\va^{[l-1]}$, as the one equation requires.
+
+The convention --- units as columns, examples as rows --- is the one TensorFlow
+uses, and it is chosen so that a batch of examples can be pushed through a layer
+in a single product (\cref{sec:forward-prop}). Some texts use the transpose,
+with units as rows of $\mathbf{W}$ and activations as column vectors. The two
+are equivalent; mixing them is the most common source of shape errors in a first
+implementation.
+
+\subsection{Counting parameters}
+
+Each of a layer's $n_l$ units has one weight per input and one bias, so a fully
+connected layer with $n_{\text{in}}$ inputs and $n_{\text{out}}$ units has
+\[
+  n_{\text{in}}\,n_{\text{out}} + n_{\text{out}}
+\]
+parameters. The demand network of \cref{fig:demand-net} has $4\cdot3+3 = 15$
+in its hidden layer and $3\cdot1+1 = 4$ in its output layer, $19$ in all.
+
+\begin{pitfall}{Count the inputs of \emph{this} layer}
+The output layer of the demand network sees the $3$ activations of the hidden
+layer, not the $4$ original features. Using the number of features $n$ for every
+layer is the most frequent error in parameter counting.
+\end{pitfall}
+
+The count grows with the \emph{product} of adjacent widths. A first hidden layer
+of $128$ units on a $28\times28$ image needs $784\cdot128+128 = 100{,}480$
+parameters before the network has done anything clever, which is part of why
+vision networks use the convolutional layers previewed in \cref{ch:ch09}.
+
+\section{Forward Propagation}
+\label{sec:forward-prop}
+
+\begin{defbox}{Forward propagation}
+\term{Forward propagation} computes a network's output by applying the layer
+equation to each layer in turn, from the input to the output:
+\[
+  \va^{[0]} = \vx, \qquad
+  \va^{[l]} = \gsig\bigl(\va^{[l-1]}\Wl{l} + \bl{l}\bigr),\quad l = 1,\dots,L,
+  \qquad f(\vx) = \va^{[L]} .
+\]
+It is all that \term{inference} --- prediction with a trained network --- requires.
+\end{defbox}
+
+Stacking layers is composing functions,
+$f(\vx) = \gsig^{[L]}\bigl(\cdots\gsig^{[2]}\bigl(\gsig^{[1]}(\vx)\bigr)\cdots\bigr)$,
+with each layer's output the next layer's input.
+
+\begin{algorithmbox}{Forward propagation}
+\begin{lstlisting}[style=pseudocode]
+input: x (row, length n0); W[1..L]; b[1..L]
+a <- x
+for l = 1 to L:
+    # (1 x n_{l-1}) (n_{l-1} x n_l) -> (1 x n_l)
+    z <- a @ W[l] + b[l]
+    a <- g(z)                   # entrywise
+return a                        # f(x)
+\end{lstlisting}
+Cost: one matrix--vector product per layer, $\sum_l n_{l-1}n_l$ multiplications
+in all --- the same as the number of weights.
+\end{algorithmbox}
+
+\begin{workedexample}{A $2\to3\to1$ network by hand}
+Take the network N231 with sigmoid activations throughout and the hand-chosen
+parameters
+\[
+  \Wl{1} = \begin{bmatrix} 1 & -3 & 5\\ 2 & 4 & -6\end{bmatrix},\quad
+  \bl{1} = (-1,\ 1,\ 2),\qquad
+  \Wl{2} = \begin{bmatrix} 2\\ -1\\ -3\end{bmatrix},\quad
+  b^{[2]} = 0.5 .
+\]
+Column $j$ of $\Wl{1}$ is the weight vector of hidden unit $j$. Propagate
+$\vx = (1, 2)$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lll@{}}
+\toprule
+unit & $z = \vw\cdot\va_{\text{in}} + b$ & $a = \gsig(z)$\\
+\midrule
+$a^{[1]}_1$ & $1\cdot1 + 2\cdot2 - 1 = 4$     & $0.9820$\\
+$a^{[1]}_2$ & $-3\cdot1 + 4\cdot2 + 1 = 6$    & $0.9975$\\
+$a^{[1]}_3$ & $5\cdot1 - 6\cdot2 + 2 = -5$    & $0.0067$\\
+\midrule
+$a^{[2]}$   & $2(0.9820) - 0.9975 - 3(0.0067) + 0.5 = 1.4464$ & $\mathbf{0.8094}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+$a^{[2]} = 0.8094 \ge 0.5$, so $\yhat = 1$. For $\vx = (-1,-1)$ the same steps
+give $\mathbf{z}^{[1]} = (-4,\ 0,\ 3)$,
+$\va^{[1]} = (0.0180,\ 0.5000,\ 0.9526)$, $z^{[2]} = -2.8217$ and
+$a^{[2]} = 0.0562$, so $\yhat = 0$.
+
+Useful anchors for checking a chain of sigmoids by hand: $\gsig(0) = 0.5$
+exactly, $\gsig(4) \approx 0.982$, $\gsig(-5) \approx 0.007$.
+\end{workedexample}
+
+\subsection{A whole batch at once}
+
+Put $m$ examples in the rows of a matrix, $\mathbf{A}^{[0]} = \Xmat \in
+\Real{m\times n_0}$. The layer equation applies to every row at once:
+\[
+  \mathbf{Z}^{[l]} = \mathbf{A}^{[l-1]}\Wl{l} + \bl{l},\qquad
+  \mathbf{A}^{[l]} = \gsig\bigl(\mathbf{Z}^{[l]}\bigr),
+\]
+with $\bl{l}$ added to every row (NumPy's broadcasting does this). The shapes
+are $(m\times n_{l-1})(n_{l-1}\times n_l)\to(m\times n_l)$: the number of rows
+--- examples --- never changes, and the number of columns is the width of the
+current layer.
+
+\begin{workedexample}{Both examples in one product}
+For N231 with $\Xmat$ holding both examples as rows,
+\[
+  \Xmat\Wl{1} = \begin{bmatrix}1&2\\-1&-1\end{bmatrix}
+                \begin{bmatrix}1&-3&5\\2&4&-6\end{bmatrix}
+              = \begin{bmatrix}5&5&-7\\-3&-1&1\end{bmatrix},
+  \qquad
+  \mathbf{Z}^{[1]} = \Xmat\Wl{1} + \bl{1}
+    = \begin{bmatrix}4&6&-5\\-4&0&3\end{bmatrix}.
+\]
+Row $1$ is the $z$ column of the previous table; row $2$ is the second example.
+Then
+\[
+  \mathbf{A}^{[1]} = \begin{bmatrix}0.9820&0.9975&0.0067\\0.0180&0.5000&0.9526\end{bmatrix},
+  \qquad
+  \mathbf{A}^{[2]} = \gsig\!\left(\begin{bmatrix}1.4464\\-2.8217\end{bmatrix}\right)
+                   = \begin{bmatrix}0.8094\\0.0562\end{bmatrix}.
+\]
+Shapes: $(2\times2)(2\times3)\to(2\times3)$, then $(2\times3)(3\times1)\to(2\times1)$.
+\end{workedexample}
+
+\begin{keyinsight}{Why the matrix form matters}
+The loop over units and the matrix product perform identical arithmetic. The
+difference is that one product hands the work to compiled linear-algebra code
+that uses every processor core and the processor's vector instructions --- and,
+on a graphics card, thousands of parallel arithmetic units. This, and not any
+new mathematics, is what made networks with millions of parameters practical.
+\end{keyinsight}
+
+\subsection{A deeper network}
+
+Nothing limits the number of layers. A handwritten-digit classifier that decides
+between $0$ and $1$ from an $8\times8$ image might use $64\to25\to15\to1$:
+\[
+  \va^{[1]} \in \Real{25},\qquad \va^{[2]} \in \Real{15},\qquad a^{[3]} \in (0,1),
+\]
+with $64\cdot25+25 = 1625$, $25\cdot15+15 = 390$ and $15\cdot1+1 = 16$
+parameters, $2031$ in all. Layers usually narrow towards the output, each
+summarising the one before in fewer numbers.
+
+\section{What a Hidden Layer Buys: XOR}
+\label{sec:xor}
+
+The clearest demonstration of what a hidden layer adds is a problem that a
+single unit provably cannot solve.
+
+\begin{defbox}{Exclusive-or}
+The function $\mathrm{XOR}(x_1, x_2)$ on binary inputs is $1$ when exactly one
+input is $1$:
+\[
+  \mathrm{XOR}(0,0) = 0,\quad \mathrm{XOR}(0,1) = 1,\quad
+  \mathrm{XOR}(1,0) = 1,\quad \mathrm{XOR}(1,1) = 0 .
+\]
+\end{defbox}
+
+A single logistic unit has a linear decision boundary, and no line separates
+$\{(0,1),(1,0)\}$ from $\{(0,0),(1,1)\}$: the positives lie on one diagonal of
+the square and the negatives on the other. Fitting a logistic regression to the
+four points confirms it in the most emphatic way possible. The best fit is
+$\vw = \mathbf{0}$, $b = 0$, which outputs $0.5$ for every input: by symmetry,
+any tilt of the boundary that helps one point hurts another equally, so the
+optimum is to commit to nothing.
+
+\begin{workedexample}{A $2\to2\to1$ network for XOR, by hand}
+Write XOR as a combination of functions a single unit \emph{can} compute:
+\[
+  \mathrm{XOR}(x_1,x_2) = \mathrm{AND}\bigl(\mathrm{OR}(x_1,x_2),\
+                                           \mathrm{NAND}(x_1,x_2)\bigr).
+\]
+Each piece is linearly separable, so each is one sigmoid unit with large weights.
+Choose
+\[
+  \text{OR: } \vw = (20, 20),\ b = -10; \qquad
+  \text{NAND: } \vw = (-20,-20),\ b = 30; \qquad
+  \text{AND: } \vw = (20, 20),\ b = -30 .
+\]
+The first two form the hidden layer, the third the output unit. Propagate all
+four inputs, using $\gsig(10) = 0.999955$ and $\gsig(-10) = 0.000045$:
+
+\begin{center}
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}ccccccc@{}}
+\toprule
+$\vx$ & $\mathbf{z}^{[1]}$ & $a^{[1]}_1$ (OR) & $a^{[1]}_2$ (NAND) & $z^{[2]}$ & $a^{[2]}$ & $\yhat$\\
+\midrule
+$(0,0)$ & $(-10,\ 30)$ & $0.000045$ & $1.000000$ & $-9.9991$ & $0.000045$ & $0$\\
+$(0,1)$ & $(10,\ 10)$  & $0.999955$ & $0.999955$ & $9.9982$  & $0.999955$ & $1$\\
+$(1,0)$ & $(10,\ 10)$  & $0.999955$ & $0.999955$ & $9.9982$  & $0.999955$ & $1$\\
+$(1,1)$ & $(30,\ -10)$ & $1.000000$ & $0.000045$ & $-9.9991$ & $0.000045$ & $0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All four correct, each with a margin of about $10$ on the logit scale.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=4.6cm, height=4.6cm, scale only axis,
+        xlabel={$x_1$}, ylabel={$x_2$}, xmin=-0.3, xmax=1.3, ymin=-0.3, ymax=1.3,
+        title={input space}]
+        \addplot[MLBlue, thick, dashed, domain=-0.3:1.3, forget plot] {0.5 - x};
+        \addplot[MLAmber, thick, dashed, domain=-0.3:1.3, forget plot] {1.5 - x};
+        \addplot[only marks, mark=*, mark size=2.4pt, MLRose, forget plot]
+          coordinates {(0,0)(1,1)};
+        \addplot[only marks, mark=square*, mark size=2.4pt, MLTeal, forget plot]
+          coordinates {(0,1)(1,0)};
+        \node[font=\tiny, MLBlue, rotate=-45] at (axis cs:0.05,0.62) {OR};
+        \node[font=\tiny, MLAmber, rotate=-45] at (axis cs:0.55,1.12) {NAND};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=4.6cm, height=4.6cm, scale only axis,
+        xlabel={$a^{[1]}_1$ (OR)}, ylabel={$a^{[1]}_2$ (NAND)},
+        xmin=-0.3, xmax=1.3, ymin=-0.3, ymax=1.3, title={hidden space}]
+        \addplot[MLGray, thick, domain=-0.3:1.3, forget plot] {1.5 - x};
+        \addplot[only marks, mark=*, mark size=2.4pt, MLRose, forget plot]
+          coordinates {(0.000045,1.0)(1.0,0.000045)};
+        \addplot[only marks, mark=square*, mark size=2.4pt, MLTeal, forget plot]
+          coordinates {(0.999955,0.999955)};
+        \node[font=\tiny, MLGray, anchor=west] at (axis cs:0.02,0.3) {AND: $a_1 + a_2 = 1.5$};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{What the hidden layer does to XOR. Left: in input space the
+  positives (squares) and negatives (circles) sit on opposite diagonals; no line
+  separates them. The two hidden units draw two lines, one each. Right: the
+  same four inputs mapped to the hidden layer's activations. The two positives
+  land on the same point, near $(1,1)$; the negatives land near $(0,1)$ and
+  $(1,0)$. Now a single line --- the output unit --- separates them.}
+  \label{fig:xor}
+\end{figure}
+
+\begin{keyinsight}{A hidden layer re-represents the input}
+The output unit is still a linear classifier. What changed is its input: the
+hidden layer mapped the four points to a space in which the classes are linearly
+separable. That is the general job of hidden layers --- to transform the data
+until the last layer's simple linear decision is enough. Here we chose the
+transformation by hand; \cref{ch:ch09} shows how gradient descent finds one from
+data.
+\end{keyinsight}
+
+\begin{researchspotlight}{McCulloch \& Pitts (1943) --- A logical calculus of nervous activity}
+\textbf{The problem.} Can networks of simple, idealised neurons compute
+anything interesting, and if so, what?
+
+\textbf{The idea.} Model a neuron as a threshold unit: it fires if the weighted
+sum of its binary inputs exceeds a threshold. Show that single units implement
+AND, OR and NOT, and that networks of them implement any finite logical
+expression.
+
+\textbf{The result.} Networks of threshold units are as expressive as Boolean
+logic --- the first formal model of neural computation, and an influence on the
+design of the stored-program computer. The paper contains no learning at all:
+every weight is set by hand.
+
+\textbf{Why it is here.} The XOR network of \cref{sec:xor} is a McCulloch--Pitts
+construction with the hard threshold softened into a sigmoid. The softening is
+everything: a threshold has zero derivative almost everywhere, so its weights
+cannot be learned by gradient descent, while the sigmoid's can.
+\parencite{mcculloch1943}
+\end{researchspotlight}
+
+\section{Why Nonlinear Activations Are Required}
+\label{sec:collapse}
+
+The activation function has been the sigmoid throughout. It is natural to ask
+whether it is needed at all, since the weighted sums already do most of the
+arithmetic. It is, and the reason takes two lines.
+
+\begin{derivation}{Linear layers compose to one linear layer}
+Suppose every layer uses the identity activation $\gsig(z) = z$. Two layers give
+\[
+  \va^{[2]} = \bigl(\vx\Wl{1} + \bl{1}\bigr)\Wl{2} + \bl{2}
+            = \vx\,\underbrace{\Wl{1}\Wl{2}}_{\mathbf{W}'}
+              + \underbrace{\bl{1}\Wl{2} + \bl{2}}_{\mathbf{b}'} ,
+\]
+which is a single linear layer with parameters $(\mathbf{W}',\mathbf{b}')$. By
+induction on the number of layers, any depth collapses the same way. A network
+of linear layers with a linear output is linear regression; with a sigmoid
+output it is logistic regression. Depth adds parameters but no ability.
+\end{derivation}
+
+\begin{workedexample}{N231 with every activation removed}
+Replace every sigmoid in N231 by the identity. Then
+\[
+  \mathbf{W}' = \Wl{1}\Wl{2}
+    = \begin{bmatrix}1\cdot2 - 3\cdot(-1) + 5\cdot(-3)\\ 2\cdot2 + 4\cdot(-1) - 6\cdot(-3)\end{bmatrix}
+    = \begin{bmatrix}-10\\ 18\end{bmatrix},
+  \qquad
+  b' = (-1)(2) + (1)(-1) + (2)(-3) + 0.5 = -8.5 .
+\]
+For $\vx = (1,2)$ the two-layer computation gives $17.5$ and
+$-10 + 36 - 8.5 = 17.5$; for $(-1,-1)$, both give $-16.5$. Thirteen parameters
+reproduce a function that three would describe.
+\end{workedexample}
+
+The non-linearity is what lets a network represent functions a linear model
+cannot. How much it can represent is the subject of a remarkable theorem.
+
+\begin{researchspotlight}{Cybenko (1989) --- Universal approximation}
+\textbf{The problem.} Is there any continuous function that a network with one
+hidden layer of sigmoid units cannot represent, however many units it has?
+
+\textbf{The idea.} Treat the set of functions
+$\sum_{j} v_j\,\gsig(\vw_j\cdot\vx + b_j)$ as a subset of the continuous
+functions on a bounded region, and use functional analysis --- the Hahn--Banach
+and Riesz representation theorems --- to show that nothing can be bounded away
+from it.
+
+\textbf{The result.} Finite sums of sigmoids are dense in the continuous
+functions on the unit cube: any continuous function can be approximated to any
+accuracy by a network with one hidden layer, provided the layer is wide enough.
+Later work extended the result to essentially any non-polynomial activation.
+
+\textbf{Why it is here.} It says a network \emph{can} represent the function
+you want. It does not say how many units that takes --- often exponentially
+many in the input dimension --- nor that gradient descent will find the weights,
+nor that the result will generalise from finite data. Those three gaps are why
+depth, training and regularization still matter, and why the theorem is a
+licence to try networks rather than a guarantee that they will work.
+\parencite{cybenko1989}
+\end{researchspotlight}
+
+\section{Networks in Code}
+\label{sec:nn-code}
+
+A practitioner writes very little code to build a network. The cost of that
+brevity is that, when something goes wrong, only someone who knows what the
+code computes can diagnose it. We write N231 three ways.
+
+\subsection{In TensorFlow}
+
+\begin{lstlisting}[style=tfkeras, caption={N231 in Keras, with the hand-chosen weights loaded.}, label={lst:n231-keras}]
+import numpy as np
+from tensorflow.keras import Sequential, Input
+from tensorflow.keras.layers import Dense
+
+model = Sequential([
+    Input(shape=(2,)),                       # two features
+    Dense(units=3, activation='sigmoid'),    # hidden layer
+    Dense(units=1, activation='sigmoid'),    # output layer
+])
+W1 = np.array([[1., -3., 5.], [2., 4., -6.]])
+b1 = np.array([-1., 1., 2.])
+W2 = np.array([[2.], [-1.], [-3.]])
+b2 = np.array([0.5])
+model.layers[0].set_weights([W1, b1])
+model.layers[1].set_weights([W2, b2])
+
+X = np.array([[1., 2.], [-1., -1.]])   # one row per example
+print(model.predict(X))                # [[0.8094] [0.0562]]
+\end{lstlisting}
+
+A \code{Dense} layer is a fully connected layer: \code{units} sets its width and
+\code{activation} its $\gsig$. Its weights are stored exactly as in
+\cref{sec:layer}, as a matrix of shape $(n_{\text{in}}, \text{units})$ whose
+columns are the units, which is why \code{set\_weights} accepts \code{W1} as
+written. Run against the NumPy computation of \cref{sec:forward-prop}, the two
+agree to $3\times10^{-9}$ --- the difference being TensorFlow's single-precision
+arithmetic.
+
+\subsection{In NumPy, from scratch}
+
+\begin{lstlisting}[style=pythonml, caption={Forward propagation from scratch: a loop over units, then a loop over layers.}, label={lst:dense-loop}]
+def g(z):
+    return 1 / (1 + np.exp(-z))
+
+def dense(a_in, W, b):
+    """a_in (n_in,), W (n_in, units), b (units,)"""
+    units = W.shape[1]
+    a_out = np.zeros(units)
+    for j in range(units):
+        w = W[:, j]          # column j = unit j's weights
+        a_out[j] = g(np.dot(w, a_in) + b[j])
+    return a_out
+
+def sequential(x, params):
+    a = x
+    for W, b in params:      # one layer per (W, b) pair
+        a = dense(a, W, b)
+    return a
+
+params = [(W1, b1), (W2, b2)]
+sequential(np.array([1., 2.]), params)   # array([0.8094])
+\end{lstlisting}
+
+\subsection{In NumPy, vectorised}
+
+\begin{lstlisting}[style=pythonml, caption={The vectorised layer: one matrix product for all units and all examples.}, label={lst:dense-vec}]
+def dense_v(A_in, W, b):
+    """A_in (m, n_in), W (n_in, units) -> (m, units)"""
+    return g(A_in @ W + b)     # b is added to every row
+
+A1 = dense_v(X, W1, b1)               # (2, 3)
+A2 = dense_v(A1, W2, b2)    # (2, 1): [[0.8094], [0.0562]]
+\end{lstlisting}
+
+\begin{pitfall}{One example is a $1\times n$ matrix, not a vector}
+\code{np.array([200., 17.])} has shape $(2,)$ --- a 1-D array with neither rows
+nor columns. \code{np.array([[200., 17.]])} has shape $(1,2)$: one example with
+two features. \code{np.array([[200.], [17.]])} has shape $(2,1)$: two examples
+with one feature each. TensorFlow layers expect the second form; passing the
+first raises an error or, worse, is broadcast into something unintended, and the
+third silently means a different dataset. A bias of shape $(\text{units},1)$
+instead of $(\text{units},)$ has the same effect inside \code{dense\_v}. Print
+\code{.shape} whenever in doubt, and \code{assert} it in any function that takes
+a batch.
+\end{pitfall}
+
+\begin{ethicsnote}{Capability is not understanding}
+A network that classifies chest X-rays as well as a specialist on a benchmark
+has learned a mapping from pixels to labels on that benchmark's distribution. It
+has not learned anatomy, and it may be relying on cues --- a scanner's
+watermark, the hospital that produced the image --- that a specialist would never
+use and that will not be present elsewhere. Claims about what a network
+``knows'' or ``understands'' should be translated into testable statements:
+\emph{this} model achieves \emph{this} error on \emph{this} population. The
+evaluation methods of \cref{ch:ch10} and the subgroup checks of \cref{ch:ch11}
+are how such statements are tested.
+\end{ethicsnote}
+
+\begin{labbox}{Lab 8 --- Neurons, layers and forward propagation}
+Build single neurons in TensorFlow with linear and sigmoid activations, load
+them with the parameters fitted in earlier chapters, and confirm that they
+reproduce those chapters' predictions. Build N231, load the weights of
+\cref{sec:forward-prop}, and reproduce $0.8094$ and $0.0562$ in Keras, in the
+looped NumPy implementation, and in the vectorised one.
+
+Then build the XOR network of \cref{sec:xor} and reproduce its table. Fit a
+single logistic unit to the XOR points and confirm that it learns $\vw =
+\mathbf{0}$. Finally, count the parameters of $64\to25\to15\to1$ by formula and
+with \code{model.summary()}: both must give $2031$.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item From Features to Learned Features
-  \item A Layer of Logistic Units
-  \item Notation for Layers
-  \item Forward Propagation
-  \item Why Nonlinearities Are Required
-  \item Networks in Code
+  \item A unit computes $a = \gsig(\vw\cdot\va + b)$; with the sigmoid it is a
+        logistic regression. The biological analogy motivated the model and
+        should not be used to justify design decisions.
+  \item A hidden layer computes features that training, not the designer,
+        chooses. The output layer is a logistic regression on those features.
+        The designer chooses the architecture.
+  \item Notation: $[l]$ is the layer, $(i)$ the example, $j$ the unit;
+        $\va^{[0]} = \vx$. Every layer computes
+        $a^{[l]}_j = \gsig(\vw^{[l]}_j\cdot\va^{[l-1]} + b^{[l]}_j)$.
+  \item Stacking unit weights as columns gives $\Wl{l}$ of shape
+        $(n_{l-1}, n_l)$ and the layer $\va^{[l]} = \gsig(\va^{[l-1]}\Wl{l} +
+        \bl{l})$. A layer has $n_{\text{in}}n_{\text{out}} + n_{\text{out}}$
+        parameters.
+  \item Forward propagation applies the layer equation from input to output. On
+        a batch, $\mathbf{A}^{[l]} = \gsig(\mathbf{A}^{[l-1]}\Wl{l} + \bl{l})$.
+        N231 gives $0.8094$ for $(1,2)$ and $0.0562$ for $(-1,-1)$.
+  \item A single unit cannot compute XOR --- the best logistic fit outputs $0.5$
+        everywhere --- but two layers can, because the hidden layer maps the
+        inputs to a space where they are linearly separable.
+  \item Without a non-linear activation, any depth collapses to one linear
+        layer: N231 becomes $-10x_1 + 18x_2 - 8.5$.
+  \item One wide hidden layer can approximate any continuous function, which
+        says nothing about how wide, how to find the weights, or whether the
+        result generalises.
+  \item Keras, a loop, and a matrix product compute the same function, provided
+        examples are rows and units are columns throughout.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Describe an artificial neuron: its inputs, parameters, computation and
+output. Why is a single sigmoid unit the same as logistic regression?
+
+\sq Give two reasons neural networks became dominant after about 2010.
+
+\sq Why is a hidden layer called ``hidden''?
+
+\sq Explain the meaning of each index in $a^{[2](7)}_3$.
+
+\sq What does the designer of a neural network still choose, and what does
+training choose?
+
+\sq How many layers does a network with input $\vx$, three hidden layers and one
+output unit have, under this chapter's convention?
+
+\sq A layer receives $\mathbf{A}^{[l-1]}$ of shape $(100, 64)$ and has $25$
+units. Give the shapes of $\Wl{l}$, $\bl{l}$, $\mathbf{Z}^{[l]}$ and
+$\mathbf{A}^{[l]}$.
+
+\sq Why does no single logistic unit compute XOR?
+
+\sq What does the universal approximation theorem guarantee, and what three
+things does it not?
+
+\sq State the shapes of \code{np.array([5, 3])}, \code{np.array([[5, 3]])} and
+\code{np.array([[5], [3]])}, and say which a Keras layer expects for one example
+with two features.
+
+\exercisesection{Analytical Problems}
+
+\ap Show that the entry in row $i$, column $j$ of $\mathbf{A}^{[l-1]}\Wl{l}$ is
+$\vw^{[l]}_j\cdot\va^{[l-1](i)}$, and hence that the batch layer equation is the
+one equation applied to every example and every unit.
+
+\ap Compute the number of parameters in each layer and in total for networks of
+sizes $64\to25\to15\to1$ and $784\to128\to64\to10$. Which layer holds most of
+the parameters in each, and why?
+
+\ap Propagate $\vx = (0, 0)$ and $\vx = (0.5, -0.5)$ through N231 by hand,
+giving $\mathbf{z}^{[1]}$, $\va^{[1]}$, $z^{[2]}$ and $a^{[2]}$ for each, and
+state the predictions.
+
+\ap Using the matrix form, compute $\mathbf{Z}^{[1]}$ and $\mathbf{A}^{[2]}$ for
+N231 with $\Xmat = \begin{bmatrix}0&0\\2&1\end{bmatrix}$.
+
+\ap Prove by induction that a network of $L$ layers with identity activations
+computes an affine function of $\vx$, and give $\mathbf{W}'$ and $\mathbf{b}'$
+in terms of the layers' parameters.
+
+\ap Prove that no choice of $(w_1, w_2, b)$ gives a logistic unit that outputs
+at least $0.5$ on $(0,1)$ and $(1,0)$ and less than $0.5$ on $(0,0)$ and $(1,1)$.
+(Hint: add the two pairs of inequalities on $z$.)
+
+\ap Design by hand a $2\to2\to1$ sigmoid network computing XNOR, the negation of
+XOR, and verify it on all four inputs.
+
+\exercisesection{Design Problems}
+
+\dpr A microcontroller can store at most $5{,}000$ parameters. Design a network
+for $28\times28$ greyscale images that decides between two classes and fits the
+budget. Show the count, and say what you give up to fit.
+
+\dpr You inherit a function that claims to perform forward propagation. Design
+three hand-computable test cases that would expose, respectively, a missing bias,
+the wrong input to the second layer, and a missing activation function. State
+the expected output of each.
+
+\dpr A colleague claims hidden unit $7$ of a trained X-ray classifier ``detects
+fractures''. Design an experiment to support or refute the claim, and state
+what result would refute it.
+
+\dpr A mobile app must score two million transactions overnight with a
+$30\to16\to8\to1$ network. Design the inference code: the batch size, the
+memory needed per batch, and the shape of every intermediate matrix. Justify the
+batch size.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement \code{dense}, \code{sequential} and \code{dense\_v} as in
+\cref{sec:nn-code}, and verify that all three reproduce the N231 outputs of
+\cref{sec:forward-prop}.
+
+\pe Build N231 in Keras, load the weights, and write an assertion-based test
+that your NumPy implementation agrees with \code{model.predict} on $1000$ random
+inputs to within $10^{-6}$. Explain the tolerance.
+
+\pe Time the looped and vectorised layers on a $(10{,}000, 784)$ input and a
+$784\to128$ layer. Report the speed-up on your machine, and explain why it is so
+large although the arithmetic is the same.
+
+\pe Train a single logistic unit and a $2\to2\to1$ network on the four XOR points
+with Keras. Report whether each learns XOR, and, for the network, plot the four
+points in hidden space after training. Repeat with five random seeds; does
+training always succeed?
+
+\exercisesection{Self-Test}
+
+\qz A single sigmoid unit is equivalent to: (a)~linear regression; (b)~logistic
+regression; (c)~a decision tree; (d)~$k$-means.
+
+\qz In $a^{[l]}_j$, the superscript $[l]$ denotes: (a)~the training example;
+(b)~the layer; (c)~the unit; (d)~the iteration.
+
+\qz A layer with $64$ inputs and $25$ units has: (a)~$64$ parameters; (b)~$1600$;
+(c)~$1625$; (d)~$89$.
+
+\qz In the convention of this chapter, the weight matrix of a layer has shape:
+(a)~$(\text{units}, n_{\text{in}})$; (b)~$(n_{\text{in}}, \text{units})$;
+(c)~$(m, \text{units})$; (d)~$(\text{units}, \text{units})$.
+
+\qz Forward propagation is required for: (a)~inference only; (b)~training only;
+(c)~both inference and training; (d)~neither.
+
+\qz A network whose layers all use the identity activation is equivalent to:
+(a)~a deeper network; (b)~a single linear layer; (c)~a decision tree; (d)~XOR.
+
+\qz The best single logistic unit fitted to XOR outputs: (a)~$0$ everywhere;
+(b)~$1$ everywhere; (c)~$0.5$ everywhere; (d)~XOR.
+
+\qz The universal approximation theorem guarantees that: (a)~gradient descent
+finds the best weights; (b)~one sufficiently wide hidden layer can approximate
+any continuous function; (c)~networks always generalise; (d)~deeper is better.
+
+\furtherreading
+
+\textcite{james2021} §10.1 introduces single-layer networks with exactly this
+chapter's reading of hidden units as learned features, and §10.2 the multilayer
+network, written with weight matrices and applied to handwritten digits; both
+are short and worth reading in full. \textcite{bishop2006} §5.1 gives the
+feed-forward network function in general form, including how the bias can be
+absorbed into the weights by an extra constant input, a careful statement of the
+approximation properties behind the Cybenko spotlight, and a discussion of the
+symmetries --- permuting hidden units, flipping signs --- that make many different
+weight settings compute the same function.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch09} turns the forward pass into a learning
+algorithm: the loss, the activation functions beyond the sigmoid, softmax for
+many classes, and back-propagation, which computes every gradient of a network in
+one backward sweep.

@@ -1,16 +1,1041 @@
 %% ch07.tex --- Overfitting and Regularization
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch07_regularization.py.
+%% Figure coordinates are printed by the same script (sections [7.1], [7.4]).
 
 \chapter{Overfitting and Regularization}
 \label{ch:ch07}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{With four parameters I can fit an elephant, and with five I can make
+him wiggle his trunk.}{---\ attributed to John von Neumann}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Recognise underfitting and overfitting from a plot and from a pair of
+        numbers --- training cost and test cost --- and say which is which.
+  \item Explain why enlarging the hypothesis space can never raise the training
+        cost, and why it can raise the test cost without limit.
+  \item List the three standard remedies for overfitting and say what each
+        costs.
+  \item Write the regularized cost for linear and logistic regression and
+        explain what $\lambda$ trades off, at both extremes.
+  \item Derive the regularized gradient-descent update and read its first term
+        as a shrinkage of every weight by $1 - \alpha\lambda/m$.
+  \item Derive the closed-form ridge solution and show that the penalty makes it
+        exist even when $\Xmat^{\mathsf{T}}\Xmat$ is singular.
+  \item Explain why the bias $b$ is not penalised, and demonstrate what goes
+        wrong if it is.
+  \item Contrast L2 and L1 penalties through the constraint-region picture, and
+        explain why only L1 produces exact zeros.
+  \item Choose $\lambda$ on a logarithmic grid using held-out data, with the
+        features scaled first.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch05} ended with a model that passed exactly through all ten of its
+training points and was plainly the worst description of the data in its table.
+\Cref{ch:ch06} ended with another: perfectly separable data on which the
+logistic coefficients grew for as long as gradient descent was allowed to run.
+Both failures have the same cause, and this chapter names it, measures it, and
+supplies the standard defence.
+
+The defence is a single extra term in the cost function. It is the first
+modification we make to a cost for a reason other than the fit to the data, and
+it is worth noticing how little else changes: the model, the optimizer and the
+decision rule all survive intact.
+
+\section{The Problem of Overfitting}
+\label{sec:overfitting}
+
+The difficulty with \cref{ch:ch05}'s degree-$9$ example was that it had only ten
+points, all of them used for fitting, so we could see the fit was bad but not
+measure it. Here is the same experiment with data held back.
+
+\begin{defbox}{Dataset T9}
+Ten training points and nine test points, generated from the curve
+$y = 0.5x^2 - 2x + 6$ with Gaussian noise of standard deviation $1.5$ added and
+the result rounded to one decimal place. The test points sit halfway between the
+training points, so every prediction asked of a model is an interpolation.
+
+\begin{center}
+\small
+\setlength{\tabcolsep}{4.5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l*{10}{r}@{}}
+\toprule
+\multicolumn{11}{@{}l}{\textbf{Training set}}\\
+$x$ & $1$ & $2$ & $3$ & $4$ & $5$ & $6$ & $7$ & $8$ & $9$ & $10$\\
+$y$ & $4.8$ & $3.2$ & $3.9$ & $2.3$ & $11.2$ & $13.7$ & $16.0$ & $23.2$ & $28.9$
+    & $35.2$\\
+\midrule
+\multicolumn{11}{@{}l}{\textbf{Test set}}\\
+$x$ & $1.5$ & $2.5$ & $3.5$ & $4.5$ & $5.5$ & $6.5$ & $7.5$ & $8.5$ & $9.5$ & \\
+$y$ & $5.6$ & $3.7$ & $4.6$ & $5.9$ & $10.8$ & $14.0$ & $19.9$ & $24.2$ & $32.3$
+    & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+We know the truth here, which real problems never grant: a quadratic, plus noise
+that no model can predict. A model that learned the quadratic and ignored the
+noise would be the best possible.
+\end{defbox}
+
+Fit polynomials of degree $1$ to $9$ to the training set exactly as in
+\cref{sec:polynomial} --- powers standardised on the training set, least squares,
+no other changes --- and evaluate each on both sets with the cost of
+\cref{ch:ch02}:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+degree & $J_{\text{train}}$ & $J_{\text{test}}$ & largest $|w_j|$\\
+\midrule
+$1$ & $6.9932$ & $5.8153$ & $10.3$\\
+$2$ & $1.2997$ & $\mathbf{0.4843}$ & $15.1$\\
+$3$ & $1.0348$ & $0.5536$ & $37.2$\\
+$4$ & $0.9796$ & $0.6121$ & $79.9$\\
+$5$ & $0.9759$ & $0.5836$ & $59.9$\\
+$6$ & $0.7750$ & $0.5689$ & $4{,}930$\\
+$7$ & $0.7748$ & $0.5662$ & $5{,}854$\\
+$8$ & $0.1202$ & $7.2178$ & $608{,}600$\\
+$9$ & $0.0000$ & $17.4598$ & $4{,}309{,}257$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The table shows three distinct regimes, and \cref{fig:three-fits} shows one
+representative of each.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.92\linewidth, height=6.0cm,
+      xlabel={$x$}, ylabel={$y$},
+      xmin=0.6, xmax=10.4, ymin=-15, ymax=42,
+      legend style={font=\scriptsize, at={(0.98,0.03)}, anchor=south east}]
+      \addplot[MLAmber, thick, dashed] coordinates {(0.8,-2.669)(1.0,-1.949)(1.2,-1.230)(1.4,-0.510)(1.6,0.209)(1.8,0.929)(2.0,1.648)(2.2,2.368)(2.4,3.088)(2.6,3.807)(2.8,4.527)(3.0,5.246)(3.2,5.966)(3.4,6.685)(3.6,7.405)(3.8,8.124)(4.0,8.844)(4.2,9.563)(4.4,10.283)(4.6,11.002)(4.8,11.722)(5.0,12.441)(5.2,13.161)(5.4,13.880)(5.6,14.600)(5.8,15.319)(6.0,16.039)(6.2,16.758)(6.4,17.478)(6.6,18.197)(6.8,18.917)(7.0,19.636)(7.2,20.356)(7.4,21.075)(7.6,21.795)(7.8,22.514)(8.0,23.234)(8.2,23.953)(8.4,24.673)(8.6,25.392)(8.8,26.112)(9.0,26.832)(9.2,27.551)(9.4,28.271)(9.6,28.990)(9.8,29.710)(10.0,30.429)(10.2,31.149)};
+      \addlegendentry{degree 1: $J_{\text{train}}=6.99$, $J_{\text{test}}=5.82$}
+      \addplot[MLBlue, very thick] coordinates {(0.8,3.759)(1.0,3.624)(1.2,3.526)(1.4,3.465)(1.6,3.442)(1.8,3.455)(2.0,3.506)(2.2,3.594)(2.4,3.719)(2.6,3.881)(2.8,4.081)(3.0,4.317)(3.2,4.591)(3.4,4.902)(3.6,5.250)(3.8,5.635)(4.0,6.057)(4.2,6.517)(4.4,7.013)(4.6,7.547)(4.8,8.118)(5.0,8.726)(5.2,9.371)(5.4,10.054)(5.6,10.773)(5.8,11.530)(6.0,12.324)(6.2,13.155)(6.4,14.023)(6.6,14.928)(6.8,15.870)(7.0,16.850)(7.2,17.867)(7.4,18.921)(7.6,20.012)(7.8,21.140)(8.0,22.305)(8.2,23.508)(8.4,24.747)(8.6,26.024)(8.8,27.338)(9.0,28.689)(9.2,30.077)(9.4,31.503)(9.6,32.965)(9.8,34.465)(10.0,36.002)(10.2,37.576)};
+      \addlegendentry{degree 2: $J_{\text{train}}=1.30$, $J_{\text{test}}=0.48$}
+      \addplot[MLRose, thick] coordinates {(0.8,46.953)(1.0,4.800)(1.2,-10.979)(1.4,-12.646)(1.6,-8.076)(1.8,-1.968)(2.0,3.199)(2.2,6.421)(2.4,7.607)(2.6,7.167)(2.8,5.721)(3.0,3.903)(3.2,2.250)(3.4,1.138)(3.6,0.769)(3.8,1.183)(4.0,2.292)(4.2,3.919)(4.4,5.839)(4.6,7.822)(4.8,9.664)(5.0,11.211)(5.2,12.375)(5.4,13.137)(5.6,13.540)(5.8,13.681)(6.0,13.689)(6.2,13.706)(6.4,13.865)(6.6,14.269)(6.8,14.980)(7.0,16.007)(7.2,17.306)(7.4,18.791)(7.6,20.344)(7.8,21.845)(8.0,23.197)(8.2,24.356)(8.4,25.352)(8.6,26.305)(8.8,27.411)(9.0,28.901)(9.2,30.949)(9.4,33.521)(9.6,36.138)(9.8,37.537)(10.0,35.200)(10.2,24.733)};
+      \addlegendentry{degree 9: $J_{\text{train}}=0.00$, $J_{\text{test}}=17.46$}
+      \addplot[only marks, mark=*, mark size=1.8pt, MLGray, forget plot]
+        coordinates {(1,4.8)(2,3.2)(3,3.9)(4,2.3)(5,11.2)(6,13.7)(7,16.0)
+                     (8,23.2)(9,28.9)(10,35.2)};
+      \addplot[only marks, mark=o, mark size=2.0pt, MLTeal, thick, forget plot]
+        coordinates {(1.5,5.6)(2.5,3.7)(3.5,4.6)(4.5,5.9)(5.5,10.8)(6.5,14.0)
+                     (7.5,19.9)(8.5,24.2)(9.5,32.3)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Underfitting, a good fit, and overfitting on T9. Filled grey points
+  are the training set; open teal circles the test set. The straight line
+  misses the curvature everywhere. The quadratic follows the trend and ignores
+  the noise. The degree-$9$ curve passes through every training point and, to
+  do so, swings between them: it plunges to $-12.6$ near $x = 1.4$, rises to
+  $7.6$ at $x = 2.4$, sinks to $0.8$ at $x = 3.6$ and overshoots to $37.5$ at
+  $x = 9.8$ --- in each case between training points, exactly where the test
+  points are.}
+  \label{fig:three-fits}
+\end{figure}
+
+\begin{defbox}{Underfitting and overfitting}
+A model \term{underfits} when it is too simple to represent the pattern in the
+data. Its training cost is high, and its test cost is about as high: it does
+badly everywhere. This is also called \term{high bias} --- the model is biased
+towards a shape the data does not have.
+
+A model \term{overfits} when it fits the training data, noise included, so
+closely that it no longer describes new data. Its training cost is low and its
+test cost much higher. This is also called \term{high variance} --- a different
+training set would have produced a very different model.
+
+The quantity we actually care about is the error on data the model has not
+seen, its \term{generalization} error. The test cost estimates it; the training
+cost does not.
+\end{defbox}
+
+\Cref{ch:ch10} makes \emph{bias} and \emph{variance} precise, and turns the two
+numbers $J_{\text{train}}$ and $J_{\text{test}}$ into a diagnostic procedure.
+Here we need only the qualitative picture: degree $1$ underfits, degree $2$ is
+right, and degrees $8$ and $9$ overfit. Degrees $3$ to $7$ are interesting in
+their own way --- slightly worse than the quadratic on test data, but not
+disastrously so. Their extra flexibility is mostly unused.
+
+\begin{keyinsight}{Read the gap, not either number alone}
+A low training cost says the model can represent the training data; it says
+nothing about new data. A high test cost says something is wrong, but not what.
+The \emph{pair} is the diagnosis: both high is underfitting; training low and
+test high is overfitting; both low is what we want. On T9 the degree-$9$ model's
+training cost is the best in the table and its test cost thirty-six times worse
+than the quadratic's.
+\end{keyinsight}
+
+\section{Why More Parameters Buy Training Accuracy}
+\label{sec:nested}
+
+The training column of the table falls monotonically. That is not a property of
+T9; it is a theorem.
+
+\begin{derivation}{Training cost cannot rise as the hypothesis space grows}
+Let $\Hspace_d$ be the polynomials of degree at most $d$. Every polynomial of
+degree $d$ is a polynomial of degree $d+1$ whose leading coefficient happens to
+be zero, so
+\[
+  \Hspace_1 \subseteq \Hspace_2 \subseteq \cdots \subseteq \Hspace_9 .
+\]
+Let $f_d^\star$ minimise $J_{\text{train}}$ over $\Hspace_d$. Because
+$f_d^\star \in \Hspace_{d+1}$, it is one of the candidates over which
+$f_{d+1}^\star$ is the minimiser, so
+\[
+  J_{\text{train}}(f_{d+1}^\star) \;\le\; J_{\text{train}}(f_d^\star).
+\]
+Nothing in the argument mentions polynomials beyond the nesting. It holds for
+any family of hypothesis spaces in which each contains the last: adding a
+feature, adding a hidden unit to a network, deepening a tree. Training cost is a
+non-increasing function of capacity.
+\end{derivation}
+
+The argument says nothing at all about $J_{\text{test}}$, and nothing could: the
+minimiser over $\Hspace_{d+1}$ is chosen to fit the training points, and the
+extra freedom is spent wherever it reduces training error most. With ten
+training points and ten parameters there is exactly one interpolating
+polynomial, and the freedom is spent bending it through the noise.
+
+The last column of the table shows how. The coefficients of the degree-$9$ fit
+reach $4.3$ million, on data whose values never exceed $36$. Large coefficients
+of opposite sign cancel at the training points --- where they were fitted ---
+and fail to cancel between them. This is the signature of overfitting that
+regularization targets directly: \emph{an overfitted model is a model with very
+large weights}.
+
+\begin{pitfall}{More data points do not mean more parameters are safe}
+It is tempting to read the T9 failure as ``degree $9$ is too high'' and conclude
+that some fixed degree is safe. What matters is the ratio of parameters to
+examples, and the noise level. With a thousand training points the degree-$9$
+fit would be close to the quadratic, because the noise would average out. With
+ten, even degree $3$ is spending some freedom on noise. There is no degree that
+is right independently of the data.
+\end{pitfall}
+
+\section{Addressing Overfitting}
+\label{sec:remedies}
+
+There are three standard remedies, and they act on different parts of the
+learning problem of \cref{sec:four-parts}.
+
+\begin{enumerate}
+  \item \textbf{Collect more training data.} The data part. The interpolating
+        curve has nothing left to bend through once there are many more points
+        than parameters. This is the most reliable remedy, and often the most
+        expensive: labels cost money and time. \Cref{ch:ch10}'s learning curves
+        tell you in advance whether it will help, and \cref{ch:ch11} discusses
+        cheaper ways to get more data.
+  \item \textbf{Use fewer features.} The hypothesis-space part. Choose a lower
+        degree, or select a subset of the original features by hand or by an
+        algorithm. This works, but it is a blunt instrument: a discarded
+        feature contributes nothing, even if it carried a little real signal.
+  \item \textbf{Regularize.} The cost part. Keep every feature, but add a term
+        to the cost that penalises large weights, so the optimizer prefers small
+        ones. The model can still use all its features; it simply has to pay to
+        lean heavily on any of them.
+\end{enumerate}
+
+The third remedy is the subject of the rest of the chapter, because it is
+continuous where the second is discrete --- one dial, $\lambda$, instead of an
+on/off switch per feature --- and because it is the one that carries over
+unchanged to logistic regression and to the networks of \cref{ch:ch08}.
+
+\section{The Regularized Cost}
+\label{sec:regularized-cost}
+
+\begin{defbox}{Regularized cost (L2, ridge)}
+For a model with weights $\vw \in \Real{n}$ and bias $b$, the
+\term{regularized} cost is
+\[
+  J(\vw,b) \;=\;
+  \underbrace{\frac{1}{2m}\sum_{i=1}^{m}\bigl(\fvwb(\xii{i}) - \yii{i}\bigr)^2}_{\text{fit to the data}}
+  \;+\;
+  \underbrace{\frac{\lambda}{2m}\sum_{j=1}^{n} w_j^2}_{\text{penalty on the weights}} ,
+\]
+where $\lambda \ge 0$ is the \term{regularization parameter}. The penalty sums
+over the weights only --- not over $b$ (\cref{sec:why-not-b}). It is called an
+\term{L2 penalty}, or \term{ridge} penalty, because $\sum_j w_j^2 =
+\|\vw\|_2^2$; in neural networks the same term is called \term{weight decay}.
+\end{defbox}
+
+The factor $\frac{1}{2m}$ in front of the penalty matches the factor in front of
+the data term. The $\frac12$ cancels on differentiation, as before; the
+$\frac1m$ means that $\lambda$ trades the penalty against the \emph{average}
+squared error, so the same $\lambda$ means roughly the same thing for a hundred
+examples as for a million.
+
+The two extremes make the trade-off plain.
 
 \begin{itemize}
-  \item The Problem of Overfitting
-  \item Addressing Overfitting
-  \item The Cost Function with Regularization
-  \item Regularized Linear Regression
-  \item Regularized Logistic Regression
-  \item Ridge and Lasso
+  \item $\lambda = 0$: no penalty, and we are back to ordinary least squares and
+        the degree-$9$ curve of \cref{fig:three-fits}.
+  \item $\lambda \to \infty$: any non-zero weight costs an unbounded amount, so
+        $\vw \to \mathbf{0}$ and $f(\vx) \to b$, a horizontal line at the mean
+        of $y$ --- the most underfitted model there is.
 \end{itemize}
+
+Between the two, $\lambda$ sets how much training fit the model must give up to
+earn a reduction in $\|\vw\|$.
+
+\begin{workedexample}{A $\lambda$ sweep on the degree-9 fit}
+Fit all nine standardised powers of T9 with the regularized cost, for $\lambda$
+over seven orders of magnitude:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$\lambda$ & $J_{\text{train}}$ & $J_{\text{test}}$ & $\|\vw\|_2$\\
+\midrule
+$0$         & $0.0000$  & $17.4598$ & $6{,}832{,}546$\\
+$10^{-4}$   & $0.9371$  & $0.5811$  & $77.57$\\
+$10^{-3}$   & $1.0081$  & $0.5251$  & $32.70$\\
+$10^{-2}$   & $1.1353$  & $\mathbf{0.5096}$ & $16.49$\\
+$10^{-1}$   & $1.4152$  & $0.6298$  & $7.54$\\
+$1$         & $1.9045$  & $0.8300$  & $5.00$\\
+$10$        & $4.2559$  & $2.4679$  & $3.48$\\
+$10^{2}$    & $21.5119$ & $16.8833$ & $1.66$\\
+$10^{3}$    & $52.1817$ & $39.5557$ & $0.28$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three things to read off it. First, even $\lambda = 10^{-4}$ --- a penalty so
+small it barely registers in the cost --- cuts the weight norm from $6.8$ million
+to $78$ and the test cost from $17.46$ to $0.58$. The interpolating solution was
+balanced on a knife-edge of cancellation, and the slightest preference for small
+weights knocks it off. Second, the training cost rises steadily with $\lambda$,
+as it must: the penalty pulls the model away from the training data. Third, the
+test cost falls, bottoms out near $\lambda = 10^{-2}$ at $0.5096$ --- within
+$0.03$ of the true-degree quadratic's $0.4843$, from a model with nine
+features --- and then rises again as the model underfits. At $\lambda = 10^3$ the
+fit is well on its way to the horizontal line $y = 14.24$ at the mean of the
+training targets, whose training cost is $60.38$.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=5.0cm,
+        xmode=log, xlabel={$\lambda$}, ylabel={cost},
+        xmin=5e-5, xmax=2e3, ymin=0, ymax=12,
+        legend style={font=\tiny, at={(0.03,0.97)}, anchor=north west}]
+        \addplot[MLBlue, very thick, mark=*, mark size=1.1pt] coordinates
+          {(0.0001,0.9371)(0.0003162,0.9673)(0.001,1.0081)(0.003162,1.0518)
+           (0.01,1.1353)(0.03162,1.2744)(0.1,1.4152)(0.3162,1.6000)(1,1.9045)
+           (3.162,2.5529)(10,4.2559)(31.62,8.8828)(100,21.5119)};
+        \addlegendentry{$J_{\text{train}}$}
+        \addplot[MLRose, very thick, mark=square*, mark size=1.1pt] coordinates
+          {(0.0001,0.5811)(0.0003162,0.5495)(0.001,0.5251)(0.003162,0.5057)
+           (0.01,0.5096)(0.03162,0.5627)(0.1,0.6298)(0.3162,0.7163)(1,0.8300)
+           (3.162,1.1371)(10,2.4679)(31.62,6.6340)(100,16.8833)};
+        \addlegendentry{$J_{\text{test}}$}
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=5.0cm,
+        xlabel={$x$}, ylabel={$y$}, xmin=0.6, xmax=10.4, ymin=-8, ymax=42,
+        legend style={font=\tiny, at={(0.03,0.97)}, anchor=north west}]
+        \addplot[MLTeal, very thick] coordinates {(0.8,3.041)(1.0,3.086)(1.2,3.148)(1.4,3.226)(1.6,3.323)(1.8,3.437)(2.0,3.572)(2.2,3.727)(2.4,3.904)(2.6,4.104)(2.8,4.328)(3.0,4.577)(3.2,4.853)(3.4,5.157)(3.6,5.490)(3.8,5.854)(4.0,6.249)(4.2,6.679)(4.4,7.143)(4.6,7.643)(4.8,8.181)(5.0,8.758)(5.2,9.376)(5.4,10.036)(5.6,10.738)(5.8,11.484)(6.0,12.275)(6.2,13.112)(6.4,13.994)(6.6,14.923)(6.8,15.898)(7.0,16.919)(7.2,17.984)(7.4,19.092)(7.6,20.242)(7.8,21.430)(8.0,22.652)(8.2,23.905)(8.4,25.184)(8.6,26.480)(8.8,27.788)(9.0,29.096)(9.2,30.395)(9.4,31.673)(9.6,32.913)(9.8,34.100)(10.0,35.215)(10.2,36.236)};
+        \addlegendentry{$\lambda = 0.1$}
+        \addplot[MLAmber, thick, dashed] coordinates {(0.8,4.969)(1.0,5.109)(1.2,5.254)(1.4,5.404)(1.6,5.561)(1.8,5.723)(2.0,5.893)(2.2,6.070)(2.4,6.254)(2.6,6.446)(2.8,6.647)(3.0,6.858)(3.2,7.078)(3.4,7.310)(3.6,7.552)(3.8,7.807)(4.0,8.075)(4.2,8.358)(4.4,8.656)(4.6,8.971)(4.8,9.305)(5.0,9.658)(5.2,10.032)(5.4,10.430)(5.6,10.853)(5.8,11.305)(6.0,11.786)(6.2,12.301)(6.4,12.852)(6.6,13.444)(6.8,14.079)(7.0,14.762)(7.2,15.498)(7.4,16.293)(7.6,17.151)(7.8,18.080)(8.0,19.086)(8.2,20.177)(8.4,21.362)(8.6,22.651)(8.8,24.054)(9.0,25.582)(9.2,27.248)(9.4,29.066)(9.6,31.051)(9.8,33.220)(10.0,35.591)(10.2,38.185)};
+        \addlegendentry{$\lambda = 10$}
+        \addplot[only marks, mark=*, mark size=1.6pt, MLGray, forget plot]
+          coordinates {(1,4.8)(2,3.2)(3,3.9)(4,2.3)(5,11.2)(6,13.7)(7,16.0)
+                       (8,23.2)(9,28.9)(10,35.2)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{Left: training and test cost of the degree-$9$ model against
+  $\lambda$, on a logarithmic axis. The training cost only rises; the test cost
+  falls to a minimum near $\lambda = 0.005$ and then rises as the model
+  underfits. Right: the fitted curve at two values of $\lambda$. At $0.1$ the
+  nine-feature model looks almost exactly like a quadratic; at $10$ it is
+  visibly too flat at both ends.}
+  \label{fig:lambda-sweep}
+\end{figure}
+
+The curves in \cref{fig:lambda-sweep} have the shape of every regularization
+curve you will meet: training cost monotone in $\lambda$, held-out cost
+U-shaped. The bottom of the U is the model to choose, and \cref{sec:choose-lambda}
+says how to find it without spending the test set.
+
+\section{Regularized Linear Regression}
+\label{sec:reg-linreg}
+
+\subsection{Gradient descent}
+
+The penalty changes the gradient with respect to each weight and leaves the
+gradient with respect to $b$ alone.
+
+\begin{derivation}{The regularized update as shrinkage}
+Differentiate the regularized cost. The data term gives exactly the gradient of
+\cref{sec:gd-multi}; the penalty $\frac{\lambda}{2m}\sum_k w_k^2$ contributes
+$\frac{\lambda}{m}w_j$ to the $j$-th partial derivative and nothing to the
+partial with respect to $b$:
+\[
+  \frac{\partial J}{\partial w_j}
+    = \frac1m\sum_{i=1}^{m}\bigl(\fvwb(\xii{i})-\yii{i}\bigr)\xjj{i}{j}
+      + \frac{\lambda}{m}w_j ,
+  \qquad
+  \frac{\partial J}{\partial b}
+    = \frac1m\sum_{i=1}^{m}\bigl(\fvwb(\xii{i})-\yii{i}\bigr).
+\]
+Substitute into the update $w_j \leftarrow w_j - \alpha\,\partial J/\partial w_j$
+and collect the two terms in $w_j$:
+\[
+  w_j \;\leftarrow\;
+  \underbrace{\Bigl(1 - \alpha\frac{\lambda}{m}\Bigr) w_j}_{\text{shrink}}
+  \;-\;
+  \underbrace{\alpha\,\frac1m\sum_{i=1}^{m}\bigl(\fvwb(\xii{i})-\yii{i}\bigr)\xjj{i}{j}}_{\text{the unregularized step}} .
+\]
+The second term is the familiar update. The first multiplies every weight by a
+factor slightly less than one before the step is taken. With $\alpha = 0.01$,
+$\lambda = 1$ and $m = 10$, the factor is $1 - 0.001 = 0.9990$: each iteration
+shrinks every weight by $0.1\%$, then lets the data push it back where the data
+insists.
+
+The update for $b$ is unchanged.
+\end{derivation}
+
+This reading explains the name \emph{weight decay}: left alone, with no data
+pressure, every weight would decay geometrically to zero, by a factor of
+$1-\alpha\lambda/m$ per step. A weight survives only if the data keeps paying
+for it. For the result to be a shrinkage rather than an oscillation the factor
+must lie in $(0,1)$, which requires $\alpha\lambda < m$; in practice it is
+always very close to one.
+
+Running this update on T9 with all nine powers, $\lambda = 1$ and
+$\alpha = 0.05$, for $200{,}000$ iterations from the origin, reproduces the
+closed-form solution of the next subsection to within $3\times10^{-14}$ in every
+weight. The two routes find the same minimiser, as they must: the regularized
+cost is a convex quadratic, so it has exactly one.
+
+\subsection{The closed form}
+
+The normal equation of \cref{sec:normal-equation} extends directly.
+
+\begin{derivation}{Ridge regression in closed form}
+Absorb $b$ into the weights as in \cref{ch:ch04}: prepend a column of ones to
+the design matrix, $\tilde\Xmat = [\mathbf{1}\ \Xmat]$, and write
+$\boldsymbol\theta = (b, w_1, \dots, w_n)$. Let $I'$ be the
+$(n+1)\times(n+1)$ identity with its top-left entry set to zero, so that
+$\boldsymbol\theta^{\mathsf{T}}I'\boldsymbol\theta = \sum_{j\ge1}w_j^2$ excludes
+$b$. The cost is
+\[
+  J(\boldsymbol\theta) = \frac{1}{2m}\|\tilde\Xmat\boldsymbol\theta - \vy\|^2
+                       + \frac{\lambda}{2m}\boldsymbol\theta^{\mathsf{T}}I'\boldsymbol\theta .
+\]
+Its gradient is
+$\frac1m\bigl(\tilde\Xmat^{\mathsf{T}}(\tilde\Xmat\boldsymbol\theta - \vy)
++ \lambda I'\boldsymbol\theta\bigr)$; setting it to zero gives
+\[
+  \boxed{\;\bigl(\tilde\Xmat^{\mathsf{T}}\tilde\Xmat + \lambda I'\bigr)\boldsymbol\theta
+  = \tilde\Xmat^{\mathsf{T}}\vy\;}
+\]
+--- the normal equations with $\lambda$ added to every diagonal entry except
+the one belonging to $b$.
+\end{derivation}
+
+The added diagonal does more than change the answer: it guarantees there is one.
+\Cref{sec:singular} showed that $\tilde\Xmat^{\mathsf{T}}\tilde\Xmat$ is singular
+when features are duplicated or linearly dependent, so the unregularized normal
+equations have infinitely many solutions. For any $\lambda > 0$ the matrix
+$\tilde\Xmat^{\mathsf{T}}\tilde\Xmat + \lambda I'$ is invertible provided the
+column of ones is not itself the problem, because
+$\boldsymbol\theta^{\mathsf{T}}(\tilde\Xmat^{\mathsf{T}}\tilde\Xmat + \lambda
+I')\boldsymbol\theta = \|\tilde\Xmat\boldsymbol\theta\|^2 + \lambda\sum_{j\ge1}w_j^2$,
+which is zero only if every $w_j = 0$ and then $b\cdot\mathbf{1} = \mathbf{0}$,
+so $b = 0$ too.
+
+\begin{workedexample}{A duplicated feature, resolved}
+Take the first standardised power of T9 and include it twice, so the design
+matrix has three columns of which two are identical. The unregularized
+$\tilde\Xmat^{\mathsf{T}}\tilde\Xmat$ has rank $2$ out of $3$: any split
+$w_1 + w_2 = c$ fits equally well, and the normal equations cannot choose.
+
+With $\lambda = 1$ the system has the unique solution $b = 14.2400$,
+$w_1 = w_2 = 4.9206$. The penalty breaks the tie in the only symmetric way:
+for a fixed sum $w_1 + w_2$, the sum of squares $w_1^2 + w_2^2$ is smallest
+when the two are equal. As a check, two equal copies each carrying $w$ pay
+$\lambda\cdot 2w^2 = \tfrac{\lambda}{2}(2w)^2$, which is a single copy carrying
+$2w$ under penalty $\lambda/2$; fitting one copy with $\lambda = 0.5$ gives
+$9.8412$, and half of that is $4.9206$.
+\end{workedexample}
+
+\begin{researchspotlight}{Hoerl \& Kennard (1970) --- Ridge regression}
+\textbf{The problem.} In regression on many correlated predictors, least-squares
+coefficients are unstable: small changes in the data swing them wildly and flip
+their signs, and $\Xmat^{\mathsf{T}}\Xmat$ is close to singular. The estimates
+are unbiased, but their variance is enormous.
+
+\textbf{The idea.} Add a small constant $k$ to the diagonal of
+$\Xmat^{\mathsf{T}}\Xmat$ before inverting. Plot every coefficient against $k$
+--- the \emph{ridge trace} --- and choose the smallest $k$ at which they
+stabilise. The name echoes Hoerl's earlier \emph{ridge analysis} of response
+surfaces.
+
+\textbf{The result.} They proved that for some $k > 0$ the ridge estimator has
+strictly smaller mean squared error than least squares: it accepts a little bias
+in exchange for a larger reduction in variance. The existence of such a $k$ is
+guaranteed whatever the true coefficients are.
+
+\textbf{Why it is here.} It is the closed form of \cref{sec:reg-linreg}, with
+$k$ playing the role of $\lambda$, and its central claim --- that a deliberately
+biased estimator can beat the best unbiased one --- is the bias/variance
+trade-off that \cref{ch:ch10} develops into a diagnostic.
+\parencite{hoerl1970}
+\end{researchspotlight}
+
+\subsection{Why the bias is not penalised}
+\label{sec:why-not-b}
+
+The penalty sums from $j = 1$, leaving $b$ out, and this is not a convenience.
+The weights control how sharply the model responds to changes in the features
+--- that is what overfitting abuses. The bias controls only the overall level of
+the predictions, which a model needs to get right whatever its complexity.
+Penalising it makes the fit depend on an arbitrary choice of origin for $y$.
+
+\begin{workedexample}{Shifting the targets}
+Fit the first two standardised powers of T9 with $\lambda = 10$, twice: once on
+the targets as given and once with $100$ added to every target, which should
+change nothing except the level of every prediction. Report the prediction at
+$x = 5.5$ with the shift subtracted back off.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & shift & $b$ & $f(5.5) - \text{shift}$\\
+\midrule
+$b$ not penalised & $0$   & $14.2400$  & $13.2737$\\
+                  & $100$ & $114.2400$ & $13.2737$\\
+\midrule
+$b$ penalised     & $0$   & $7.1200$   & $6.1537$\\
+                  & $100$ & $57.1200$  & $-43.8463$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Leave $b$ unpenalised and the shift simply passes through to $b$; the prediction
+is unchanged. Penalise it and $b$ is pulled towards zero by an amount that
+depends on how far the targets happen to sit from zero: with $m = 10$ and
+$\lambda = 10$ it becomes $\sum_i \yii{i}/(m+\lambda)$, exactly half the mean.
+A model whose predictions change by $50$ because the targets were recorded in
+different units of origin has learned nothing reliable. (The weights are
+identical in all four rows because standardised features have mean zero, which
+decouples $b$ from $\vw$ entirely.)
+\end{workedexample}
+
+\section{Regularized Logistic Regression}
+\label{sec:reg-logistic}
+
+Nothing in the penalty depends on the data term, so it attaches to the logistic
+cost of \cref{sec:logistic-loss} unchanged.
+
+\begin{defbox}{Regularized logistic cost}
+\[
+  J(\vw,b) = -\frac1m\sum_{i=1}^{m}\Bigl[\yii{i}\ln f^{(i)}
+              + \bigl(1-\yii{i}\bigr)\ln\bigl(1-f^{(i)}\bigr)\Bigr]
+           + \frac{\lambda}{2m}\sum_{j=1}^{n}w_j^2 ,
+  \qquad f^{(i)} = \gsig(\vw\cdot\xii{i} + b).
+\]
+Its gradient is that of \cref{sec:gd-logistic} with $\frac{\lambda}{m}w_j$ added
+to each weight component, so the update is again a shrinkage by
+$1-\alpha\lambda/m$ followed by the unregularized step.
+\end{defbox}
+
+The penalty also adds $\frac{\lambda}{m}I'$ to the Hessian of
+\cref{sec:logistic-convexity}. That matrix was positive semi-definite; adding a
+positive multiple of the identity on the weight block makes the cost strictly
+convex in $\vw$ whatever the data, which is the cure for the pathology that
+closed \cref{ch:ch06}.
+
+\begin{workedexample}{Separable data now has a finite fit}
+Take T7 with the $2$~cm malignancy removed --- seven points separated perfectly
+by any threshold between $5$ and $6$~cm --- for which \cref{ch:ch06} showed the unregularized coefficients
+growing without bound. With the penalty, Newton's method converges to a finite
+minimiser for every $\lambda > 0$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+$\lambda$ & $b$ & $w$ & boundary $-b/w$ & unpenalised cost\\
+\midrule
+$0.001$ & $-51.3188$ & $9.3307$ & $5.5000$ & $0.002678$\\
+$0.01$  & $-31.0923$ & $5.6531$ & $5.5000$ & $0.016496$\\
+$0.1$   & $-14.7120$ & $2.6749$ & $5.5000$ & $0.072081$\\
+$1$     & $-6.2338$  & $1.1321$ & $5.5064$ & $0.193743$\\
+$10$    & $-2.1175$  & $0.3654$ & $5.7957$ & $0.423834$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Small $\lambda$ gives a steep sigmoid with the boundary midway between the
+largest benign tumour ($5$~cm) and the smallest malignant one ($6$~cm), as a
+maximum-margin rule would. Larger $\lambda$ flattens the sigmoid --- the model
+becomes honest about how little seven points can establish --- and eventually,
+at $\lambda = 10$, starts to move the boundary too.
+\end{workedexample}
+
+The same effect is more dramatic with many features. Give T8 all $27$ monomials
+$x_1^px_2^q$ with $1 \le p+q \le 6$, standardised:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$\lambda$ & training accuracy & $\|\vw\|_2$ & unpenalised cost\\
+\midrule
+$10^{-4}$ & $1.00$ & $124.07$ & $0.0602$\\
+$0.1$     & $0.90$ & $2.02$   & $0.2318$\\
+$1$       & $0.90$ & $0.74$   & $0.2536$\\
+$10$      & $0.90$ & $0.45$   & $0.2802$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+With almost no penalty the twenty-seven features separate all twenty tumours,
+using weights of norm $124$ and a boundary contorted around the two awkward
+points of \cref{sec:decision-boundary}. A modest penalty gives back exactly the
+linear model's eighteen-of-twenty, with weights fifty times smaller. Which of
+the two is better cannot be read from training accuracy; that is the point.
+
+\section{L2 and L1 Penalties}
+\label{sec:l1-l2}
+
+The squared penalty is not the only choice. Replace $w_j^2$ by $|w_j|$ and the
+behaviour changes qualitatively.
+
+\begin{defbox}{The L1 penalty (lasso)}
+\[
+  J(\vw,b) = \frac{1}{2m}\sum_{i=1}^{m}\bigl(\fvwb(\xii{i})-\yii{i}\bigr)^2
+           + \frac{\lambda}{m}\sum_{j=1}^{n}|w_j| .
+\]
+The penalty is $\frac{\lambda}{m}\|\vw\|_1$. Linear regression with this penalty
+is called the \term{lasso}, for ``least absolute shrinkage and selection
+operator''.
+\end{defbox}
+
+The difference is best seen through an equivalent formulation. Minimising the
+data cost plus $\lambda$ times a penalty is, for a suitable budget $t$ that
+depends on $\lambda$, the same as minimising the data cost alone subject to the
+penalty not exceeding $t$. For L2 the feasible region $\|\vw\|_2 \le t$ is a
+disc; for L1, $\|\vw\|_1 \le t$ is a diamond with corners on the axes.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=\linewidth, view={0}{90},
+        axis equal image, xlabel={$w_1$}, ylabel={$w_2$},
+        xmin=-1.4, xmax=2.6, ymin=-1.4, ymax=1.9, title={L2: a disc}]
+        \costcontour{MLGray, forget plot, contour/draw color=MLGray,
+          domain=-1.4:2.6, y domain=-1.4:1.9}
+          {0.6333,1.4,2.6}{(x-1.6)^2 + (y-0.6)^2 + 1.2*(x-1.6)*(y-0.6)}
+        \addplot[MLBlue, very thick, fill=MLBlue!12, domain=0:360, samples=90,
+          forget plot] ({cos(x)},{sin(x)});
+        \addplot[only marks, mark=*, mark size=2.2pt, MLRose, forget plot]
+          coordinates {(0.8399,0.5427)};
+        \addplot[only marks, mark=+, mark size=3pt, MLGray, thick, forget plot]
+          coordinates {(1.6,0.6)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=\linewidth, view={0}{90},
+        axis equal image, xlabel={$w_1$}, ylabel={$w_2$},
+        xmin=-1.4, xmax=2.6, ymin=-1.4, ymax=1.9, title={L1: a diamond}]
+        \costcontour{MLGray, forget plot, contour/draw color=MLGray,
+          domain=-1.4:2.6, y domain=-1.4:1.9}
+          {1.1520,2.0,3.2}{(x-1.6)^2 + (y-0.6)^2 + 1.2*(x-1.6)*(y-0.6)}
+        \addplot[MLBlue, very thick, fill=MLBlue!12, forget plot]
+          coordinates {(1,0)(0,1)(-1,0)(0,-1)(1,0)};
+        \addplot[only marks, mark=*, mark size=2.2pt, MLRose, forget plot]
+          coordinates {(1,0)};
+        \addplot[only marks, mark=+, mark size=3pt, MLGray, thick, forget plot]
+          coordinates {(1.6,0.6)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{The same quadratic data cost (grey contours, minimum at the cross,
+  $(1.6,\,0.6)$) constrained to an L2 disc and to an L1 diamond of radius $1$.
+  The constrained optimum (dot) is where the smallest contour touches the
+  region. On the disc it is $(0.8399,\,0.5427)$ --- both weights shrunk, neither
+  zero. On the diamond it is the corner $(1,\,0)$: $w_2$ is exactly zero. The
+  innermost contour in each panel is drawn at the level of the optimum,
+  $0.6333$ and $1.1520$, computed in \texttt{verify/}.}
+  \label{fig:l1-l2}
+\end{figure}
+
+\Cref{fig:l1-l2} is the whole argument. The elliptical contours of a smooth cost
+are far more likely to first touch a diamond at a corner than anywhere else,
+because the corners stick out; and at a corner some coordinates are exactly
+zero. The disc has no corners, so the touching point is generically off the
+axes, and every weight is shrunk but none is eliminated.
+
+\begin{workedexample}{Lasso and ridge on the degree-9 fit}
+Fit T9's nine standardised powers with each penalty at several values of
+$\lambda$. The lasso cost has no closed form, because $|w_j|$ is not
+differentiable at zero; it was minimised by coordinate descent, and agrees with
+\tool{scikit-learn}'s \code{Lasso} to $2\times10^{-10}$.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{L1 (lasso)} & \multicolumn{2}{c}{L2 (ridge)}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+$\lambda$ & non-zero $w_j$ & $J_{\text{test}}$ & non-zero $w_j$ & $J_{\text{test}}$\\
+\midrule
+$0.1$ & $3$ of $9$ & $0.5235$ & $9$ of $9$ & $0.6298$\\
+$1$   & $2$ of $9$ & $0.7249$ & $9$ of $9$ & $0.8300$\\
+$5$   & $2$ of $9$ & $0.7695$ & $9$ of $9$ & $1.4752$\\
+$20$  & $2$ of $9$ & $2.0537$ & $9$ of $9$ & $4.4326$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+From $\lambda = 1$ upward the lasso keeps exactly two features, $x^2$ and $x^3$,
+and sets the other seven to exactly zero. At $\lambda = 5$ its weights are
+$w_2 = 6.4332$ and $w_3 = 3.9441$. It has, in effect, chosen a low-degree
+polynomial for us --- the selection that the second remedy of
+\cref{sec:remedies} asked us to make by hand. Ridge, meanwhile, never sets
+anything to zero.
+\end{workedexample}
+
+\begin{pitfall}{Sparse is not the same as true}
+The lasso kept $x^2$ and $x^3$, but the curve that generated T9 has $x$ and
+$x^2$. The two sets of powers are highly correlated over $[1,10]$, and among
+correlated features the lasso tends to pick one somewhat arbitrarily and zero
+the rest. Treat the features it keeps as a compact description that predicts
+well, not as a discovery about which variables matter.
+\end{pitfall}
+
+The practical guidance follows from the picture. Use L2 by default: it is
+differentiable everywhere, has a closed form for linear models, and handles
+groups of correlated features by sharing the weight among them. Use L1 when you
+want a model that uses few features --- for interpretability, or because each
+feature is expensive to measure at prediction time. The \term{elastic net},
+which adds both penalties, is a common compromise.
+
+\begin{researchspotlight}{Tibshirani (1996) --- The lasso}
+\textbf{The problem.} Ridge regression improves prediction but keeps every
+predictor, which leaves a model that is hard to interpret. Subset selection
+gives interpretable models but is discrete, unstable, and computationally
+explosive.
+
+\textbf{The idea.} Minimise the residual sum of squares subject to
+$\sum_j|w_j| \le t$. The constraint is convex, so the problem is tractable; and
+because the constraint region has corners, the solution has some coefficients
+exactly zero.
+
+\textbf{The result.} A single method that both shrinks and selects. As $t$
+decreases, coefficients leave the model one by one, tracing a piecewise-linear
+path; the paper's diamond-versus-disc figure is the ancestor of
+\cref{fig:l1-l2}.
+
+\textbf{Why it is here.} It is the L1 penalty of \cref{sec:l1-l2}. It also
+opened a large field --- compressed sensing and sparse modelling more broadly
+--- built on the observation that L1 is the closest convex relative of simply
+counting the non-zero coefficients.
+\parencite{tibshirani1996}
+\end{researchspotlight}
+
+\section{Choosing \texorpdfstring{$\lambda$}{lambda}}
+\label{sec:choose-lambda}
+
+The sweep of \cref{sec:regularized-cost} is the procedure, with two
+refinements.
+
+\textbf{Search on a logarithmic grid.} The useful values of $\lambda$ spanned
+seven orders of magnitude on T9, and would on most problems. A grid that roughly
+doubles or triples at each step --- $0.01, 0.03, 0.1, 0.3, 1, 3, 10, \dots$ ---
+covers that range in a dozen fits, the same $\times3$ ladder used for the
+learning rate in \cref{sec:alpha-ladder}.
+
+\textbf{Scale the features first.} The penalty $\sum_j w_j^2$ treats every
+weight alike, but the size of a weight depends on the units of its feature. A
+feature measured in centimetres needs a weight one hundred times smaller than
+the same feature in metres to have the same effect, and so pays ten thousand
+times less penalty.
+
+\begin{pitfall}{Regularizing unscaled features}
+Fit T9 with the two raw features $x$ and $x^2$ and $\lambda = 10$, first with $x$
+read as metres and then, identically, as centimetres:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+unit of $x$ & $(w_1, w_2)$ & $J_{\text{train}}$ & $f(5.5\text{ m})$\\
+\midrule
+metres      & $(-0.4201,\ 0.3699)$   & $1.5463$ & $11.1886$\\
+centimetres & $(-0.0151,\ 0.000046)$ & $1.2997$ & $10.4090$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Same data, same model, same $\lambda$, different fits. In centimetres the
+weights are so small that the penalty is negligible and the fit is the
+unregularized quadratic ($J_{\text{train}} = 1.2997$, as in
+\cref{sec:overfitting}); in metres the penalty bites. A value of $\lambda$ has
+no meaning until the features are on a common scale --- which is one more reason
+the standardisation of \cref{sec:feature-scaling} comes before everything else.
+\end{pitfall}
+
+\textbf{Choose on held-out data --- but not on the test set.} The sweep above
+reported test cost so that its shape would be visible, and choosing $\lambda$ by
+reading that column would give about $0.005$. But a $\lambda$ chosen because it
+minimises test cost has been fitted to the test set, and the test cost at that
+$\lambda$ is no longer an honest estimate of performance on new data: it is the
+best of nine tries. The cure is a third set, the \emph{validation} set, held out
+from training and used to choose $\lambda$, leaving the test set untouched until
+the very end. \Cref{ch:ch10} builds that procedure, and its more economical
+relative, cross-validation.
+
+\begin{keyinsight}{Regularization buys the right to over-parameterize}
+Before this chapter the safe course was to choose a small model. Regularization
+inverts the advice: choose a model flexible enough to capture whatever pattern
+is there, and let the penalty, tuned on held-out data, decide how much of that
+flexibility the data can support. On T9, nine features and a penalty matched
+the true-degree model to within $0.03$ in test cost, without anyone telling the
+model the true degree. The same strategy, at scale, is how large neural networks
+are trained.
+\end{keyinsight}
+
+\begin{labbox}{Lab 7 --- Overfitting and regularization}
+Load T9 and reproduce the degree table of \cref{sec:overfitting}: the
+degree-$9$ test cost must be $17.4598$. Implement the regularized cost and
+gradient for linear regression, verify the gradient against a central finite
+difference, and confirm that gradient descent with $\lambda = 1$ reaches the
+closed-form solution of \cref{sec:reg-linreg}.
+
+Reproduce the $\lambda$ sweep and both panels of \cref{fig:lambda-sweep}. Then
+implement regularized logistic regression, fit the separable seven-point set,
+and confirm the finite coefficients of \cref{sec:reg-logistic} at
+$\lambda = 0.1$: $b = -14.7120$, $w = 2.6749$. Finally fit T9 with
+\code{sklearn.linear\_model.Lasso} (remember that its \code{alpha} is our
+$\lambda/m$) and list which powers survive at $\lambda = 5$.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item A model \emph{underfits} when training and test cost are both high, and
+        \emph{overfits} when training cost is low and test cost much higher. On
+        T9 the straight line underfits ($6.99$, $5.82$), the quadratic is right
+        ($1.30$, $0.48$), and the degree-$9$ interpolant overfits ($0.00$,
+        $17.46$).
+  \item Training cost cannot rise as nested hypothesis spaces grow; test cost can
+        rise without limit. Overfitted models show very large weights that
+        cancel at the training points --- $4.3$ million on T9.
+  \item The remedies are more data, fewer features, and regularization. The
+        third is continuous, keeps every feature, and carries over unchanged to
+        logistic regression and neural networks.
+  \item The L2 penalty $\frac{\lambda}{2m}\sum_j w_j^2$ trades training fit for
+        smaller weights. $\lambda=0$ is least squares; $\lambda\to\infty$ is the
+        horizontal line at $\bar y$. On T9, $\lambda = 10^{-4}$ alone cuts the
+        test cost from $17.46$ to $0.58$.
+  \item The regularized update is a shrinkage of every weight by
+        $1-\alpha\lambda/m$ followed by the ordinary step. The closed form adds
+        $\lambda$ to the diagonal of the normal equations and is solvable even
+        when $\Xmat^{\mathsf{T}}\Xmat$ is singular.
+  \item The bias is not penalised: penalising it makes predictions depend on the
+        origin of $y$, by $50$ units in the shifted-target example.
+  \item Regularized logistic regression is strictly convex in $\vw$ and has a
+        finite minimiser even on separable data.
+  \item L1 penalties produce exact zeros because the diamond's corners lie on
+        the axes; L2 shrinks without eliminating. The lasso kept two of T9's
+        nine powers.
+  \item Choose $\lambda$ on a logarithmic grid, after scaling the features, using
+        a validation set rather than the test set.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Define underfitting and overfitting, and give the pattern of training and
+test cost that identifies each.
+
+\sq Why does the training cost of the best polynomial of degree $d+1$ never
+exceed that of degree $d$?
+
+\sq Name the three standard remedies for overfitting and one cost of each.
+
+\sq Write the L2-regularized cost for linear regression and say what happens to
+the fitted model as $\lambda \to 0$ and as $\lambda \to \infty$.
+
+\sq Why is the penalty divided by $m$, and why by $2$?
+
+\sq What is meant by \emph{weight decay}? Express the decay factor per iteration
+in terms of $\alpha$, $\lambda$ and $m$.
+
+\sq Why is the bias $b$ excluded from the penalty?
+
+\sq Why must features be scaled before regularization is applied?
+
+\sq State one advantage of the L1 penalty over L2, and one of L2 over L1.
+
+\sq Why must $\lambda$ not be chosen by minimising the test cost?
+
+\sq An overfitted model on ten training points has coefficients of order
+$10^6$. Explain, in one sentence, how such coefficients can still fit the
+training data well.
+
+\exercisesection{Analytical Problems}
+
+\ap Prove that if $\Hspace_1 \subseteq \Hspace_2$, the minimum training cost over
+$\Hspace_2$ is at most that over $\Hspace_1$. Explain why no corresponding
+statement holds for the test cost.
+
+\ap Derive the regularized gradient-descent update for linear regression and
+show that it can be written as a shrinkage step followed by the unregularized
+step. Under what condition on $\alpha$, $\lambda$ and $m$ is the shrinkage
+factor in $(0,1)$?
+
+\ap Derive the closed-form ridge solution
+$(\tilde\Xmat^{\mathsf{T}}\tilde\Xmat + \lambda I')\boldsymbol\theta =
+\tilde\Xmat^{\mathsf{T}}\vy$, and prove that the matrix on the left is invertible
+for every $\lambda > 0$.
+
+\ap For one feature, centred so that $\sum_i \xii{i} = 0$, show that the ridge
+weight is $w = \sum_i\xii{i}\yii{i}/(\sum_i(\xii{i})^2 + \lambda)$ and that
+$b = \bar y$. Hence show that $|w|$ decreases monotonically in $\lambda$.
+
+\ap Suppose the bias is penalised, the feature is centred and $\lambda > 0$.
+Show that $b = \sum_i\yii{i}/(m+\lambda)$, and use this to explain the
+shifted-target table of \cref{sec:why-not-b}.
+
+\ap Write the regularized logistic cost and its gradient, and show that its
+Hessian is positive definite in the weights for every $\lambda > 0$, even when
+the data is linearly separable.
+
+\ap For the one-dimensional lasso cost
+$\frac12(w - a)^2 + \mu|w|$ with $\mu > 0$, show that the minimiser is
+$w^\star = \operatorname{sign}(a)\max(|a| - \mu, 0)$. Explain how this
+\emph{soft-thresholding} produces exact zeros, and why the ridge analogue
+$\frac12(w-a)^2 + \frac{\mu}{2}w^2$ never does.
+
+\exercisesection{Design Problems}
+
+\dpr You must predict house prices from $200$ features, many of them strongly
+correlated, using $1{,}500$ sales. Choose between ridge, lasso and elastic net,
+describe the preprocessing, specify the $\lambda$ grid, and say how you would
+choose $\lambda$ without touching the test set.
+
+\dpr A clinical team wants a risk model that uses as few blood tests as possible,
+since each costs money and time. Design a regularized logistic model for them,
+explain which penalty you would use and why, and describe how you would present
+the trade-off between the number of tests and predictive accuracy.
+
+\dpr A colleague reports that their degree-$15$ polynomial model with
+$\lambda = 10^{-6}$ ``works perfectly'' on training data. Design the sequence of
+experiments you would run to decide whether it overfits, and state the result of
+each that would change your conclusion.
+
+\dpr You are given a fixed budget of $20$ model fits to tune both the polynomial
+degree and $\lambda$. Design the search, justify how you divide the budget, and
+say what you would report at the end.
+
+\exercisesection{Programming Exercises}
+
+\pe Reproduce the degree table of \cref{sec:overfitting} and
+\cref{fig:three-fits}. Then repeat the experiment with $100$ training points
+drawn from the same curve and noise, and report how $J_{\text{test}}$ for degree
+$9$ changes.
+
+\pe Implement ridge regression both by gradient descent and in closed form, and
+show that they agree to $10^{-8}$ on T9 with all nine powers at $\lambda = 1$.
+Plot the \emph{ridge trace}: each of the nine weights against $\lambda$ on a
+logarithmic axis.
+
+\pe Implement lasso by coordinate descent using the soft-thresholding update of
+AP~7.7. Reproduce the lasso column of \cref{sec:l1-l2} and plot the lasso path:
+each weight against $\lambda$. At what value of $\lambda$ does each power leave
+the model?
+
+\pe Fit regularized logistic regression to T8 with the $27$ degree-$\le6$
+monomials, for $\lambda \in \{10^{-4}, 0.1, 1, 10\}$, and draw the $0.5$
+contour of each model on a grid. Describe how the boundary changes with
+$\lambda$.
+
+\exercisesection{Self-Test}
+
+\qz A model with low training cost and high test cost is: (a)~underfitting;
+(b)~overfitting; (c)~well fitted; (d)~unregularized but correct.
+
+\qz As $\lambda \to \infty$ in ridge regression, the fitted function tends to:
+(a)~the least-squares fit; (b)~zero everywhere; (c)~the constant $\bar y$;
+(d)~the interpolating polynomial.
+
+\qz The regularized update multiplies each weight by: (a)~$1 + \alpha\lambda/m$;
+(b)~$1 - \alpha\lambda/m$; (c)~$\lambda$; (d)~$1 - \alpha/m$.
+
+\qz The bias term is not regularized because: (a)~it has no gradient;
+(b)~penalising it makes predictions depend on the origin of $y$; (c)~it is
+always zero; (d)~it cannot overfit by convention only.
+
+\qz Adding $\lambda > 0$ to the diagonal of the normal equations: (a)~can make
+them singular; (b)~guarantees a unique solution; (c)~has no effect on the
+solution; (d)~removes the need for features.
+
+\qz Which penalty can set weights exactly to zero? (a)~L2; (b)~L1; (c)~both;
+(d)~neither.
+
+\qz The test cost plotted against $\lambda$ is typically: (a)~increasing;
+(b)~decreasing; (c)~U-shaped; (d)~constant.
+
+\qz Choosing $\lambda$ by minimising the test cost: (a)~is the correct
+procedure; (b)~makes the reported test cost optimistic; (c)~is impossible;
+(d)~guarantees the best model.
+
+\qz Regularization applied to features of very different scales: (a)~is
+unaffected by the scales; (b)~penalises small-valued features less;
+(c)~penalises features in large units less; (d)~requires L1.
+
+\furtherreading
+
+\textcite{james2021} §6.2 is the primary reading: §6.2.1 develops ridge
+regression, including the ridge trace and the explicit point that penalised
+regression must be applied to standardised predictors, and §6.2.2 the lasso,
+with the constraint-region figure that \cref{fig:l1-l2} reproduces and a careful
+comparison of when each wins. Read §2.2.2 for the bias/variance picture behind
+\cref{sec:overfitting}, which \cref{ch:ch10} takes further.
+\textcite{bishop2006} §1.1 works through polynomial curve fitting with and
+without a penalty on almost exactly the T9 setting, and is worth reading for its
+plots of coefficient magnitude against degree; §3.1.4 states regularized least
+squares in general form, including the family of penalties $\sum_j|w_j|^q$ of
+which L1 and L2 are the two important members.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch08} opens Part~III. A neural network is a
+stack of the logistic units of \cref{ch:ch06}, and every idea from this chapter
+--- capacity, overfitting, the L2 penalty --- applies to it directly, at a scale
+where regularization stops being optional.

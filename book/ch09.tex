@@ -1,17 +1,1092 @@
 %% ch09.tex --- Training Neural Networks
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch09_training.py.
+%% N231 and N231-ReLU are the networks of Chapter 8 (same weights).
 
 \chapter{Training Neural Networks}
 \label{ch:ch09}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{What I cannot create, I do not understand.}{---\ Richard Feynman}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Name the three steps of training --- model, loss, minimisation --- and
+        say what each line of a Keras training script actually runs.
+  \item Choose an activation function for each layer: from the target for the
+        output layer, and ReLU by default for hidden layers, with reasons.
+  \item Define softmax and its cross-entropy loss, show that two-class softmax is
+        logistic regression, and derive the gradient $\mathbf{a} - \mathbf{e}_y$.
+  \item Explain why the obvious softmax implementation overflows and loses
+        precision, and implement the stable version.
+  \item Distinguish multiclass from multi-label classification and choose the
+        output layer for each.
+  \item Compute derivatives on a computation graph by the chain rule, derive
+        back-propagation for a network with one hidden layer, and carry out a
+        complete forward and backward pass by hand.
+  \item Verify a gradient implementation numerically, and explain why the check
+        can fail at a ReLU kink.
+  \item State the Adam update and explain the robustness it buys over plain
+        gradient descent.
+  \item Explain what a convolutional layer is and why it needs far fewer
+        parameters than a dense one.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch08} built networks and ran them forward with weights chosen by hand.
+That is enough to understand what a network computes, but no one chooses a
+million weights by hand. This chapter supplies the learning algorithm --- which,
+at the level of ideas, is the gradient descent of \cref{ch:ch03} applied to the
+cost of \cref{ch:ch06} --- and the three extensions that make it work in practice:
+better activation functions, an output layer for many classes, and an efficient
+way to compute the gradient with respect to every weight at once.
+
+\section{Training in Three Steps}
+\label{sec:train-steps}
+
+Training any model in this book has had the same three steps, and a network is
+no exception.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}L{2.6cm}L{4.3cm}L{4.3cm}@{}}
+\toprule
+step & logistic regression & neural network\\
+\midrule
+1.\ specify $f$ & $\fvwb(\vx) = \gsig(\vw\cdot\vx + b)$
+   & \code{Sequential([Dense(...), ...])}\\
+2.\ specify the loss and cost & logistic loss, $J = \frac1m\sum_i\loss$
+   & \code{compile(loss=BinaryCrossentropy())}\\
+3.\ minimise $J$ & gradient descent on $\vw$, $b$ & \code{fit(X, y, epochs=100)}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{lstlisting}[style=tfkeras, caption={Training a network: one statement per step.}, label={lst:three-steps}]
+from tensorflow.keras import Sequential, Input
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.losses import BinaryCrossentropy
+
+# step 1: the model
+model = Sequential([Input(shape=(64,)),
+                    Dense(25, activation='relu'),
+                    Dense(15, activation='relu'),
+                    Dense(1,  activation='sigmoid')])
+# step 2: the loss
+model.compile(loss=BinaryCrossentropy())
+# step 3: minimise the cost
+history = model.fit(X, y, epochs=100)
+\end{lstlisting}
+
+The loss named in step 2 is a formula, and for a binary target it is the
+logistic loss of \cref{sec:logistic-loss}, under the name used in information
+theory.
+
+\begin{defbox}{Binary cross-entropy, and epochs}
+For $y \in \{0,1\}$ and output $f \in (0,1)$, the \term{binary cross-entropy} is
+\[
+  \loss(f, y) = -y\ln f - (1-y)\ln(1-f),
+\]
+and the cost $J$ averages it over the training set, now a function of every
+weight and bias in every layer. For a numeric target, the squared error
+$(f - y)^2$ is used instead; note that Keras's \code{MeanSquaredError} omits the
+$\frac12$ of earlier chapters, which only rescales the learning rate.
+
+An \term{epoch} is one complete pass through the training set. \code{epochs=100}
+means the optimizer sees every example one hundred times.
+\end{defbox}
+
+\begin{workedexample}{The loss of N231's predictions}
+N231 of \cref{sec:forward-prop} outputs $0.8094$ for $(1,2)$ and $0.0562$ for
+$(-1,-1)$. Their losses under each possible label are
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+$\vx$ & $f(\vx)$ & $\loss$ if $y=1$ & $\loss$ if $y=0$\\
+\midrule
+$(1,2)$   & $0.8094$ & $0.2115$ & $1.6576$\\
+$(-1,-1)$ & $0.0562$ & $2.8788$ & $0.0578$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Confident and right costs little; confident and wrong costs a great deal --- the
+unbounded penalty that \cref{sec:logistic-loss} showed keeps the gradient alive.
+\end{workedexample}
+
+Step 3 is gradient descent: repeat
+$\Wl{l} \leftarrow \Wl{l} - \alpha\,\partial J/\partial\Wl{l}$ and
+$\bl{l} \leftarrow \bl{l} - \alpha\,\partial J/\partial\bl{l}$ for every layer.
+The cost now depends on thousands or millions of parameters, and the two things
+this chapter must supply are an efficient way to compute all those partial
+derivatives (\cref{sec:backprop}) and a better update rule than plain gradient
+descent (\cref{sec:adam}). First, the activation functions, which turn out to
+matter a great deal for both.
+
+\section{Activation Functions}
+\label{sec:activations}
+
+The sigmoid has been the only activation so far. Two others do most of the work
+in practice.
+
+\begin{defbox}{ReLU and linear activations}
+The \term{rectified linear unit} is $\gsig(z) = \max(0, z)$: zero for negative
+inputs, the identity for positive ones. The \term{linear activation} is
+$\gsig(z) = z$, often described as ``no activation''.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.6cm,
+        xlabel={$z$}, ylabel={$\gsig(z)$}, xmin=-4, xmax=4, ymin=-1.5, ymax=4,
+        legend style={font=\tiny, at={(0.03,0.97)}, anchor=north west}]
+        \addplot[MLBlue, very thick, domain=-4:4, samples=80] {1/(1+exp(-x))};
+        \addlegendentry{sigmoid}
+        \addplot[MLTeal, very thick, domain=-4:4, samples=81] {max(0,x)};
+        \addlegendentry{ReLU}
+        \addplot[MLAmber, thick, dashed, domain=-4:4] {x};
+        \addlegendentry{linear}
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, width=\linewidth, height=4.6cm,
+        xlabel={$z$}, ylabel={$\gsig'(z)$}, xmin=-6, xmax=6, ymin=-0.05, ymax=1.15,
+        legend style={font=\tiny, at={(0.03,0.97)}, anchor=north west}]
+        \addplot[MLBlue, very thick, domain=-6:6, samples=120]
+          {exp(-x)/(1+exp(-x))^2};
+        \addlegendentry{sigmoid: at most $0.25$}
+        \addplot[MLTeal, very thick, domain=-6:0, samples=2] {0};
+        \addlegendentry{ReLU: $0$ or $1$}
+        \addplot[MLTeal, very thick, domain=0:6, samples=2, forget plot] {1};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{Left: the three activations used most. Right: their slopes. The
+  sigmoid's slope peaks at $0.25$ at $z = 0$ and falls to $0.0066$ at $z = 5$; a
+  sigmoid unit that is confidently on or off barely responds to gradient
+  descent. ReLU's slope is exactly $1$ wherever the unit is active.}
+  \label{fig:activations}
+\end{figure}
+
+\subsection{Choosing the output activation}
+
+The output activation should have the same range as the target, and the loss
+comes paired with it.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{3.0cm}L{2.0cm}L{3.2cm}L{3.0cm}@{}}
+\toprule
+target $y$ & output $\gsig$ & loss & example\\
+\midrule
+$0$ or $1$ & sigmoid & binary cross-entropy & a transaction is fraudulent\\
+any real number & linear & squared error & tomorrow's temperature change\\
+non-negative & ReLU & squared error & rainfall, house price\\
+one of $N$ classes & softmax & cross-entropy & which digit (\cref{sec:softmax})\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{pitfall}{A mismatched output layer}
+A sigmoid output can never exceed $1$, so a model predicting house prices with
+one cannot be trained into usefulness however long it runs. A linear output
+under binary cross-entropy can produce $f \le 0$, where $\ln f$ is undefined.
+Check the output layer against the target before debugging anything else.
+\end{pitfall}
+
+\subsection{Hidden layers: ReLU by default}
+
+For hidden layers, ReLU has displaced the sigmoid almost entirely, for two
+reasons visible in \cref{fig:activations}. It is cheaper --- a comparison, not
+an exponential. And it is flat on only one side: the sigmoid is flat for large
+$|z|$ in both directions, so a saturated sigmoid unit passes back almost no
+gradient, while a ReLU unit passes back the full gradient whenever it is active.
+Networks with ReLU hidden layers train markedly faster.
+
+\begin{workedexample}{N231 with a ReLU hidden layer}
+Keep N231's weights and change only the hidden activation. The pre-activations
+$\mathbf{z}^{[1]}$ are unchanged; ReLU zeros their negative entries and passes
+the rest through unsquashed:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & $\vx = (1,2)$ & $\vx = (-1,-1)$\\
+\midrule
+$\mathbf{z}^{[1]}$             & $(4,\ 6,\ -5)$ & $(-4,\ 0,\ 3)$\\
+$\va^{[1]}$, sigmoid           & $(0.982,\ 0.998,\ 0.007)$ & $(0.018,\ 0.500,\ 0.953)$\\
+$\va^{[1]}$, ReLU              & $(4,\ 6,\ 0)$ & $(0,\ 0,\ 3)$\\
+$z^{[2]}$, ReLU                & $8 - 6 - 0 + 0.5 = 2.5$ & $0 - 0 - 9 + 0.5 = -8.5$\\
+$a^{[2]}$, ReLU                & $\mathbf{0.9241}$ & $\mathbf{0.0002}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The predictions are the same as before but more confident, because the hidden
+activations are no longer capped at $1$. With labels $y = (1, 0)$ the
+binary-cross-entropy cost of the batch is $(0.0789 + 0.0002)/2 = 0.039547$.
+\end{workedexample}
+
+\begin{pitfall}{Dead ReLU units}
+A ReLU unit whose $z$ is negative for every training example outputs $0$ and
+has gradient $0$, so gradient descent never changes its weights: it is
+\emph{dead}. A large learning rate or a bad initialisation can kill many units at
+once. Variants such as the \emph{leaky ReLU}, $\max(0.01z, z)$, keep a small
+slope for $z < 0$ and cannot die.
+\end{pitfall}
+
+\subsection{What the non-linearity buys}
+
+\Cref{sec:collapse} proved that without a non-linear activation any depth
+collapses to one linear layer. ReLU makes the positive side of that statement
+concrete. Each ReLU unit contributes one \emph{hinge}, a point at which the
+slope of the network's output changes. The linear output layer adds hinges with
+weights: the network with three hidden units $r(x)$, $r(x-1)$ and $r(x-2.5)$
+and output weights $(1, -2, 2)$ computes
+\[
+  f(x) = r(x) - 2\,r(x-1) + 2\,r(x-2.5),
+\]
+whose slope is $1$ on $(0,1)$, $1 - 2 = -1$ on $(1, 2.5)$ and $-1 + 2 = 1$ beyond
+--- a zig-zag through $f(0) = 0$, $f(1) = 1$, $f(2.5) = -0.5$, $f(4) = 1$. With
+enough hidden units, sums of hinges follow any continuous curve on a bounded
+interval: the universal approximation theorem of \cref{ch:ch08}, made visible.
+
+\begin{researchspotlight}{Nair \& Hinton (2010) --- Rectified linear units}
+\textbf{The problem.} Deep networks of sigmoid or tanh units were slow and
+difficult to train, and their gradients shrank as they passed backwards through
+saturated units.
+
+\textbf{The idea.} Use units whose activation is $\max(0, z)$. The paper derived
+them as an approximation to a sum of many sigmoid units with shifted biases,
+and showed they could be used inside the restricted Boltzmann machines then
+popular for pre-training.
+
+\textbf{The result.} Rectified units gave better results on object recognition
+and face verification than binary or sigmoid units, and training was faster.
+Within two years, deep ReLU networks trained by plain back-propagation were
+winning image-recognition competitions.
+
+\textbf{Why it is here.} It is the default hidden activation of
+\cref{sec:activations}. The two properties argued for there --- no saturation for
+$z > 0$, and an exact zero for $z < 0$ that makes activations sparse --- are the
+reasons it displaced the sigmoid in hidden layers.
+\parencite{nair2010}
+\end{researchspotlight}
+
+\section{Multiclass Classification and Softmax}
+\label{sec:softmax}
+
+Many problems have more than two answers: which of ten digits, which of four
+leaf diseases, which of several kinds of fabric defect.
+
+\begin{defbox}{Multiclass classification, and softmax}
+In \term{multiclass classification} the target takes one of $N > 2$ values, and
+exactly one is correct for each example. A \term{softmax} output layer has one
+unit per class. Each computes a score $z_j = \vw_j\cdot\va + b_j$, and the scores
+are turned into probabilities by
+\[
+  a_j = \frac{e^{z_j}}{\sum_{k=1}^{N}e^{z_k}} = \Prob(y = j \mid \vx),
+  \qquad j = 1,\dots,N .
+\]
+The outputs are positive and sum to $1$.
+\end{defbox}
+
+Softmax is unlike every activation so far: each output depends on \emph{all}
+the scores, through the denominator. Raise one score and every other probability
+falls. The name says what it does --- a smooth version of picking the maximum.
+
+\begin{workedexample}{Softmax of three scores}
+Take $\mathbf{z} = (2,\ 1,\ 0.1)$. Then $e^{\mathbf{z}} = (7.3891,\ 2.7183,\
+1.1052)$, which sum to $11.2125$, so
+\[
+  \va = (0.6590,\ 0.2424,\ 0.0986).
+\]
+Raising $z_1$ to $3$ gives $(0.8401,\ 0.1137,\ 0.0462)$, and to $4$ gives
+$(0.9346,\ 0.0465,\ 0.0189)$: both other probabilities fall although their
+scores did not change.
+\end{workedexample}
+
+\subsection{Two classes give back the sigmoid}
+
+With $N = 2$, divide numerator and denominator by $e^{z_1}$:
+\[
+  a_1 = \frac{e^{z_1}}{e^{z_1} + e^{z_2}} = \frac{1}{1 + e^{-(z_1 - z_2)}}
+      = \gsig(z_1 - z_2).
+\]
+Two-class softmax is logistic regression on the difference of the scores; for
+$\mathbf{z} = (2,\ 0.5)$ both give $0.8176$. Softmax is the natural extension of
+the sigmoid, not a replacement for it.
+
+\subsection{The loss}
+
+\begin{defbox}{Cross-entropy loss}
+For softmax outputs $\va$ and true class $y$,
+\[
+  \loss(\va, y) = -\ln a_y .
+\]
+Only the probability assigned to the correct class is penalised. With $N = 2$ it
+is exactly binary cross-entropy. Keras calls it
+\code{SparseCategoricalCrossentropy}: \emph{sparse} because the label is stored as
+one integer rather than as a one-hot vector.
+\end{defbox}
+
+For the scores $(2, 1, 0.1)$ the loss is $0.4170$, $1.4170$ or $2.3170$
+according as the true class is $1$, $2$ or $3$. The losses differ by exactly the
+gaps between the scores, because
+$-\ln a_y = \ln\sum_k e^{z_k} - z_y$ --- an identity that \cref{sec:stable-softmax}
+puts to work.
+
+\begin{derivation}{The gradient of softmax with cross-entropy}
+Differentiate $\loss = \ln\sum_k e^{z_k} - z_y$ with respect to $z_j$. The first
+term gives
+\[
+  \frac{\partial}{\partial z_j}\ln\sum_k e^{z_k}
+  = \frac{e^{z_j}}{\sum_k e^{z_k}} = a_j ,
+\]
+and the second gives $-1$ if $j = y$ and $0$ otherwise. So
+\[
+  \boxed{\;\frac{\partial\loss}{\partial z_j} = a_j - [\,j = y\,]\;}
+  \qquad\text{or, as a vector,}\qquad
+  \frac{\partial\loss}{\partial\mathbf{z}} = \va - \mathbf{e}_y ,
+\]
+where $\mathbf{e}_y$ is the one-hot vector of the true class. This is the
+multiclass version of $\partial\loss/\partial z = f - y$ from
+\cref{sec:gd-logistic}: prediction minus target, again. For $\mathbf{z} = (2,
+1, 0.1)$ and true class $1$ it is $(-0.3410,\ 0.2424,\ 0.0986)$, which a central
+finite difference reproduces to every digit shown.
+
+Note how much the combination simplifies. The softmax Jacobian
+$\partial a_j/\partial z_k$ is a full matrix, $a_j([j=k] - a_k)$, and the
+derivative of $-\ln a_y$ is $-1/a_y$; their product collapses to
+$\va - \mathbf{e}_y$. Libraries exploit this by computing the softmax and the loss
+together, which is also what makes the stable implementation possible.
+\end{derivation}
+
+\section{Numerically Stable Softmax}
+\label{sec:stable-softmax}
+
+The formula for softmax is two lines of code, and those two lines fail in
+practice.
+
+\subsection{Round-off}
+
+Floating-point numbers carry a fixed number of significant digits. A small
+number computed as the difference of two numbers near $1$ loses most of them.
+Mathematically $2/10{,}000 = (1 + 1/10{,}000) - (1 - 1/10{,}000)$, but in double
+precision the right-hand side is $0.00019999999999997797$, wrong in the
+fourteenth digit; in single precision, which TensorFlow uses by default, it is
+$0.00020003318786621094$, wrong in the fourth. Computing a probability and then
+its logarithm invites exactly this kind of loss.
+
+\subsection{Overflow}
+
+Scores of several hundred are routine in an untrained or badly scaled network,
+and $e^{1000}$ exceeds the largest double, about $1.8\times10^{308}$. The naive
+softmax of $(1000,\ 999,\ 998)$ is $\infty/\infty$, which is \code{nan}, and one
+\code{nan} in a cost corrupts every gradient after it.
+
+The fix uses a property of softmax: adding the same constant $c$ to every score
+changes nothing, because the factor $e^c$ cancels. Choose $c = \max_k z_k$. Then
+every exponent is at most $0$, so nothing overflows, and the largest term is
+exactly $e^0 = 1$, so the sum cannot underflow to zero. For the loss, never form
+$a_y$ and then take its logarithm; use the identity
+\[
+  -\ln a_y = \Bigl(c + \ln\sum_k e^{z_k - c}\Bigr) - z_y .
+\]
+For $(1000,\ 999,\ 998)$ and true class $1$ this gives
+$\ln(1 + e^{-1} + e^{-2}) = 0.4076$, computed without ever forming $e^{1000}$.
+
+\begin{lstlisting}[style=pythonml, caption={Stable softmax and log-softmax.}, label={lst:stable-softmax}]
+def softmax(Z):        # Z: (m, N), one row per example
+    Zs = Z - Z.max(axis=1, keepdims=True)
+    E = np.exp(Zs)
+    return E / E.sum(axis=1, keepdims=True)
+
+def log_softmax(Z):
+    c = Z.max(axis=1, keepdims=True)
+    s = np.exp(Z - c).sum(axis=1, keepdims=True)
+    lse = c + np.log(s)
+    return Z - lse
+
+def cross_entropy(Z, y):           # y: (m,) integer labels
+    return -log_softmax(Z)[np.arange(len(y)), y].mean()
+\end{lstlisting}
+
+\subsection{What this means in TensorFlow}
+
+\begin{pitfall}{The softmax output layer and the clipped loss}
+There are two ways to build a multiclass output layer in Keras.
+\begin{enumerate}\raggedright
+  \item A softmax output layer, \code{Dense(N, activation='softmax')}, with
+        the default loss: the layer outputs probabilities and the loss takes
+        their logarithm. Because a probability can round to $0$, Keras clips it
+        to at least $10^{-7}$ first.
+  \item A linear output layer, \code{Dense(N, activation='linear')}, with
+        \code{from\_logits=True} in the loss: the layer outputs the scores ---
+        the \term{logits} --- and the loss applies the stable log-softmax
+        itself.
+\end{enumerate}
+They differ on examples that are confidently wrong. For logits $(0, 50)$ and
+true class $1$, the exact loss is $50$. Version 1 computes $a_1 = 1.9\times10^{-22}$,
+clips it to $10^{-7}$, and reports $-\ln 10^{-7} = 16.12$ however wrong the
+model is; beyond the clip the gradient is zero, so a badly wrong example stops
+pulling on the weights. Version 2 reports $50$. Use version 2.
+\end{pitfall}
+
+\begin{lstlisting}[style=tfkeras, caption={The recommended multiclass set-up.}, label={lst:from-logits}]
+model = Sequential([Input(shape=(64,)),
+                    Dense(25, activation='relu'),
+                    Dense(15, activation='relu'),
+                    Dense(10, activation='linear')])
+loss = SparseCategoricalCrossentropy(from_logits=True)
+model.compile(loss=loss)
+model.fit(X, y, epochs=100)
+
+logits = model(X_new)          # logits, not probabilities
+probs = tf.nn.softmax(logits)  # if probabilities needed
+yhat = np.argmax(logits, axis=1)    # argmax is unchanged
+\end{lstlisting}
+
+The same applies to binary classification: a linear output unit with
+\code{BinaryCrossentropy(from\_logits=True)}, and \code{tf.nn.sigmoid} on the
+logit when a probability is wanted.
+
+\section{Multi-label Classification}
+\label{sec:multilabel}
+
+A different question has a different output layer. Given a photograph of a
+street, is there a car in it? A bus? A pedestrian? Any combination may be
+present, so the label is a vector such as $(1, 0, 1)$.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{3.2cm}L{3.8cm}L{3.8cm}@{}}
+\toprule
+ & multiclass & multi-label\\
+\midrule
+labels per example & exactly one & any number\\
+output layer & $N$ softmax units & $N$ sigmoid units\\
+outputs sum to & $1$ & anything in $[0, N]$\\
+loss & cross-entropy & binary cross-entropy per output, summed\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A multi-label network is equivalent to $N$ binary classifiers sharing their
+hidden layers. Using softmax for a multi-label problem forces the classes to
+compete: a confident ``car'' pushes ``pedestrian'' down even when both are
+present.
+
+\section{Back-propagation}
+\label{sec:backprop}
+
+Training needs $\partial J/\partial\theta$ for every parameter $\theta$. For a
+network of a million weights, estimating each by nudging it and re-running the
+network would take a million forward passes per gradient step. Back-propagation
+computes all of them in one forward pass and one backward pass.
+
+\subsection{Derivatives as sensitivities}
+
+If increasing $w$ by a small $\varepsilon$ changes $J$ by about $k\varepsilon$,
+then $\dd J/\dd w = k$. For $J = w^2$ at $w = 3$, $J(3.001) = 9.006001$, a change of
+$0.006001 \approx 6\varepsilon$, matching $\dd J/\dd w = 2w = 6$. The estimate
+$(J(w+\varepsilon) - J(w))/\varepsilon$ is off by a term proportional to
+$\varepsilon$; the \emph{central} difference
+$(J(w+\varepsilon) - J(w-\varepsilon))/2\varepsilon$ cancels it, leaving an
+error proportional to $\varepsilon^2$. That estimate is too slow to train with,
+but it is the standard way to test a gradient implementation.
+
+\subsection{The computation graph}
+
+\begin{defbox}{Computation graph}
+A \term{computation graph} breaks a calculation into elementary operations, one
+per node, with edges carrying intermediate values from each operation to the
+next. Evaluating it left to right is the \emph{forward pass}; propagating
+derivatives right to left, multiplying by each node's local derivative, is the
+\emph{backward pass}. The rule that justifies the multiplication is the chain
+rule: if $J$ depends on $u$ only through $v$, then
+$\partial J/\partial u = (\partial J/\partial v)(\partial v/\partial u)$.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      op/.style={draw=MLBlue, fill=MLBlue!6, rounded corners, align=center,
+                 font=\small, minimum width=2.0cm, minimum height=9mm},
+      inl/.style={font=\small, MLTeal},
+      fwd/.style={-{Stealth[length=2mm]}, MLGray, thick},
+      bwd/.style={-{Stealth[length=2mm]}, MLRose, thick}]
+    \node[inl] (w) at (0, 0.6) {$w = 2$};
+    \node[inl] (x) at (0,-0.6) {$x = -2$};
+    \node[op] (c) at (2.4, 0) {$c = wx$\\$= -4$};
+    \node[inl] (b) at (2.4,-1.5) {$b = 8$};
+    \node[op] (a) at (5.0, 0) {$a = c + b$\\$= 4$};
+    \node[inl] (y) at (5.0,-1.5) {$y = 2$};
+    \node[op] (d) at (7.6, 0) {$d = a - y$\\$= 2$};
+    \node[op, draw=MLAmber, fill=MLAmber!10] (J) at (10.2, 0) {$J = \tfrac12 d^2$\\$= 2$};
+    \draw[fwd] (w) -- (c); \draw[fwd] (x) -- (c);
+    \draw[fwd] (c) -- (a); \draw[fwd] (b) -- (a);
+    \draw[fwd] (a) -- (d); \draw[fwd] (y) -- (d);
+    \draw[fwd] (d) -- (J);
+    \draw[bwd] ([yshift=5mm]J.north) to[bend right=30]
+      node[above, font=\scriptsize, MLRose] {$\frac{\partial J}{\partial d} = d = 2$} ([yshift=5mm]d.north);
+    \draw[bwd] ([yshift=5mm]d.north) to[bend right=30]
+      node[above, font=\scriptsize, MLRose] {$\frac{\partial J}{\partial a} = 2$} ([yshift=5mm]a.north);
+    \draw[bwd] ([yshift=5mm]a.north) to[bend right=30]
+      node[above, font=\scriptsize, MLRose] {$\frac{\partial J}{\partial c} = 2$} ([yshift=5mm]c.north);
+    \node[font=\scriptsize, MLRose] at (0.4, 1.5)
+      {$\frac{\partial J}{\partial w} = \frac{\partial J}{\partial c}\,x = -4$};
+    \node[font=\scriptsize, MLRose] at (3.75,-1.5)
+      {$\frac{\partial J}{\partial b} = \frac{\partial J}{\partial a} = 2$};
+  \end{tikzpicture}
+  \caption{The computation graph of $J = \tfrac12(wx + b - y)^2$ at $w = 2$,
+  $b = 8$, $x = -2$, $y = 2$. Grey arrows carry values forward; red arrows carry
+  derivatives backward, each node multiplying the incoming derivative by its own
+  local derivative. Nudging $w$ to $2.001$ changes $J$ by $-0.003998$, matching
+  $\partial J/\partial w = -4$.}
+  \label{fig:comp-graph}
+\end{figure}
+
+The decisive property is reuse. $\partial J/\partial a$ is computed once and
+then used for both $\partial J/\partial b$ and $\partial J/\partial c$, and through
+$c$ for $\partial J/\partial w$. Every intermediate derivative is shared by
+everything to its left. A graph with $N$ nodes and $P$ parameters needs about
+$N + P$ steps for the backward pass; nudging each parameter would need about
+$N \times P$. With $N = 10^4$ and $P = 10^5$ that is $1.1\times10^5$ against
+$10^9$.
+
+\begin{workedexample}{Two ReLU layers}
+One input, one unit per layer, ReLU in both, squared-error loss:
+$a^{[1]} = r(w^{[1]}x + b^{[1]})$, $a^{[2]} = r(w^{[2]}a^{[1]} + b^{[2]})$,
+$J = \frac12(a^{[2]} - y)^2$, with $x = 1$, $y = 5$, $w^{[1]} = 2$, $b^{[1]} = 0$,
+$w^{[2]} = 3$, $b^{[2]} = 1$.
+
+\textbf{Forward:} $z^{[1]} = 2$, $a^{[1]} = 2$; $z^{[2]} = 7$, $a^{[2]} = 7$;
+$J = \frac12(7-5)^2 = 2$.
+
+\textbf{Backward}, with $r'(z) = 1$ because both $z > 0$:
+\[
+\begin{aligned}
+  \frac{\partial J}{\partial z^{[2]}} &= a^{[2]} - y = 2, &
+  \frac{\partial J}{\partial w^{[2]}} &= 2\cdot a^{[1]} = 4, &
+  \frac{\partial J}{\partial b^{[2]}} &= 2,\\
+  \frac{\partial J}{\partial z^{[1]}} &= 2\cdot w^{[2]} = 6, &
+  \frac{\partial J}{\partial w^{[1]}} &= 6\cdot x = 6, &
+  \frac{\partial J}{\partial b^{[1]}} &= 6 .
+\end{aligned}
+\]
+Nudging each parameter by $0.001$ changes $J$ by $0.0060045$, $0.0060045$,
+$0.0040020$ and $0.0020005$ --- agreeing with $6, 6, 4, 2$ to the size of the
+nudge.
+\end{workedexample}
+
+\subsection{Back-propagation for a dense network}
+
+A dense network is a computation graph whose nodes are whole layers. The same
+two rules --- store every value on the way forward, multiply local derivatives
+on the way back --- give matrix formulas.
+
+\begin{derivation}{Back-propagation for one hidden layer}
+Take a network with a ReLU hidden layer, a sigmoid output and binary
+cross-entropy, on a batch $\Xmat$ of $m$ examples:
+\[
+  \mathbf{Z}^{[1]} = \Xmat\Wl{1} + \bl{1},\quad
+  \mathbf{A}^{[1]} = r\bigl(\mathbf{Z}^{[1]}\bigr),\quad
+  \mathbf{Z}^{[2]} = \mathbf{A}^{[1]}\Wl{2} + \bl{2},\quad
+  \mathbf{A}^{[2]} = \gsig\bigl(\mathbf{Z}^{[2]}\bigr),
+\]
+and $J = \frac1m\sum_i\loss^{(i)}$. Write $d\mathbf{M}$ for $\partial J/\partial
+\mathbf{M}$, a matrix of the same shape as $\mathbf{M}$.
+
+\textbf{Output pre-activation.} \Cref{sec:gd-logistic} showed
+$\partial\loss/\partial z = a - y$ for a sigmoid with cross-entropy; the
+$\frac1m$ comes from the average:
+\[
+  d\mathbf{Z}^{[2]} = \tfrac1m\bigl(\mathbf{A}^{[2]} - \vy\bigr) .
+\]
+\textbf{Output weights.} $Z^{[2]}_{i} = \sum_k A^{[1]}_{ik}W^{[2]}_{k} + b^{[2]}$,
+so $\partial Z^{[2]}_i/\partial W^{[2]}_k = A^{[1]}_{ik}$ and, summing over
+examples by the chain rule,
+\[
+  d\Wl{2} = \mathbf{A}^{[1]\mathsf{T}}d\mathbf{Z}^{[2]},\qquad
+  d\bl{2} = \textstyle\sum_i d\mathbf{Z}^{[2]}_{i} .
+\]
+\textbf{Back into the hidden layer.} $\partial Z^{[2]}_i/\partial A^{[1]}_{ik} =
+W^{[2]}_k$, so $d\mathbf{A}^{[1]} = d\mathbf{Z}^{[2]}\mathbf{W}^{[2]\mathsf{T}}$, and the
+ReLU multiplies by its local derivative, $1$ where $z > 0$ and $0$ elsewhere:
+\[
+  d\mathbf{Z}^{[1]} = d\mathbf{A}^{[1]} \odot \bigl[\mathbf{Z}^{[1]} > 0\bigr] .
+\]
+\textbf{Hidden weights}, by the same argument as the output weights:
+\[
+  d\Wl{1} = \Xmat^{\mathsf{T}}d\mathbf{Z}^{[1]},\qquad
+  d\bl{1} = \textstyle\sum_i d\mathbf{Z}^{[1]}_{i,:} .
+\]
+Every gradient has the shape of its parameter --- a check worth asserting in
+code. With a sigmoid hidden layer the only change is the local derivative:
+$\odot\,\mathbf{A}^{[1]}\odot(1 - \mathbf{A}^{[1]})$, by \cref{sec:sigmoid}.
+\end{derivation}
+
+\begin{algorithmbox}{Back-propagation (one gradient step)}
+\begin{lstlisting}[style=pseudocode]
+# forward: store every Z and A
+A[0] <- X
+for l = 1..L:
+    Z[l] <- A[l-1] @ W[l] + b[l];   A[l] <- g_l(Z[l])
+# backward: output layer first
+# (sigmoid or softmax output with cross-entropy)
+dZ[L] <- (A[L] - Y) / m
+for l = L..1:
+    dW[l] <- A[l-1].T @ dZ[l]
+    db[l] <- column sums of dZ[l]
+    if l > 1:
+        dZ[l-1] <- (dZ[l] @ W[l].T) * g'_{l-1}(Z[l-1])
+# update
+for l = 1..L:
+    W[l] <- W[l] - alpha * dW[l]
+    b[l] <- b[l] - alpha * db[l]
+\end{lstlisting}
+The backward loop costs about as much as the forward loop: one matrix product per
+layer for $d\mathbf{W}$, and one for $d\mathbf{Z}$.
+\end{algorithmbox}
+
+\begin{workedexample}{A complete forward and backward pass}
+Train N231-ReLU on the single example $\vx = (1,2)$ with $y = 1$.
+
+\textbf{Forward} (from \cref{sec:activations}): $\mathbf{z}^{[1]} = (4, 6, -5)$,
+$\va^{[1]} = (4, 6, 0)$, $z^{[2]} = 2.5$, $a^{[2]} = 0.9241$,
+$\loss = -\ln 0.9241 = 0.0789$.
+
+\textbf{Backward.}
+\begin{align*}
+  dz^{[2]} &= a^{[2]} - y = -0.0759\\
+  d\Wl{2} &= \va^{[1]\mathsf{T}}dz^{[2]} = (-0.3034,\ -0.4551,\ 0)^{\mathsf{T}},
+  \qquad db^{[2]} = -0.0759\\
+  d\va^{[1]} &= dz^{[2]}\,\mathbf{W}^{[2]\mathsf{T}} = (-0.1517,\ 0.0759,\ 0.2276)\\
+  d\mathbf{z}^{[1]} &= d\va^{[1]}\odot[\mathbf{z}^{[1]} > 0] = (-0.1517,\ 0.0759,\ 0)\\
+  d\Wl{1} &= \vx^{\mathsf{T}}d\mathbf{z}^{[1]}
+  = \begin{bmatrix}-0.1517 & 0.0759 & 0\\ -0.3034 & 0.1517 & 0\end{bmatrix},
+  \qquad d\bl{1} = (-0.1517,\ 0.0759,\ 0)
+\end{align*}
+Read the result. The third hidden unit is off ($z = -5$), so all its incoming
+gradients are exactly zero: nothing it does affects the loss. The output weight
+from unit $1$ has a negative gradient, so gradient descent increases it, which
+raises $z^{[2]}$ and the prediction towards $y = 1$. Every one of the thirteen
+gradients agrees with a central finite difference to within $10^{-10}$. One
+update with $\alpha = 1$ raises the prediction to $0.9999$ and lowers the loss to
+$0.0001$.
+\end{workedexample}
+
+\begin{pitfall}{A gradient check that fails on correct code}
+Run the same check on the two-example batch $\{(1,2), (-1,-1)\}$ and the largest
+relative discrepancy is $6.7\times10^{-4}$ --- far too large for a correct
+implementation. The implementation is correct. The second example gives the
+middle hidden unit $z = 0$ exactly, at ReLU's kink. There the slope is $0$ on the
+left and $1$ on the right; the central difference averages them to
+$\frac12$, while back-propagation (and TensorFlow) use $0$. ReLU has no
+derivative at $0$, and libraries simply pick a side. Hand-chosen integer inputs
+hit the kink; real data almost never does. On twenty random inputs the same
+check gives $4.1\times10^{-8}$.
+\end{pitfall}
+
+\begin{keyinsight}{You write the forward pass; the library writes the backward one}
+TensorFlow and PyTorch record the operations of the forward pass as a
+computation graph while it runs, and apply the backward rules automatically ---
+\term{automatic differentiation}. This is why \code{model.fit} needs no
+derivative from you. It does not remove the need to understand
+back-propagation: vanishing gradients, dead units and exploding losses are all
+statements about the backward pass, and diagnosing them requires knowing what it
+computes.
+\end{keyinsight}
+
+\begin{researchspotlight}{Rumelhart, Hinton \& Williams (1986) --- Back-propagation}
+\textbf{The problem.} Networks with hidden layers could represent functions that
+single-layer perceptrons could not, but there was no practical way to train the
+hidden units: no one knew how to assign credit or blame to a unit whose
+correct output is never given.
+
+\textbf{The idea.} Use differentiable units, and compute the derivative of the
+error with respect to every weight by propagating error signals backwards
+through the network with the chain rule --- the procedure of \cref{sec:backprop}.
+
+\textbf{The result.} Networks trained this way learned useful internal
+representations on their own; the paper's examples include a network that
+discovered the structure of two family trees in its hidden units. The method had
+precursors, including in control theory, but this paper made it the standard way
+to train networks.
+
+\textbf{Why it is here.} It is the algorithm of this section. Its central claim
+--- that hidden units trained by gradient descent invent features the designer
+never specified --- is the claim of \cref{sec:learned-features}, demonstrated.
+\parencite{rumelhart1986}
+\end{researchspotlight}
+
+\section{Adam}
+\label{sec:adam}
+
+Plain gradient descent uses one learning rate for every parameter, and one rate
+rarely suits them all. The cost $J = w_1^2 + 10w_2^2$ is steep in $w_2$ and
+shallow in $w_1$. Gradient descent multiplies $w_2$ by $1 - 20\alpha$ at each
+step, so it diverges for $\alpha > 0.1$, oscillates forever at $\alpha = 0.1$,
+and must keep $\alpha$ below that threshold --- at which rate $w_1$, multiplied by
+$1 - 2\alpha$, crawls.
+
+\begin{defbox}{Adam}
+For each parameter $w$ with gradient $d$ at step $t = 1, 2, \dots$, \term{Adam}
+keeps running averages of the gradient and its square,
+\[
+  m \leftarrow \beta_1 m + (1-\beta_1)\,d, \qquad
+  v \leftarrow \beta_2 v + (1-\beta_2)\,d^2,
+\]
+corrects them for having started at zero,
+\[
+  \hat m = \frac{m}{1-\beta_1^t}, \qquad \hat v = \frac{v}{1-\beta_2^t},
+\]
+and updates
+\[
+  w \leftarrow w - \alpha\,\frac{\hat m}{\sqrt{\hat v} + \epsilon} .
+\]
+Defaults: $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-7}$, and
+$\alpha = 10^{-3}$.
+\end{defbox}
+
+When a parameter's gradient keeps its sign, $\hat m/\sqrt{\hat v} \approx \pm1$
+and each step has length about $\alpha$ \emph{whatever the gradient's
+magnitude}. When the gradient oscillates, $\hat m$ averages towards zero and the
+steps shrink. At $t = 1$ the corrected averages are exactly $d$ and $d^2$, so the
+first step is $\alpha\,\mathrm{sign}(d)$ in every coordinate: from $(-4, 1)$ with
+$\alpha = 0.3$, Adam moves to $(-3.7, 0.7)$, although the gradient in $w_2$ is
+$2.5$ times larger than in $w_1$.
+
+\begin{workedexample}{Robustness to the learning rate}
+Run both optimizers on $J = w_1^2 + 10w_2^2$ from $(-4, 1)$ and count the steps
+until $J < 0.01$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrr@{}}
+\toprule
+$\alpha$ & gradient descent & Adam\\
+\midrule
+$0.003$ & $> 300$  & $> 300$\\
+$0.01$  & $183$    & $> 300$\\
+$0.03$  & $60$     & $259$\\
+$0.09$  & $\mathbf{20}$ & $66$\\
+$0.1$   & $> 300$ (oscillates) & $61$\\
+$0.11$  & diverges & $78$\\
+$0.3$   & diverges & $59$\\
+$1$     & diverges & $\mathbf{49}$\\
+$3$     & diverges & $51$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The fastest run in the table is gradient descent at $\alpha = 0.09$ --- but only
+because $0.09$ sits just below the divergence threshold of $0.1$, which we know
+only because we can differentiate this $J$ by hand. A little above it, gradient
+descent diverges. Adam reaches the minimum for every $\alpha$ from $0.03$ to $3$,
+a hundredfold range, in $49$ to $259$ steps. Its advantage is not speed on a
+problem tuned by hand; it is that you do not have to tune it by hand.
+\end{workedexample}
+
+\begin{lstlisting}[style=tfkeras, caption={Adam in Keras.}, label={lst:adam}]
+opt = tf.keras.optimizers.Adam(learning_rate=1e-3)
+loss = SparseCategoricalCrossentropy(from_logits=True)
+model.compile(optimizer=opt, loss=loss)
+\end{lstlisting}
+
+\begin{researchspotlight}{Kingma \& Ba (2015) --- Adam}
+\textbf{The problem.} Stochastic gradient descent on large, noisy, badly scaled
+objectives needs a learning rate tuned per problem, and often per parameter.
+Earlier adaptive methods each fixed part of this: momentum smoothed noisy
+gradients, and AdaGrad and RMSProp scaled each parameter by its gradient
+history.
+
+\textbf{The idea.} Combine the two: track an exponential moving average of the
+gradient (first moment) and of its square (second moment), correct both for
+their initialisation at zero, and step by their ratio.
+
+\textbf{The result.} An optimizer whose step size is invariant to rescaling the
+gradient, that needs little tuning, and that worked well across the models of
+the time. It became the default optimizer for neural networks.
+
+\textbf{Why it is here.} It is the update of \cref{sec:adam}. The bias
+correction --- the division by $1 - \beta^t$ --- is the detail most often
+dropped in a hand implementation, and without it the first steps are far too
+small.
+\parencite{kingma2015}
+\end{researchspotlight}
+
+\section{Convolutional Layers, Briefly}
+\label{sec:conv}
+
+Every layer so far has been \emph{dense}: each unit sees every activation of the
+previous layer. On images and signals that is wasteful.
+
+\begin{defbox}{Convolutional layer}
+In a \term{convolutional layer} each unit looks only at a \emph{window} --- a
+small, contiguous region of its input --- and the \emph{same} weights, called a
+\term{filter}, are slid across all windows. A layer usually has several
+filters, each detecting one pattern wherever it occurs.
+\end{defbox}
+
+\begin{workedexample}{Classifying a heart signal}
+A recording of a heartbeat is $100$ samples, $x_1,\dots,x_{100}$. A first layer
+whose units look at windows of $20$ samples, moving $10$ samples at a time,
+needs units for windows starting at $1, 11, \dots, 81$: nine units. Its parameter
+count depends on how the weights are organised:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{}}
+\toprule
+layer type & parameters\\
+\midrule
+dense, $100\to9$ & $100\cdot9 + 9 = 909$\\
+separate weights per window & $9\cdot(20+1) = 189$\\
+one shared filter (convolutional) & $20 + 1 = 21$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A second convolutional layer might look at windows of five of the nine
+activations, and a sigmoid unit at the end decide whether the heart is
+abnormal.
+\end{workedexample}
+
+Fewer parameters mean faster computation, less data needed, and less
+overfitting. Weight sharing also builds in an assumption that is usually true of
+images and signals: a pattern means the same thing wherever it appears. The
+sequence models of \cref{ch:ch18} start from the same observation about text.
+
+\begin{researchspotlight}{LeCun et al.\ (1998) --- Gradient-based learning for document recognition}
+\textbf{The problem.} Recognising handwritten characters needed hand-designed
+feature extractors, which were brittle and expensive to build for each new task.
+
+\textbf{The idea.} A network of convolutional layers with shared weights,
+alternating with sub-sampling layers, trained end to end by back-propagation
+directly from pixels --- LeNet-5. The convolutions learn the feature extractors
+that had been designed by hand.
+
+\textbf{The result.} State-of-the-art accuracy on handwritten digits, and a
+deployed system that read a significant fraction of the cheques written in the
+United States. Fourteen years later a much larger convolutional network, trained
+on graphics processors with ReLU units, won the ImageNet competition by a wide
+margin and began the modern era of deep learning \parencite{krizhevsky2012}.
+
+\textbf{Why it is here.} It is \cref{sec:conv} at full scale, and the clearest
+early demonstration of the key insight of \cref{ch:ch08}: features learned from
+data beat features designed by hand, given enough data.
+\parencite{lecun1998}
+\end{researchspotlight}
+
+\begin{labbox}{Lab 9 --- Training networks}
+Implement sigmoid, ReLU and linear activations and check them against Keras.
+Reproduce the N231-ReLU outputs and the cost $0.039547$, and confirm that
+\code{model.evaluate} returns the same number. Implement stable softmax and
+cross-entropy, reproduce the clipped-loss experiment of
+\cref{sec:stable-softmax}, and train a four-class network with
+\code{from\_logits=True}.
+
+Implement the back-propagation of \cref{sec:backprop} in NumPy, reproduce the
+thirteen gradients of the worked forward and backward pass, and pass a gradient
+check on random inputs. Then implement Adam from its definition and reproduce
+the learning-rate table of \cref{sec:adam}. The practice lab trains a ten-class
+digit classifier and reproduces its probabilities in NumPy from the trained
+weights.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item Model, Loss, Fit
-  \item Activation Functions
-  \item Multiclass Classification and Softmax
-  \item Numerically Stable Softmax
-  \item Backpropagation
-  \item Advanced Optimization
-  \item Other Layer Types
+  \item Training a network is the same three steps as before: model, loss,
+        minimisation --- \code{Sequential}, \code{compile}, \code{fit}. Binary
+        cross-entropy is the logistic loss.
+  \item The output activation is chosen from the range of the target: sigmoid,
+        linear, ReLU, or softmax. Hidden layers use ReLU by default; it does not
+        saturate for $z > 0$, where its slope is $1$ against the sigmoid's
+        maximum of $0.25$.
+  \item Softmax turns $N$ scores into $N$ probabilities; two-class softmax is the
+        sigmoid of the score difference. Its cross-entropy loss $-\ln a_y$ has
+        gradient $\va - \mathbf{e}_y$ with respect to the scores.
+  \item The naive softmax overflows and loses precision. Subtract the maximum
+        score and compute log-softmax directly; in Keras, output logits and pass
+        \code{from\_logits=True}, or a confidently wrong example's loss is
+        clipped at $16.12$.
+  \item Multi-label problems use $N$ sigmoid outputs, not softmax.
+  \item Back-propagation stores every value on the forward pass and multiplies
+        local derivatives on the backward pass, computing all gradients in about
+        the cost of one forward pass. For a dense layer,
+        $d\mathbf{W} = \mathbf{A}_{\text{in}}^{\mathsf{T}}d\mathbf{Z}$ and
+        $d\mathbf{Z}_{\text{in}} = (d\mathbf{Z}\,\mathbf{W}^{\mathsf{T}})\odot\gsig'$.
+  \item Gradient checks against central differences catch implementation
+        errors, but fail spuriously at ReLU's kink.
+  \item Adam scales each parameter's step by its gradient history. On
+        $w_1^2 + 10w_2^2$ gradient descent converges only for $\alpha < 0.1$;
+        Adam converges for every $\alpha$ from $0.03$ to $3$.
+  \item Convolutional layers share one filter across windows: $21$ parameters
+        where a dense layer needs $909$.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq List the three steps of training and the Keras statement that performs each.
+
+\sq Define an epoch. If $m = 60{,}000$ and \code{epochs=20}, how many times is each
+example seen?
+
+\sq Choose the output activation and loss for: (a) whether a loan defaults;
+(b) tomorrow's temperature; (c) the number of visitors to a website; (d) which
+of five fruits is in an image.
+
+\sq Give two reasons ReLU is preferred over the sigmoid in hidden layers.
+
+\sq What is a dead ReLU unit, and why does gradient descent not revive it?
+
+\sq Why is softmax unlike the other activations in how its outputs depend on the
+scores?
+
+\sq What are logits, and why is \code{from\_logits=True} preferred?
+
+\sq Distinguish multiclass from multi-label classification, giving the output
+layer for each.
+
+\sq Why does back-propagation take about $N + P$ steps while finite differences
+take about $N\times P$?
+
+\sq State the Adam update and say how it behaves when a gradient keeps its sign
+and when it oscillates.
+
+\sq Why does a convolutional layer need fewer parameters than a dense layer?
+
+\exercisesection{Analytical Problems}
+
+\ap Show that two-class softmax with scores $(z_1, z_2)$ equals
+$\gsig(z_1 - z_2)$, and that its cross-entropy loss equals binary cross-entropy.
+
+\ap Compute the softmax of $\mathbf{z} = (1, 0, -1)$ and the loss for each
+possible true class. Explain why the first loss equals that of
+$(1000, 999, 998)$.
+
+\ap Derive $\partial\loss/\partial z_j = a_j - [j = y]$ for softmax with
+cross-entropy, first directly from $\loss = \ln\sum_k e^{z_k} - z_y$, and then
+by multiplying the softmax Jacobian by $\partial\loss/\partial\va$.
+
+\ap For $J = \frac12(wx + b - y)^2$ with $w = 1$, $b = 2$, $x = 3$, $y = 1$, draw
+the computation graph, carry out the forward pass, and compute
+$\partial J/\partial w$ and $\partial J/\partial b$ by back-propagation.
+
+\ap In the two-ReLU-layer example, change $w^{[2]}$ from $3$ to $-1$. Recompute
+every value and every gradient, and explain what has happened to the second
+unit.
+
+\ap Derive the back-propagation equations for a network with one hidden layer of
+\emph{sigmoid} units, a sigmoid output and binary cross-entropy. Which single
+factor differs from the ReLU case?
+
+\ap Show that at $t = 1$ the Adam update is $w \leftarrow w - \alpha\,
+d/(|d| + \epsilon)$, so that the first step has length almost exactly $\alpha$ in
+every coordinate. What happens to the first step if the bias correction is
+omitted?
+
+\exercisesection{Design Problems}
+
+\dpr Design a network to classify photographs of leaves into four disease
+categories. Specify the input preprocessing, the architecture (including any
+convolutional layers), every activation, the loss, the optimizer, and how you
+will report probabilities to the user.
+
+\dpr A news site wants to tag each article with any of $12$ topics. Design the
+output layer and loss, explain what would go wrong with softmax, and say how you
+would choose the threshold for each tag.
+
+\dpr Design a routine that checks the gradients produced by any back-propagation
+implementation. Specify $\varepsilon$, the comparison metric, the tolerance, and
+how you handle ReLU kinks.
+
+\dpr Design an experiment that fairly compares plain gradient descent with Adam
+on a digit-classification task. Specify the learning rates you sweep, what you
+measure, the number of runs, and how you report the result.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement stable \code{softmax}, \code{log\_softmax} and
+\code{cross\_entropy}, and check them against TensorFlow on logits of size
+$(500, 6)$ scaled by $100$. Confirm that the naive version returns \code{nan}.
+
+\pe Implement forward and backward passes for a network with one ReLU hidden
+layer and a sigmoid output. Reproduce the worked forward and backward pass of
+\cref{sec:backprop}, then pass a gradient check on twenty random inputs.
+
+\pe Using your implementation, train a $2\to8\to1$ network on a two-moons data
+set with your own gradient descent and with your own Adam. Plot both learning
+curves and the decision boundaries.
+
+\pe Train the same Keras digit classifier with sigmoid hidden layers and with
+ReLU hidden layers, using the same seed and optimizer. Plot both learning curves
+and report the epoch at which each first reaches half its initial cost.
+
+\exercisesection{Self-Test}
+
+\qz Binary cross-entropy is the same as: (a)~squared error; (b)~the logistic
+loss; (c)~hinge loss; (d)~the softmax.
+
+\qz The default activation for hidden layers is: (a)~sigmoid; (b)~linear;
+(c)~ReLU; (d)~softmax.
+
+\qz For a regression target that can be negative, the output activation should
+be: (a)~sigmoid; (b)~ReLU; (c)~linear; (d)~softmax.
+
+\qz The softmax of $(2, 1, 0.1)$ has first component: (a)~$0.2424$; (b)~$0.5$;
+(c)~$0.6590$; (d)~$0.7311$.
+
+\qz The gradient of softmax cross-entropy with respect to the scores is:
+(a)~$\va$; (b)~$\va - \mathbf{e}_y$; (c)~$-1/a_y$; (d)~$\mathbf{e}_y$.
+
+\qz Subtracting $\max_k z_k$ from every score before softmax: (a)~changes the
+probabilities; (b)~prevents overflow without changing them; (c)~is only needed
+for two classes; (d)~breaks the gradient.
+
+\qz Back-propagation computes: (a)~the forward pass; (b)~all gradients in about
+the cost of one forward pass; (c)~one gradient per forward pass; (d)~the
+learning rate.
+
+\qz At $t = 1$, the Adam step in each coordinate has length about:
+(a)~$\alpha|d|$; (b)~$\alpha$; (c)~$\alpha d^2$; (d)~zero.
+
+\furtherreading
+
+\textcite{james2021} §10.7 is the primary reading: §10.7.1 derives
+back-propagation for a single-hidden-layer network in the notation of this
+chapter, and §10.7.2 covers stochastic gradient descent, dropout and other
+regularization for networks. The softmax output and cross-entropy loss appear
+in §10.2 on the digit data, and §10.3 is a readable introduction to
+convolutional networks. \textcite{bishop2006} §5.2 develops network training
+with an emphasis that complements this chapter --- pairing each output
+activation with its error function, exactly as in \cref{sec:activations} --- and
+§5.3 derives back-propagation in full generality, including the efficiency
+argument and its application to the Jacobian and Hessian of a network.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch10} opens Part~IV. Every model in the book can
+now be built and trained; the question becomes how to tell whether it is good
+enough, and what to do when it is not.

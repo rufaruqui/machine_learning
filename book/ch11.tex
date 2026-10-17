@@ -1,17 +1,796 @@
 %% ch11.tex --- Error Analysis, Data, Skew, and Ethics
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch11_skew.py.
+%% Scope boundary: this chapter is the *modelling* loop.  The *engineering*
+%% loop --- pipelines, serving, monitoring, retraining --- is Part IX.
 
 \chapter{Error Analysis, Data, Skew, and Ethics}
 \label{ch:ch11}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{In God we trust. All others must bring data.}{---\ attributed to
+W.~Edwards Deming}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Describe the iterative loop of model development and say where each
+        diagnostic enters it.
+  \item Carry out an error analysis by hand and use it to rank possible
+        improvements.
+  \item Add data effectively --- by targeted collection, augmentation and
+        synthesis --- and state the rule an augmentation must obey.
+  \item Apply transfer learning in either of its two fine-tuning regimes, and
+        say when each is appropriate.
+  \item Explain why accuracy is useless on skewed data, and compute precision,
+        recall and $F_1$ from a confusion matrix.
+  \item Trace the precision--recall trade-off as the threshold moves, and derive
+        the cost-minimising threshold from the costs of the two errors.
+  \item Evaluate a model separately for each group it affects, and explain why a
+        single threshold can treat groups differently.
+  \item Write the content of a model card.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch10} built the measurements: held-out error, bias and variance,
+learning curves, calibration. This chapter puts them to work in the
+day-to-day loop of building a model, and adds the measurements that matter when
+the classes are badly imbalanced and when the people the model affects are not
+all alike.
+
+A word on scope. This chapter is about improving a \emph{model}: deciding what to
+try next, getting the right data, measuring the right thing. Building and
+operating the \emph{system} that contains the model --- pipelines, serving,
+monitoring, retraining --- is the subject of Part~IX. The two loops interlock,
+and each cross-references the other.
+
+\section{The Iterative Loop of Model Development}
+\label{sec:loop}
+
+Building a model is rarely a straight line from data to deployment. It is a loop:
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      st/.style={draw=MLBlue, fill=MLBlue!6, rounded corners, align=center,
+                 font=\small, minimum width=3.2cm, minimum height=10mm},
+      ar/.style={-{Stealth[length=2.5mm]}, MLGray, very thick}]
+    \node[st] (a) at (90:1.9) {choose architecture\\(model, data, features, $\lambda$)};
+    \node[st, draw=MLAmber, fill=MLAmber!10] (t) at (-30:2.3) {train the model};
+    \node[st, draw=MLTeal, fill=MLTeal!10] (d) at (210:2.3)
+      {diagnose\\(bias, variance,\\error analysis)};
+    \draw[ar] (a) to[bend left=25] (t);
+    \draw[ar] (t) to[bend left=25] (d);
+    \draw[ar] (d) to[bend left=25] (a);
+  \end{tikzpicture}
+  \caption{The iterative loop of model development. Each turn costs time ---
+  minutes for a small model, days for a large one --- so the quality of the
+  diagnosis decides how many turns a project needs.}
+  \label{fig:dev-loop}
+\end{figure}
+
+Consider building a spam classifier, with $x_j = 1$ if word $j$ of a
+$10{,}000$-word vocabulary appears in an email. After a first model, plausible
+next steps include: collecting more data, for instance from ``honeypot''
+accounts that attract spam; building features from the email's routing headers;
+building features from the body, such as punctuation and deliberate misspellings
+like \emph{w4tches}; and writing an algorithm to detect those misspellings. Each
+could take weeks. The bias/variance diagnosis of \cref{ch:ch10} says whether
+more data or more features is the right \emph{kind} of step. It does not say
+\emph{which} features. For that, look at the mistakes.
+
+\section{Error Analysis}
+\label{sec:error-analysis}
+
+\begin{defbox}{Error analysis}
+\term{Error analysis} is the manual inspection of a sample of the examples a
+model gets wrong, tagging each with the properties that might explain the error,
+and counting the tags. The counts rank the possible improvements by the most
+they could achieve.
+\end{defbox}
+
+\begin{workedexample}{Error analysis for the spam classifier (illustrative)}
+Suppose the classifier misclassifies $500$ of $5000$ validation emails. Sample
+$100$ of the $500$ at random, read them, and tag each:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lr@{}}
+\toprule
+category & count of $100$\\
+\midrule
+pharmaceutical spam              & $21$\\
+phishing (stealing passwords)    & $18$\\
+unusual email routing            & $7$\\
+spam inside an embedded image    & $5$\\
+deliberate misspellings          & $3$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The categories may overlap; one email can be both pharmaceutical and misspelt.
+A perfect misspelling detector would fix at most $3$ of the $100$ --- about $15$
+of the $500$ errors. Pharmaceutical spam and phishing together account for $39$.
+That is where the next weeks should go: more examples of pharmaceutical spam,
+and features for the links that phishing emails contain.
+\end{workedexample}
+
+The sample size is a compromise. A hundred is enough to see the large categories
+clearly and few enough to read in an hour or two; if the model makes only a few
+hundred errors in all, read them all. Error analysis works best on tasks that
+people do well --- reading email, recognising objects, transcribing speech ---
+because the analyst can see why an error is an error. It is much harder when
+people cannot judge the task either, such as predicting which advertisement a
+user will click.
+
+\begin{keyinsight}{An error analysis is an upper bound on every idea}
+Each category's count is the most that fixing it perfectly could gain. That
+turns arguments about which idea is cleverest into arithmetic about which idea
+could possibly matter, and it routinely shows that the idea the team was most
+excited about addresses three percent of the errors.
+\end{keyinsight}
+
+\section{Adding Data}
+\label{sec:adding-data}
+
+When the diagnosis is high variance, more data helps. Collecting more of
+\emph{everything} is slow and expensive. Three cheaper strategies are usually
+available.
+
+\subsection{Targeted collection}
+
+If error analysis says pharmaceutical spam is the problem, collect pharmaceutical
+spam: search the unlabelled mail you already have for it, and label only that. A
+few hundred targeted examples can do more than tens of thousands of random ones.
+
+\subsection{Data augmentation}
+
+\begin{defbox}{Data augmentation}
+\term{Data augmentation} creates new training examples by modifying existing
+ones in ways that preserve the label: rotating, scaling, shearing or slightly
+distorting an image; adding background noise to a speech recording; replacing
+words with synonyms in a sentence.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[letter/.style={font=\sffamily\bfseries\Huge, MLBlue}]
+    \node[draw=MLAmber, thick, minimum size=1.5cm, letter] at (0,0) {A};
+    \node[font=\scriptsize, MLAmber] at (0,-1.05) {original};
+    \foreach \x/\lab in {2.0/rotated, 3.8/stretched, 5.6/shrunk, 7.4/sheared}{
+      \node[draw=MLGray!50, minimum size=1.5cm] at (\x,0) {};
+      \node[font=\scriptsize, MLGray] at (\x,-1.05) {\lab};}
+    \node[letter, rotate=15] at (2.0,0) {A};
+    \node[letter, xscale=1.4] at (3.8,0) {A};
+    \node[letter, scale=0.65] at (5.6,0) {A};
+    \node[letter, xslant=0.4] at (7.4,0) {A};
+  \end{tikzpicture}
+  \caption{Four label-preserving augmentations of one training example. Each
+  represents a variation a real handwritten or photographed letter might show,
+  so each teaches the model something it will need.}
+  \label{fig:augment}
+\end{figure}
+
+\begin{pitfall}{An augmentation must represent the test distribution}
+A distortion helps only if it represents variation the model will meet. Rotated
+letters and noisy telephone calls occur in practice; adding independent random
+noise to every pixel does not resemble anything a camera produces, and usually
+adds little. And an augmentation must not change the label: rotate a $6$ by
+$180^\circ$ and it is a $9$.
+\end{pitfall}
+
+\subsection{Data synthesis}
+
+\term{Data synthesis} creates examples from scratch. To read text in photographs
+--- shop signs, number plates --- render characters in many fonts, sizes, colours
+and contrasts on varied backgrounds and crop them: the label is known by
+construction. Simulated sensor readings and game-engine images for self-driving
+are larger versions of the same idea. The risk is that a model learns the
+renderer's quirks instead of the task, so synthetic data should always be
+validated on real data, with error analysis checking that it fixes the categories
+it was made for.
+
+\subsection{Data-centric development}
+
+There are two ways to spend a week improving a model. \emph{Model-centric}
+development holds the data fixed and improves the algorithm. \emph{Data-centric}
+development holds a good algorithm fixed and improves the data: fixing
+inconsistent labels, collecting targeted examples, augmenting. Now that strong
+off-the-shelf architectures exist for most kinds of input, the second is often
+the faster route to a better system.
+
+\begin{researchspotlight}{Halevy, Norvig \& Pereira (2009) --- The unreasonable effectiveness of data}
+\textbf{The problem.} For tasks such as machine translation and speech
+recognition, decades of work on elaborate models had produced modest gains. Was
+the bottleneck the model or the data?
+
+\textbf{The idea.} The authors, from a large web company, argued from experience
+with web-scale text that simple models with very large amounts of data --- such
+as $n$-gram statistics over a trillion words --- outperform sophisticated models
+trained on less, and that the right response to the messiness of real data is
+to use more of it rather than to model it away.
+
+\textbf{The result.} An influential essay that shifted attention towards data
+collection and scale. Its title deliberately echoes Wigner's ``unreasonable
+effectiveness of mathematics''.
+
+\textbf{Why it is here.} It is the strongest form of the high-variance remedy of
+\cref{ch:ch10}, and the context for \cref{sec:adding-data}. Read it with the
+caveat this chapter's learning curves supply: more data helps a high-variance
+model and does nothing for a high-bias one.
+\parencite{halevy2009}
+\end{researchspotlight}
+
+\section{Transfer Learning}
+\label{sec:transfer}
+
+Sometimes the data for the task at hand is scarce, but plenty exists for a
+related task. \term{Transfer learning} uses the second to help with the first.
+
+\begin{defbox}{Transfer learning: pre-training and fine-tuning}
+\begin{enumerate}
+  \item \textbf{Supervised pre-training.} Train a network on a large dataset for
+        a related task --- for instance, a million photographs labelled with
+        $1000$ object classes.
+  \item \textbf{Fine-tuning.} Copy all but the output layer to a new network,
+        give it a new output layer sized for the task at hand, and continue
+        training on the small dataset. Either
+        \begin{itemize}
+          \item \emph{option 1}: train only the new output layer, keeping the
+                copied layers fixed --- best when the new dataset is very small;
+                or
+          \item \emph{option 2}: train every layer, starting from the copied
+                values --- better when there is more data.
+        \end{itemize}
+\end{enumerate}
+\end{defbox}
+
+\begin{workedexample}{What option 1 trains}
+A network $784 \to 128 \to 64 \to 1000$ is pre-trained on a large image dataset:
+$784\cdot128 + 128 = 100{,}480$ parameters in its first layer, $8{,}256$ in its
+second, and $65{,}000$ in its $1000$-class output layer. To recognise ten digits,
+replace the output layer with a $64\to10$ layer of $650$ parameters. Option 1
+trains those $650$ of the network's $109{,}386$ --- $0.59\%$ --- and the
+$108{,}736$ copied parameters supply everything else.
+\end{workedexample}
+
+It works because the early layers of a network trained on images learn generic
+features --- edges, corners, simple shapes (\cref{sec:learned-features}) --- that
+are useful for almost any image task. The pre-training input must therefore be
+of the same \emph{type} as the new task's: images for an image task, audio for a
+speech task, text for a language task. A network pre-trained on photographs has
+nothing to offer a table of loan applications. In practice the pre-trained
+network is usually downloaded, not trained: researchers and companies publish
+networks trained on very large datasets. The large language models of
+\cref{ch:ch19} are the same idea at the largest scale yet.
+
+\section{Skewed Classes}
+\label{sec:skew}
+
+Many important classification problems are badly imbalanced: a rare disease, a
+fraudulent transaction, a failing machine. On such data, accuracy is not merely
+uninformative but actively misleading.
+
+\begin{defbox}{Confusion matrix}
+For a binary classifier, the \term{confusion matrix} counts the four outcomes:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}l|cc@{}}
+ & actual $1$ & actual $0$\\
+\hline
+predicted $1$ & true positives (TP) & false positives (FP)\\
+predicted $0$ & false negatives (FN) & true negatives (TN)\\
+\end{tabular}
+\end{center}
+By convention the rare class is labelled $y = 1$.
+\end{defbox}
+
+\begin{workedexample}{The accuracy trap at $0.5\%$ prevalence}
+A screening programme tests $10{,}000$ people, of whom $50$ have the disease. A
+classifier produces TP $= 35$, FN $= 15$, FP $= 90$, TN $= 9{,}860$. Its accuracy
+is $(35 + 9{,}860)/10{,}000 = 0.9895$.
+
+The program that prints ``healthy'' for everyone is right about the $9{,}950$
+healthy people and wrong about the $50$ sick ones: accuracy $0.9950$. It is more
+accurate than the classifier, and it never finds a single case.
+\end{workedexample}
+
+\section{Precision, Recall and \texorpdfstring{$F_1$}{F1}}
+\label{sec:precision-recall}
+
+\begin{defbox}{Precision and recall}
+\[
+  \text{precision} = \frac{\text{TP}}{\text{TP} + \text{FP}}, \qquad
+  \text{recall} = \frac{\text{TP}}{\text{TP} + \text{FN}} .
+\]
+\term{Precision} is the fraction of the examples flagged positive that really
+are positive. \term{Recall} is the fraction of the positives that were flagged.
+\end{defbox}
+
+For the screening classifier above, precision is $35/125 = 0.28$ and recall is
+$35/50 = 0.70$: it finds seven in ten cases, and seven in ten of the people it
+flags are healthy. The ``always healthy'' program has recall $0$ and an undefined
+precision ($0/0$). The two numbers expose it at once, which is the point of them.
+
+\subsection{The trade-off}
+
+A logistic model produces a probability, and the threshold turns it into a
+decision (\cref{sec:threshold}). Raising the threshold flags fewer cases, more
+confidently: precision rises and recall falls. Lowering it does the reverse.
+
+\begin{defbox}{Screening model S}
+To see the trade-off in full, consider a screening score with
+$\mathcal{N}(3,1)$ distribution among the sick and $\mathcal{N}(0,1)$ among the
+healthy, prevalence $0.5\%$, and a classifier that reports the exact
+probability $\Prob(y = 1 \mid \text{score})$. Everything below is computed
+exactly from the normal distribution, per $10{,}000$ people screened.
+\end{defbox}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+threshold & recall & precision & $F_1$ & TP & FP & FN\\
+\midrule
+$0.01$ & $0.897$ & $0.098$ & $0.176$ & $44.9$ & $413.6$ & $5.1$\\
+$0.02$ & $0.849$ & $0.148$ & $0.252$ & $42.5$ & $244.6$ & $7.5$\\
+$0.05$ & $0.763$ & $0.255$ & $0.382$ & $38.2$ & $111.6$ & $11.8$\\
+$0.10$ & $0.680$ & $0.376$ & $0.484$ & $34.0$ & $56.4$  & $16.0$\\
+$0.20$ & $0.578$ & $0.534$ & $0.555$ & $28.9$ & $25.2$  & $21.1$\\
+$0.30$ & $0.507$ & $0.640$ & $\mathbf{0.566}$ & $25.4$ & $14.2$ & $24.6$\\
+$0.50$ & $0.396$ & $0.784$ & $0.526$ & $19.8$ & $5.5$   & $30.2$\\
+$0.70$ & $0.292$ & $0.883$ & $0.439$ & $14.6$ & $1.9$   & $35.4$\\
+$0.90$ & $0.159$ & $0.961$ & $0.273$ & $8.0$  & $0.3$   & $42.0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.62\linewidth, height=5.4cm,
+      xlabel={recall}, ylabel={precision}, xmin=0, xmax=1.02, ymin=0, ymax=1.02]
+      \addplot[MLBlue, very thick, smooth] coordinates
+        {(1.000,0.006)(0.999,0.008)(0.999,0.010)(0.997,0.012)(0.994,0.016)
+         (0.988,0.021)(0.977,0.030)(0.960,0.044)(0.933,0.066)(0.894,0.101)
+         (0.841,0.157)(0.773,0.241)(0.691,0.359)(0.599,0.502)(0.500,0.651)
+         (0.401,0.778)(0.309,0.870)(0.227,0.928)(0.159,0.962)(0.106,0.980)
+         (0.067,0.990)(0.040,0.995)(0.023,0.997)(0.012,0.999)};
+      \addplot[only marks, mark=*, mark size=1.8pt, MLRose] coordinates
+        {(0.897,0.098)(0.763,0.255)(0.507,0.640)(0.396,0.784)(0.159,0.961)};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:0.90,0.12) {$0.01$};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:0.77,0.28) {$0.05$};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:0.52,0.66) {$0.3$};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:0.41,0.80) {$0.5$};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:0.17,0.98) {$0.9$};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The precision--recall curve of screening model S, traced by moving
+  the threshold. Labelled points are thresholds on the predicted probability.
+  At $0.5\%$ prevalence even a recall of $0.9$ costs a precision below $0.1$:
+  ten healthy people flagged for every case found.}
+  \label{fig:pr-curve}
+\end{figure}
+
+\subsection{Combining the two}
+
+Two numbers are awkward for choosing among models. The obvious single number,
+their average, is a trap.
+
+\begin{defbox}{$F_1$ score}
+\[
+  F_1 = \frac{1}{\tfrac12\bigl(\tfrac1P + \tfrac1R\bigr)} = \frac{2PR}{P + R},
+\]
+the \term{harmonic mean} of precision $P$ and recall $R$. It is dominated by the
+smaller of the two, so a model must do reasonably well on both to score well.
+\end{defbox}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & $P$ & $R$ & mean & $F_1$\\
+\midrule
+algorithm 1 & $0.5$  & $0.4$ & $0.450$ & $\mathbf{0.4444}$\\
+algorithm 2 & $0.7$  & $0.1$ & $0.400$ & $0.1750$\\
+algorithm 3 & $0.02$ & $1.0$ & $\mathbf{0.510}$ & $0.0392$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Algorithm 3 flags almost everyone: perfect recall, useless precision. The mean
+ranks it first; $F_1$ ranks it last. The screening classifier of
+\cref{sec:skew} has $F_1 = 2(0.28)(0.70)/0.98 = 0.40$, and model S reaches its
+best $F_1$, $0.566$, at a threshold of about $0.28$ --- not at the default $0.5$.
+
+\section{Choosing a Threshold from Costs}
+\label{sec:threshold-costs}
+
+$F_1$ weights the two kinds of error as if they cost the same. In screening they
+emphatically do not, and when the costs are known the threshold can be derived
+rather than tuned.
+
+\begin{derivation}{The cost-minimising threshold}
+Let a false negative cost $c_{\text{FN}}$ and a false positive $c_{\text{FP}}$.
+For an example with predicted probability $p = \Prob(y = 1\mid\vx)$, assumed
+calibrated (\cref{sec:calibration}), the expected cost of each decision is
+\[
+  \text{predict } 0:\ p\,c_{\text{FN}}, \qquad
+  \text{predict } 1:\ (1-p)\,c_{\text{FP}} .
+\]
+Predict $1$ when the second is smaller:
+\[
+  (1-p)\,c_{\text{FP}} < p\,c_{\text{FN}}
+  \iff
+  p > \boxed{\;t^\star = \frac{c_{\text{FP}}}{c_{\text{FP}} + c_{\text{FN}}}\;}
+\]
+Equal costs give $t^\star = \tfrac12$, the default. A missed case that costs as
+much as fifty false alarms gives $t^\star = 1/51 = 0.0196$. The threshold
+depends only on the cost ratio, and the derivation needs the probabilities to be
+calibrated: an overconfident model applied with this threshold makes the wrong
+trade.
+\end{derivation}
+
+\begin{workedexample}{Pricing the errors for model S}
+With $c_{\text{FN}} = 50$ and $c_{\text{FP}} = 1$, the expected cost per
+$10{,}000$ people screened is $50\,\text{FN} + \text{FP}$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+threshold & FN & FP & cost\\
+\midrule
+$0.0050$ & $3.34$  & $664.7$ & $831.7$\\
+$0.0196$ & $7.46$  & $248.6$ & $\mathbf{621.7}$\\
+$0.0500$ & $11.83$ & $111.6$ & $703.3$\\
+$0.1000$ & $16.00$ & $56.4$  & $856.2$\\
+$0.2832$ (best $F_1$) & $24.10$ & $15.6$ & $1220.6$\\
+$0.5000$ & $30.21$ & $5.5$   & $1516.2$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A search over every threshold confirms the minimum at $t^\star = 0.0196$. The
+threshold that maximises $F_1$ costs almost exactly twice as much.
+\end{workedexample}
+
+\begin{pitfall}{Optimising $F_1$ when the two errors cost differently}
+$F_1$ is a convenient single number for comparing models when nobody has priced
+the errors. Once someone has, use the cost. Here the best-$F_1$ threshold misses
+$24$ cases per $10{,}000$ where the cost-optimal one misses $7.5$, because $F_1$
+cannot know that a missed case is worth fifty false alarms. The weighted
+$F_\beta = (1+\beta^2)PR/(\beta^2P + R)$ puts more weight on recall for
+$\beta > 1$, but an explicit cost is always clearer.
+\end{pitfall}
+
+\begin{ethicsnote}{Who sets the cost ratio?}
+The ratio $c_{\text{FN}}/c_{\text{FP}}$ decides how many healthy people are
+recalled to find one more case. It is a value judgement about competing harms
+--- anxiety and unnecessary procedures on one side, missed disease on the other
+--- and it belongs to the people who bear those harms and to those accountable
+for them, not to whoever happens to write the code. Record the ratio, who chose
+it and why, next to the model.
+\end{ethicsnote}
+
+\section{Fairness: Evaluating for Everyone}
+\label{sec:fairness}
+
+A model's error rates are averages, and an average can hide a group the model
+serves badly. That matters most when the model makes consequential decisions
+about people.
+
+\subsection{Sources of harm}
+
+Harm usually enters through the data. A group under-represented in the training
+set gets a model that has seen too few of its examples. Labels that record past
+human decisions --- who was hired, who was granted a loan, who was arrested ---
+encode whatever bias those decisions contained, and a model trained on them
+learns to reproduce it at scale. Features that look neutral can stand in for
+protected attributes: a postal code can carry much of the information in race or
+income. And a model can be used for purposes its builders never evaluated it for.
+
+\subsection{Subgroup evaluation}
+
+The first defence is simply to measure. Report every metric separately for each
+group the model will be applied to.
+
+\begin{workedexample}{One threshold, two groups}
+A screening model is applied to two groups with the same prevalence, $5\%$. For
+group A the score separates the classes as before (positives $\mathcal{N}(3,1)$);
+for group B, under-represented in the training data, it separates them less well
+(positives $\mathcal{N}(2.2,1)$). A single threshold, set at the score where
+group A's probability is $0.5$, is applied to both:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+group & recall & miss rate & false-positive rate & precision & accuracy\\
+\midrule
+A & $0.698$ & $0.302$ & $0.0065$ & $0.849$ & $0.9787$\\
+B & $0.389$ & $0.611$ & $0.0065$ & $0.758$ & $0.9632$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Group B's cases are missed twice as often as group A's, $61\%$ against $30\%$.
+If B is $10\%$ of the population, the pooled accuracy is $0.9771$, which looks
+excellent and reveals nothing.
+
+Lowering B's threshold until its recall matches A's, $0.698$, raises B's
+false-positive rate from $0.0065$ to $0.0463$ --- seven times as many healthy
+members of B recalled. Equalising one error rate unbalanced the other. The real
+remedy is upstream: better data and features for group B, so that its score
+separates the classes as well as A's does.
+\end{workedexample}
+
+\begin{keyinsight}{Fairness criteria compete}
+``Equal recall for every group'', ``equal false-positive rate'' and ``equally
+calibrated probabilities'' are each a reasonable definition of a fair
+classifier, and when groups differ in base rates or in how well the model
+separates them, no threshold satisfies all of them at once. Choosing among them
+is a decision about values, not a technical detail; the technical work is to
+measure all of them, report them, and reduce the underlying disparity in model
+quality.
+\end{keyinsight}
+
+\begin{researchspotlight}{Buolamwini \& Gebru (2018) --- Gender Shades}
+\textbf{The problem.} Commercial face-analysis systems were reported to be highly
+accurate. Were they equally accurate for everyone?
+
+\textbf{The idea.} Build a benchmark balanced by gender and by skin type, and
+evaluate three commercial gender-classification systems on each intersectional
+subgroup separately, rather than on the population as a whole.
+
+\textbf{The result.} All three systems performed worst on darker-skinned women,
+with error rates up to $34.7\%$, against at most $0.8\%$ for lighter-skinned
+men. The headline accuracy figures had concealed a disparity of more than forty
+to one. Several of the companies improved their systems after publication.
+
+\textbf{Why it is here.} It is subgroup evaluation, \cref{sec:fairness}, done on
+production systems, and it showed that the disparity was invisible precisely
+because nobody had measured by subgroup. The benchmark's design --- balanced by
+construction, so that small groups are measured precisely --- is a lesson in
+itself.
+\parencite{buolamwini2018}
+\end{researchspotlight}
+
+\subsection{Model cards}
+
+\begin{defbox}{Model card}
+A \term{model card} is a short document that travels with a trained model and
+records: what the model is for and what it must not be used for; the data it was
+trained and evaluated on; its performance, overall and \emph{for each relevant
+group}, with the threshold used; the cost ratio behind that threshold and who
+chose it; known limitations and failure modes; and the people responsible for
+it.
+\end{defbox}
+
+\begin{researchspotlight}{Mitchell et al.\ (2019) --- Model cards for model reporting}
+\textbf{The problem.} Trained models were being released and reused with little
+information about how they had been evaluated, for whom they worked, or where
+they should not be used.
+
+\textbf{The idea.} A standard, short report to accompany every model: intended
+use, factors such as demographic groups, metrics, evaluation and training data,
+quantitative analyses disaggregated by group, ethical considerations, and
+caveats --- analogous to a datasheet for an electronic component.
+
+\textbf{The result.} A widely adopted documentation practice; many published
+models now ship with a model card, and the format has been extended to datasets
+and to whole systems.
+
+\textbf{Why it is here.} It turns the measurements of this chapter --- subgroup
+metrics, the threshold, the cost ratio --- into a record someone else can audit.
+\Cref{ch:ch22} returns to it as part of operating a deployed model.
+\parencite{mitchellm2019}
+\end{researchspotlight}
+
+\begin{ethicsnote}{Before you build}
+Some harms are best prevented before any data is collected. Assemble a team
+with varied backgrounds to brainstorm how the system could fail or be misused,
+especially for vulnerable groups. Look for established standards in the
+application area --- medicine, lending and hiring all have them. Audit for harm
+before deployment, with the subgroup measurements above. Prepare a plan for
+rolling back if harm appears after release, and keep monitoring after
+deployment, because the population a model serves changes. And be willing to
+conclude that a system should not be built.
+\end{ethicsnote}
+
+\begin{labbox}{Lab 11 --- Error analysis and skewed data}
+Take the digit classifier of Lab~9, collect its misclassified validation images,
+and carry out an error analysis on them: invent categories, tag each error, and
+rank the categories. Augment the training set with small rotations and shifts
+of the images in the largest category, retrain, and report the change in that
+category's count.
+
+Then reproduce the screening calculations: the confusion-matrix metrics of
+\cref{sec:skew}, the threshold table and precision--recall curve of model S, and
+the cost-minimising threshold $0.0196$. Finally reproduce the two-group table of
+\cref{sec:fairness} and the effect of equalising recall.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item The Iterative Loop of Model Development
-  \item Error Analysis
-  \item Adding Data
-  \item Transfer Learning
-  \item Skewed Datasets
-  \item Precision, Recall, and the Trade-Off
-  \item Fairness, Bias, and Ethics
+  \item Model development is a loop of choosing, training and diagnosing. The
+        diagnosis decides how many turns a project needs.
+  \item Error analysis tags a sample of the errors by hand. Each category's count
+        is an upper bound on what fixing it can gain: a perfect misspelling
+        detector could fix $3\%$ of the spam errors.
+  \item More data helps high variance. Collect it where error analysis points;
+        augment with distortions that represent the test distribution and keep
+        the label; synthesise when the input can be rendered.
+  \item Transfer learning pre-trains on a large related task and fine-tunes;
+        option 1 trains only the new output layer ($650$ of $109{,}386$
+        parameters in the example).
+  \item At $0.5\%$ prevalence the ``always negative'' rule has accuracy $0.9950$,
+        beating a classifier that finds $70\%$ of cases. Use precision, recall
+        and $F_1 = 2PR/(P+R)$.
+  \item The threshold trades precision for recall. Model S's best $F_1$ is
+        $0.566$ at a threshold of $0.28$.
+  \item When the errors have costs, the cost-minimising threshold is
+        $c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$ for calibrated
+        probabilities --- $0.0196$ when a miss costs fifty false alarms, half
+        the cost of the best-$F_1$ threshold.
+  \item Evaluate every metric per group. One threshold missed $61\%$ of one
+        group's cases and $30\%$ of another's; equalising recall raised the
+        first group's false-positive rate sevenfold. Fairness criteria compete.
+  \item A model card records intended use, data, per-group performance, the
+        threshold and its cost ratio, limitations, and who is responsible.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Describe the iterative loop of model development and the role of
+diagnostics in it.
+
+\sq How do you carry out an error analysis? Why is each category's count an
+upper bound?
+
+\sq Distinguish collecting, augmenting and synthesising data, with an example of
+each.
+
+\sq State the rule an augmentation must obey, and give one augmentation that
+would harm a digit classifier.
+
+\sq Explain the two fine-tuning options of transfer learning and when to use
+each.
+
+\sq Why must the pre-training data be of the same type as the new task's?
+
+\sq Why is accuracy misleading on skewed data? Illustrate with a classifier that
+always predicts $y = 0$.
+
+\sq Define precision and recall in words and in terms of the confusion matrix.
+
+\sq Why is $F_1$ preferred to the arithmetic mean of precision and recall?
+
+\sq What is the cost-minimising threshold when a false negative costs nine times
+a false positive?
+
+\sq Give two ways in which training data can cause a model to treat groups
+differently.
+
+\exercisesection{Analytical Problems}
+
+\ap A fraud model on $10{,}000$ transactions gives TP $= 40$, FP $= 60$,
+FN $= 20$. Compute precision, recall, $F_1$ and accuracy, and the accuracy of
+the rule ``never fraud''.
+
+\ap Show that $\min(P,R) \le F_1 \le 2\min(P,R)$, so that $F_1$ is small
+whenever either of $P$ and $R$ is small. Compute $F_1$ and the arithmetic mean
+for $P = 0.9$, $R = 0.2$.
+
+\ap Derive the cost-minimising threshold $t^\star = c_{\text{FP}}/(c_{\text{FP}} +
+c_{\text{FN}})$. Explain why the derivation requires calibrated probabilities,
+and what happens to the expected cost if the model is overconfident.
+
+\ap For a score with $\mathcal{N}(\mu, 1)$ distribution among positives and
+$\mathcal{N}(0,1)$ among negatives, show that the log-odds of $\Prob(y=1\mid s)$
+is linear in $s$, and find the score at which the probability equals $t$ for
+prevalence $\pi$.
+
+\ap Using the previous problem, compute the recall and false-positive rate of
+model S at the probability threshold $0.5$, and check them against the table of
+\cref{sec:precision-recall}.
+
+\ap In the two-group example, show that equalising the groups' recall by moving
+group B's threshold necessarily raises B's false-positive rate, and compute the
+new rate.
+
+\exercisesection{Design Problems}
+
+\dpr Design an error analysis for a handwritten-address reader that misreads
+$8\%$ of envelopes: the sample size, the categories you expect, and how each
+finding would change what you do next.
+
+\dpr Design an augmentation pipeline for a leaf-disease classifier trained on
+photographs from a few fields, reflecting the conditions users' phones will
+meet. Name one tempting augmentation you would reject, and why.
+
+\dpr A screening test costs a small fee; a missed case costs a hundred times as
+much in later treatment. Design how to choose the threshold from validation
+data, how to check that the probabilities are calibrated first, and what to
+report to the clinic.
+
+\dpr A lender will use a model to pre-screen loan applications from two regions.
+Design the audit you would run before deployment: the metrics per group, the
+fairness criteria you would report, the condition that would stop the launch,
+and the contents of the model card.
+
+\exercisesection{Programming Exercises}
+
+\pe Train a classifier on a dataset of your choice, collect its validation
+errors, and carry out an error analysis on $100$ of them. Report the category
+table and the improvement you would try first.
+
+\pe Reproduce the threshold table and \cref{fig:pr-curve} for model S by
+simulation: draw $10^6$ scores from the model and compare the simulated rates with
+the exact ones.
+
+\pe Implement a function that, given validation labels, predicted probabilities
+and a cost ratio, returns the cost-minimising threshold and the confusion matrix
+at that threshold. Test it on model S with $c_{\text{FN}}/c_{\text{FP}} = 50$.
+
+\pe Fine-tune a pre-trained image network on a small dataset of your choice using
+option 1 and option 2. Compare their validation accuracy and training time as
+the training set grows from $50$ to $5000$ images.
+
+\exercisesection{Self-Test}
+
+\qz An error analysis category containing $3$ of $100$ sampled errors can
+improve the error rate by at most: (a)~$3\%$ of the errors; (b)~$30\%$;
+(c)~$100\%$; (d)~it cannot be bounded.
+
+\qz A good data augmentation: (a)~adds random pixel noise; (b)~represents
+variation expected in the test set and preserves the label; (c)~changes the
+label; (d)~doubles the dataset regardless of content.
+
+\qz In transfer learning option 1, the parameters trained are: (a)~all of them;
+(b)~only the new output layer; (c)~only the first layer; (d)~none.
+
+\qz At $0.5\%$ prevalence, the rule ``always negative'' has accuracy:
+(a)~$0.5\%$; (b)~$50\%$; (c)~$99.5\%$; (d)~$100\%$.
+
+\qz Recall is: (a)~TP/(TP+FP); (b)~TP/(TP+FN); (c)~TN/(TN+FP); (d)~(TP+TN)/m.
+
+\qz $F_1$ for $P = 0.02$, $R = 1.0$ is about: (a)~$0.51$; (b)~$0.04$;
+(c)~$1.0$; (d)~$0.02$.
+
+\qz With calibrated probabilities and a false negative costing fifty false
+positives, the cost-minimising threshold is about: (a)~$0.5$; (b)~$0.98$;
+(c)~$0.02$; (d)~$0.28$.
+
+\qz Reporting metrics separately for each group: (a)~is unnecessary if overall
+accuracy is high; (b)~can reveal disparities that averages hide; (c)~guarantees
+fairness; (d)~is only required by law.
+
+\furtherreading
+
+\textcite{james2021} §4.4.2 is the primary reading: working through a
+credit-default example with heavily imbalanced classes, it builds the confusion
+matrix, shows how lowering the threshold trades one error for the other, defines
+sensitivity and specificity, and introduces the ROC curve --- the companion of
+\cref{fig:pr-curve}, which plots recall against the false-positive rate instead
+of precision. \textcite{bishop2006} §1.5 is the supplementary reading for
+\cref{sec:threshold-costs}: it sets classification as decision theory, with a
+loss matrix for unequal error costs, derives the decision rule that minimises
+expected loss, and discusses the \emph{reject option} of deferring the least
+certain cases to a human --- a practical response to the trade-offs of this
+chapter.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch12} turns to a different family of models,
+decision trees and their ensembles, which remain the strongest default for
+tabular data.
