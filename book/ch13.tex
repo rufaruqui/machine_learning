@@ -1,16 +1,623 @@
-%% ch13.tex --- Clustering with $k$-Means
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% ch13.tex --- Clustering with k-Means
+%% Numbers are computed by verify/ch13_kmeans.py.
+%% B60 and the snapshot run are the same data and run the companion lecture
+%% animates frame by frame.  The six-point hand example (K6) is A-F below.
 
-\chapter{Clustering with $k$-Means}
+\chapter{Clustering with \texorpdfstring{$k$}{k}-Means}
 \label{ch:ch13}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{Birds of a feather flock together.}{---\ proverb}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Explain what clustering is and why it is useful without labels.
+  \item State the $k$-means algorithm and run it by hand.
+  \item Define the distortion objective and prove that neither step of $k$-means
+        can increase it.
+  \item Explain why $k$-means converges, why only to a local minimum, and how
+        empty clusters arise and are handled.
+  \item Use multiple random initialisations and $k$-means\texttt{++} to avoid
+        poor local minima.
+  \item Choose the number of clusters by the elbow method --- and recognise when
+        there is no elbow --- and from the cost of the application downstream.
+  \item Apply $k$-means to image compression and compute the compression it
+        achieves.
+\end{enumerate}
+\end{chapterlearning}
+
+Every chapter so far has learned from labelled examples $(\vx, y)$. This part of
+the book drops the labels. The data are $\xii{1},\dots,\xii{m}$ and nothing else,
+and the task is to find structure in them.
+
+The simplest such structure is a grouping. Customers who buy alike, documents on
+the same topic, pixels of similar colour, genes with similar expression: in each
+case we want to discover groups that no one has defined in advance. This chapter
+develops the algorithm that is still the first choice for that task, analyses
+exactly what it optimises, and shows how to use it well.
+
+\section{What Clustering Is}
+\label{sec:clustering}
+
+\begin{defbox}{Clustering}
+\term{Clustering} partitions a set of unlabelled examples into groups ---
+\term{clusters} --- so that examples in the same cluster are similar to one
+another and different from examples in other clusters. ``Similar'' must be
+defined; here it is Euclidean distance between feature vectors.
+\end{defbox}
+
+Uses include market segmentation, grouping news articles by topic, organising
+large image collections, finding families of related genes, and compressing data
+by replacing each example with a representative of its cluster
+(\cref{sec:compression}). Clustering is also a common first step in exploring a
+new dataset, before anyone knows what the right labels would be.
+
+\section{The \texorpdfstring{$k$}{k}-Means Algorithm}
+\label{sec:kmeans-alg}
+
+\begin{algorithmbox}{$k$-means}
+\begin{lstlisting}[style=pseudocode]
+choose K; initialise centroids mu_1, ..., mu_K
+repeat until no assignment changes:
+    # assignment step
+    for i = 1 to m:
+        c(i) <- index k of the centroid nearest x(i)
+    # update step
+    for k = 1 to K:
+        mu_k <- mean of the x(i) with c(i) = k
+\end{lstlisting}
+Here $c^{(i)} \in \{1,\dots,K\}$ is the cluster of example $i$, and the
+centroid $\mu_k \in \Real{n}$ is a point in feature space --- not, in general,
+one of the examples. ``Nearest'' uses squared Euclidean distance
+$\|\xii{i} - \mu_k\|^2$, which selects the same centroid as the distance itself
+and avoids a square root.
+\end{algorithmbox}
+
+\begin{workedexample}{Six points by hand}
+Cluster six points into $K = 2$ groups,
+\[
+  A(1,1),\ B(1.5,2),\ C(5,7),\ D(3.5,5),\ E(4.5,5),\ F(3.5,4.5),
+\]
+starting --- badly, on purpose --- with both centroids in the same corner:
+$\mu_1 = A$, $\mu_2 = B$.
+
+\textbf{Iteration 1, assign.} Squared distances to $(\mu_1, \mu_2)$:
+$A$: $(0, 1.25)$; $B$: $(1.25, 0)$; $C$: $(52, 37.25)$; $D$: $(22.25, 13)$;
+$E$: $(28.25, 18)$; $F$: $(18.5, 10.25)$. Only $A$ is nearer $\mu_1$, so
+$c = (1, 2, 2, 2, 2, 2)$.
+
+\textbf{Iteration 1, update.} $\mu_1 = A = (1, 1)$; $\mu_2$ is the mean of the
+other five, $(3.6,\ 4.7)$.
+
+\textbf{Iteration 2, assign.} $B$ is now at squared distance $1.25$ from $\mu_1$
+and $11.70$ from $\mu_2$, so it switches: $c = (1, 1, 2, 2, 2, 2)$.
+
+\textbf{Iteration 2, update.} $\mu_1 = (1.25,\ 1.5)$, the mean of $A$ and $B$;
+$\mu_2 = (4.125,\ 5.375)$, the mean of $C$, $D$, $E$, $F$.
+
+\textbf{Iteration 3, assign.} Nothing changes: converged. The cost of
+\cref{sec:distortion} fell at every half-step:
+\[
+  13.0833 \;\to\; 3.3333 \;\to\; 1.5917 \;\to\; 1.0000 \;\to\; 1.0000 .
+\]
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[at={(0.0cm,0)}, width=4.1cm, height=4.1cm,
+      xmin=0, xmax=6, ymin=0, ymax=8, title={\small start}, xtick=\empty, ytick=\empty]
+      \addplot[only marks, mark=*, mark size=2pt, MLBlue] coordinates {(1,1)};
+      \addplot[only marks, mark=square*, mark size=2pt, MLRose] coordinates {(1.5,2)(5,7)(3.5,5)(4.5,5)(3.5,4.5)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLBlue] coordinates {(1,1)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLRose] coordinates {(1.5,2)};
+    \end{axis}
+    \begin{axis}[at={(3.7cm,0)}, width=4.1cm, height=4.1cm,
+      xmin=0, xmax=6, ymin=0, ymax=8, title={\small after iteration 1}, xtick=\empty, ytick=\empty]
+      \addplot[only marks, mark=*, mark size=2pt, MLBlue] coordinates {(1,1)};
+      \addplot[only marks, mark=square*, mark size=2pt, MLRose] coordinates {(1.5,2)(5,7)(3.5,5)(4.5,5)(3.5,4.5)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLBlue] coordinates {(1,1)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLRose] coordinates {(3.6,4.7)};
+    \end{axis}
+    \begin{axis}[at={(7.4cm,0)}, width=4.1cm, height=4.1cm,
+      xmin=0, xmax=6, ymin=0, ymax=8, title={\small converged}, xtick=\empty, ytick=\empty]
+      \addplot[only marks, mark=*, mark size=2pt, MLBlue] coordinates {(1,1)(1.5,2)};
+      \addplot[only marks, mark=square*, mark size=2pt, MLRose] coordinates {(5,7)(3.5,5)(4.5,5)(3.5,4.5)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLBlue] coordinates {(1.25,1.5)};
+      \addplot[only marks, mark=diamond*, mark size=4pt, draw=black, fill=MLRose] coordinates {(4.125,5.375)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The six-point example. Circles are assigned to cluster $1$, squares to
+  cluster $2$; diamonds are centroids. The bad start puts five points in cluster
+  $2$; one update moves $\mu_2$ into the upper group, and $B$ then switches
+  sides.}
+  \label{fig:k6}
+\end{figure}
+
+On larger data the same two steps take more iterations. \Cref{fig:b60-strip}
+shows four moments of a run on B60, a dataset of $60$ points in three groups,
+started from three randomly chosen examples. Two of the starting centroids fall
+in the same group, and one centroid is dragged step by step across the top of
+the plane until each group has its own; the run converges after eight
+assignment steps, with the cost falling from $10.990$ to $2.338$.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[at={(0.0cm,0.0cm)}, width=5.3cm, height=4.7cm,
+      xmin=-1, xmax=11, ymin=0, ymax=11.3, xtick=\empty, ytick=\empty, title={\small iteration 1, $J = 10.990$}]
+      \addplot[only marks, mark=*, mark size=1.3pt, MLBlue] coordinates {(2.30,6.32)(3.64,2.70)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(4.29,4.42)(1.31,7.81)};
+      \addplot[only marks, mark=square*, mark size=1.3pt, MLRose] coordinates {(8.42,10.47)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.12,8.66)(7.89,9.87)(6.42,8.55)(1.57,10.23)(0.18,8.59)};
+      \addplot[only marks, mark=triangle*, mark size=1.6pt, MLTeal] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(7.90,9.31)(5.02,2.03)(8.12,9.58)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLBlue] coordinates {(1.55,5.48)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLRose] coordinates {(1.57,10.23)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLTeal] coordinates {(7.49,3.46)};
+    \end{axis}
+    \begin{axis}[at={(5.6cm,0.0cm)}, width=5.3cm, height=4.7cm,
+      xmin=-1, xmax=11, ymin=0, ymax=11.3, xtick=\empty, ytick=\empty, title={\small iteration 3, $J = 7.716$}]
+      \addplot[only marks, mark=*, mark size=1.3pt, MLBlue] coordinates {(2.30,6.32)(1.13,8.00)(1.18,9.18)(0.68,9.61)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(2.00,6.07)(1.55,5.48)(1.73,6.40)(0.18,8.59)(1.31,7.81)};
+      \addplot[only marks, mark=square*, mark size=1.3pt, MLRose] coordinates {(8.42,10.47)(3.82,8.17)(2.61,8.14)(2.04,8.45)(3.86,7.49)(3.12,8.66)(3.94,7.64)(3.15,7.54)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(1.57,10.23)};
+      \addplot[only marks, mark=triangle*, mark size=1.6pt, MLTeal] coordinates {(8.37,8.81)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(4.05,2.91)(9.65,7.69)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(9.65,7.77)(5.60,3.24)(6.16,3.12)(10.10,8.26)(7.67,6.70)(4.68,2.83)(6.68,3.24)(7.85,7.66)(6.89,2.00)(6.69,6.84)(5.53,1.87)(4.26,2.44)(8.30,7.42)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(7.58,7.02)(4.78,1.85)(5.46,1.48)(8.62,7.17)(4.67,3.93)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLBlue] coordinates {(1.74,6.90)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLRose] coordinates {(3.52,8.85)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLTeal] coordinates {(6.64,4.90)};
+    \end{axis}
+    \begin{axis}[at={(0.0cm,-5.0cm)}, width=5.3cm, height=4.7cm,
+      xmin=-1, xmax=11, ymin=0, ymax=11.3, xtick=\empty, ytick=\empty, title={\small iteration 5, $J = 4.575$}]
+      \addplot[only marks, mark=*, mark size=1.3pt, MLBlue] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+      \addplot[only marks, mark=square*, mark size=1.3pt, MLRose] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(9.65,7.69)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+      \addplot[only marks, mark=triangle*, mark size=1.6pt, MLTeal] coordinates {(7.79,6.04)(6.12,6.02)(4.05,2.91)(7.59,5.90)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLBlue] coordinates {(1.61,7.70)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLRose] coordinates {(6.48,8.71)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLTeal] coordinates {(6.41,4.30)};
+    \end{axis}
+    \begin{axis}[at={(5.6cm,-5.0cm)}, width=5.3cm, height=4.7cm,
+      xmin=-1, xmax=11, ymin=0, ymax=11.3, xtick=\empty, ytick=\empty, title={\small iteration 8, $J = 2.338$}]
+      \addplot[only marks, mark=*, mark size=1.3pt, MLBlue] coordinates {(2.30,6.32)(3.82,8.17)(1.13,8.00)(1.18,9.18)(0.68,9.61)(2.61,8.14)(2.04,8.45)(3.86,7.49)(1.95,6.40)(-0.27,7.27)(2.56,7.71)(3.12,8.66)(2.00,6.07)(3.94,7.64)(1.55,5.48)(3.15,7.54)(1.73,6.40)(1.57,10.23)(0.18,8.59)(1.31,7.81)};
+      \addplot[only marks, mark=square*, mark size=1.3pt, MLRose] coordinates {(8.37,8.81)(8.42,10.47)(8.11,8.28)(8.92,7.80)(7.79,6.04)(6.12,6.02)(9.65,7.69)(7.59,5.90)(9.65,7.77)(10.10,8.26)(7.67,6.70)(7.85,7.66)(6.69,6.84)(8.30,7.42)(7.89,9.87)(7.90,9.31)(6.42,8.55)(8.12,9.58)(7.58,7.02)(8.62,7.17)};
+      \addplot[only marks, mark=triangle*, mark size=1.6pt, MLTeal] coordinates {(4.05,2.91)(4.62,1.98)(3.64,2.70)(4.99,2.42)(5.60,3.24)(6.16,3.12)(4.68,2.83)(6.68,3.24)(6.89,2.00)(5.53,1.87)(4.26,2.44)(5.43,0.91)(7.49,3.46)(6.57,2.67)(4.29,4.42)(5.02,2.03)(5.72,3.48)(4.78,1.85)(5.46,1.48)(4.67,3.93)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLBlue] coordinates {(2.02,7.76)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLRose] coordinates {(8.09,7.86)};
+      \addplot[only marks, mark=diamond*, mark size=3.5pt, draw=black, fill=MLTeal] coordinates {(5.33,2.65)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Four moments in a $k$-means run on B60 (the companion lecture shows
+  every step as an animation). Shapes show the current assignment, diamonds the
+  centroids. At the start, blue and rose share the upper-left group and teal
+  covers the other two; by iteration $5$ the rose centroid has moved most of the
+  way to the upper-right group; at iteration $8$ the clusters have $20$ points
+  each and the assignment no longer changes.}
+  \label{fig:b60-strip}
+\end{figure}
+
+\begin{pitfall}{Empty clusters}
+If no example is nearest some centroid, that cluster's mean is $0/0$. Start all
+three centroids of B60 bunched in one corner --- at $(1,1)$, $(2,1.5)$ and
+$(1.5,3)$ --- and exactly this happens at the first update. The two standard
+remedies are to drop the empty cluster and continue with $K-1$, or to
+re-initialise its centroid at a random example (or at the example farthest from
+its centroid). Library implementations do the latter automatically.
+\end{pitfall}
+
+\section{The Distortion Objective}
+\label{sec:distortion}
+
+\begin{defbox}{Distortion}
+The \term{distortion} (cost) of an assignment and a set of centroids is
+\[
+  J\bigl(c^{(1)},\dots,c^{(m)},\mu_1,\dots,\mu_K\bigr)
+  = \frac1m\sum_{i=1}^{m}\bigl\|\xii{i} - \mu_{c^{(i)}}\bigr\|^2 ,
+\]
+the average squared distance from each example to the centroid of its cluster.
+\end{defbox}
+
+$k$-means is not a heuristic that happens to produce clusters. It is an
+optimizer for $J$.
+
+\begin{derivation}{Neither step of $k$-means can increase $J$}
+$k$-means is \term{coordinate descent}: it minimises $J$ over one block of
+variables with the other held fixed, then alternates.
+
+\textbf{Assignment step} (centroids fixed, choose $c$). $J$ is a sum of
+independent terms $\|\xii{i} - \mu_{c^{(i)}}\|^2$, one per example, and each is
+minimised by choosing the nearest centroid. So the assignment step finds the
+best possible $c$ for the current centroids, and cannot increase $J$.
+
+\textbf{Update step} (assignment fixed, choose $\mu$). The terms involving
+$\mu_k$ are $\sum_{i:c^{(i)}=k}\|\xii{i} - \mu_k\|^2$, a convex quadratic in
+$\mu_k$. Its gradient is
+\[
+  \frac{\partial}{\partial\mu_k}\sum_{i:c^{(i)}=k}\|\xii{i} - \mu_k\|^2
+  = -2\sum_{i:c^{(i)}=k}\bigl(\xii{i} - \mu_k\bigr),
+\]
+which is zero exactly when $\mu_k = \frac{1}{|C_k|}\sum_{i\in C_k}\xii{i}$, the
+mean of the cluster. So the update step finds the best possible centroids for
+the current assignment, and cannot increase $J$ either.
+\end{derivation}
+
+\begin{keyinsight}{Convergence, and its limits}
+$J$ never increases and is bounded below by $0$. There are finitely many
+possible assignments --- at most $K^m$ --- and the algorithm cannot revisit one
+without $J$ having stayed constant, so it terminates in finitely many steps. A
+cost that rises from one step to the next is therefore proof of a bug.
+
+What $k$-means cannot do is guarantee the \emph{global} minimum. Coordinate
+descent stops at any configuration where neither step can improve $J$, and on
+most datasets there are many such configurations.
+\end{keyinsight}
+
+\begin{researchspotlight}{Lloyd (1982) --- Least squares quantization in PCM}
+\textbf{The problem.} In pulse-code modulation, a continuous signal is
+represented by a finite set of levels. Which levels minimise the mean squared
+error between the signal and its quantised version?
+
+\textbf{The idea.} Alternate two conditions that any optimal quantiser must
+satisfy: each value is mapped to its nearest level, and each level is the mean
+(centroid) of the values mapped to it. Iterating them improves the quantiser
+monotonically.
+
+\textbf{The result.} A practical algorithm for optimal scalar quantisation,
+written at Bell Labs in 1957 and circulated internally for twenty-five years
+before formal publication. Applied to vectors of features rather than samples of
+a signal, it is $k$-means, which is why the algorithm is often called
+\emph{Lloyd's algorithm}.
+
+\textbf{Why it is here.} It is \cref{sec:kmeans-alg}, and its framing as
+quantisation is exactly the image compression of \cref{sec:compression}.
+\parencite{lloyd1982}
+\end{researchspotlight}
+
+\section{Initialisation and Local Minima}
+\label{sec:km-init}
+
+\begin{defbox}{Random initialisation}
+Choose $K < m$ training examples at random and use them as the initial
+centroids.
+\end{defbox}
+
+On B60, $200$ runs from random initialisations end as follows:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}lr@{}}
+\toprule
+final distortion $J$ & runs (of $200$)\\
+\midrule
+$2.338$ (the three true groups)  & $193$\\
+$7.717$ to $8.152$ (local minima) & $7$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In each poor run one centroid covers two of the groups while two centroids split
+the third --- a configuration neither step can repair, because no single point is
+nearer a different centroid.
+
+\begin{algorithmbox}{Multiple random initialisations}
+\begin{lstlisting}[style=pseudocode]
+for t = 1 to T:              # typically 50 to 1000
+    randomly initialise k-means
+    run it to convergence
+    record the clustering and its distortion J
+return the clustering with the lowest J
+\end{lstlisting}
+If one run finds the best clustering with probability $p$, all $T$ runs miss it
+with probability $(1-p)^T$. On B60, $p = 193/200 = 0.965$, and two runs miss with
+probability $0.035^2 \approx 0.0012$.
+\end{algorithmbox}
+
+\subsection{\texorpdfstring{$k$}{k}-means++}
+
+Random initialisation often places two starting centroids close together, as in
+\cref{fig:b60-strip}. \term{$k$-means++} spreads them out deliberately: choose
+the first centroid uniformly at random from the data; then choose each next
+centroid at random with probability proportional to its squared distance from the
+nearest centroid already chosen. A point far from every existing centroid is
+much more likely to be picked. In one draw on B60, the farthest point from the
+first centre has probability $0.0447$ of being chosen next, against $1/60 =
+0.0167$ under uniform sampling.
+
+Over $200$ runs on B60, $k$-means++ reaches the best clustering in $197$, against
+$193$ for random initialisation. B60 is an easy problem; on data with many
+clusters the difference is much larger, and $k$-means++ comes with a guarantee
+random initialisation lacks.
+
+\begin{researchspotlight}{Arthur \& Vassilvitskii (2007) --- $k$-means++}
+\textbf{The problem.} $k$-means is fast but can be arbitrarily bad: from a poor
+start, its final distortion can be unboundedly worse than the optimum.
+
+\textbf{The idea.} Seed the centroids by $D^2$ sampling --- each new centroid
+chosen with probability proportional to its squared distance from the nearest
+existing one --- then run ordinary $k$-means.
+
+\textbf{The result.} The expected distortion of the seeding alone is within a
+factor of $O(\log K)$ of the optimum, before any iterations; in experiments the
+method was both faster and more accurate than random seeding.
+
+\textbf{Why it is here.} It is the initialisation of \cref{sec:km-init}, and the
+default in \tool{scikit-learn}'s \code{KMeans}, which also runs ten
+initialisations and keeps the best.
+\parencite{arthur2007}
+\end{researchspotlight}
+
+\section{Choosing \texorpdfstring{$K$}{K}}
+\label{sec:choose-k}
+
+The distortion always decreases as $K$ grows, given good initialisations, and
+reaches $0$ when $K = m$. So $K$ cannot be chosen by minimising $J$.
+
+\begin{defbox}{The elbow method}
+Plot the best distortion found against $K$, and look for an \term{elbow}: a value
+of $K$ after which further clusters reduce $J$ much more slowly.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.72\linewidth, height=5.0cm,
+      xlabel={number of clusters $K$}, ylabel={distortion $J$},
+      xmin=0.5, xmax=8.5, ymin=0, ymax=18.5, xtick={1,...,8},
+      legend style={font=\scriptsize, at={(0.98,0.97)}, anchor=north east}]
+      \addplot[MLBlue, very thick, mark=*, mark size=1.6pt] coordinates
+        {(1,14.407)(2,8.132)(3,2.338)(4,1.923)(5,1.519)(6,1.269)(7,1.056)(8,0.805)};
+      \addlegendentry{B60: three groups}
+      \addplot[MLAmber, very thick, dashed, mark=square*, mark size=1.4pt] coordinates
+        {(1,17.351)(2,9.128)(3,5.567)(4,3.962)(5,3.023)(6,2.435)(7,1.998)(8,1.646)};
+      \addlegendentry{U60: uniform, no groups}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Elbow curves, each point the best of $50$ random starts. B60 has a
+  sharp elbow at $K = 3$, its true number of groups. Sixty points scattered
+  uniformly over a square have no groups, and their curve bends smoothly with no
+  elbow at all.}
+  \label{fig:elbow}
+\end{figure}
+
+\begin{pitfall}{The elbow that isn't}
+On B60 the elbow is unmistakable: $J$ falls from $14.41$ to $8.13$ to $2.34$,
+then to only $1.92$. But the uniform data of \cref{fig:elbow} also produces a
+decreasing curve, and someone determined to find an elbow will find one
+somewhere in it. Real datasets usually look more like the uniform curve than
+like B60. An elbow is evidence of structure when it is sharp; its absence is
+common, and is not a failure of the method.
+\end{pitfall}
+
+\begin{keyinsight}{Choose $K$ for the purpose}
+Clustering is usually a step towards something else, and that something
+usually settles $K$. A clothing maker clustering customers' heights and weights
+into sizes might choose $K = 3$ (S, M, L) or $K = 5$ (XS to XL): five sizes fit
+customers better, three are cheaper to make and stock. The data cannot decide
+that trade-off; the business can. Evaluate candidate values of $K$ by how well the
+resulting clusters serve the downstream task.
+\end{keyinsight}
+
+\section{Application: Image Compression}
+\label{sec:compression}
+
+A colour image stores $24$ bits per pixel: $8$ each for red, green and blue.
+Treat every pixel as a point in $\Real{3}$, cluster the pixels into $K$ colours,
+and replace each pixel by its cluster's centroid. The image now needs only
+$\lceil\log_2 K\rceil$ bits per pixel, plus a small table of the $K$ colours.
+
+\begin{workedexample}{Compressing a photograph}
+Take the $427\times640$ colour photograph distributed with \tool{scikit-learn}
+(\code{load\_sample\_image("china.jpg")}): $273{,}280$ pixels, $800.6$~KiB at $24$
+bits each. Run $k$-means on a random sample of $5000$ pixels with colour values
+scaled to $[0,1]$, then assign every pixel to its nearest centroid:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+$K$ & bits per pixel & size (KiB) & compression & mean squared colour error\\
+\midrule
+$2$  & $1$ & $33.4$  & $24.0\times$ & $0.05929$\\
+$4$  & $2$ & $66.7$  & $12.0\times$ & $0.02112$\\
+$8$  & $3$ & $100.1$ & $8.0\times$  & $0.00976$\\
+$16$ & $4$ & $133.5$ & $6.0\times$  & $0.00547$\\
+$32$ & $5$ & $166.9$ & $4.8\times$  & $0.00324$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each doubling of $K$ costs one bit per pixel and roughly halves the colour error
+--- the elbow trade-off of \cref{sec:choose-k}, now with a price in storage.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \fill[fill={rgb,255:red,13;green,13;blue,7}, draw=MLGray!50] (0.00,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (0.475,-0.18) {8.3\%};
+    \fill[fill={rgb,255:red,39;green,30;blue,22}, draw=MLGray!50] (1.15,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (1.625,-0.18) {8.3\%};
+    \fill[fill={rgb,255:red,49;green,53;blue,45}, draw=MLGray!50] (2.30,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (2.775,-0.18) {6.0\%};
+    \fill[fill={rgb,255:red,84;green,64;blue,31}, draw=MLGray!50] (3.45,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (3.925,-0.18) {5.1\%};
+    \fill[fill={rgb,255:red,80;green,83;blue,69}, draw=MLGray!50] (4.60,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (5.075,-0.18) {5.3\%};
+    \fill[fill={rgb,255:red,114;green,100;blue,54}, draw=MLGray!50] (5.75,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (6.225,-0.18) {5.0\%};
+    \fill[fill={rgb,255:red,111;green,114;blue,101}, draw=MLGray!50] (6.90,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (7.375,-0.18) {4.6\%};
+    \fill[fill={rgb,255:red,156;green,125;blue,79}, draw=MLGray!50] (8.05,0.00) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (8.525,-0.18) {3.2\%};
+    \fill[fill={rgb,255:red,145;green,151;blue,142}, draw=MLGray!50] (0.00,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (0.475,-1.63) {4.6\%};
+    \fill[fill={rgb,255:red,218;green,153;blue,113}, draw=MLGray!50] (1.15,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (1.625,-1.63) {1.9\%};
+    \fill[fill={rgb,255:red,175;green,185;blue,182}, draw=MLGray!50] (2.30,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (2.775,-1.63) {5.1\%};
+    \fill[fill={rgb,255:red,202;green,208;blue,213}, draw=MLGray!50] (3.45,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (3.925,-1.63) {7.5\%};
+    \fill[fill={rgb,255:red,191;green,214;blue,240}, draw=MLGray!50] (4.60,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (5.075,-1.63) {8.9\%};
+    \fill[fill={rgb,255:red,230;green,231;blue,233}, draw=MLGray!50] (5.75,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (6.225,-1.63) {5.1\%};
+    \fill[fill={rgb,255:red,217;green,234;blue,252}, draw=MLGray!50] (6.90,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (7.375,-1.63) {7.8\%};
+    \fill[fill={rgb,255:red,242;green,246;blue,252}, draw=MLGray!50] (8.05,-1.45) rectangle ++(0.95,0.95);
+    \node[font=\tiny, MLGray] at (8.525,-1.63) {13.4\%};
+  \end{tikzpicture}
+  \caption{The $16$ colours $k$-means found for the photograph, ordered from dark to
+  light, with the share of pixels assigned to each. They are the centroids: every
+  pixel of the compressed image is one of these colours. The palette is dominated
+  by greys, browns and the pale blues of the sky.}
+  \label{fig:palette}
+\end{figure}
+
+\begin{labbox}{Lab 13 --- $k$-means}
+Implement \code{find\_closest\_centroids} and \code{compute\_centroids}, each
+vectorised, and the loop that alternates them. Reproduce the six-point example of
+\cref{sec:kmeans-alg}, including the distortion after every half-step, and
+confirm that it never increases. Run $200$ random initialisations on B60 and
+reproduce the table of \cref{sec:km-init}; then implement $k$-means++ and compare.
+
+Finally compress an image: load it, cluster its pixels with $K = 16$, rebuild the
+image from the palette, and report the bits per pixel, the compression factor and
+the mean squared colour error.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item What Clustering Is
-  \item The $k$-Means Algorithm
-  \item The Distortion Objective
-  \item Initialization and $k$-Means\texttt{++}
-  \item Choosing the Number of Clusters
-  \item Application: Image Compression
+  \item Clustering finds groups in unlabelled data; $k$-means does so by
+        alternating two steps: assign each example to its nearest centroid, and
+        move each centroid to the mean of its examples.
+  \item $k$-means is coordinate descent on the distortion
+        $J = \frac1m\sum_i\|\xii{i} - \mu_{c^{(i)}}\|^2$. The assignment step is
+        optimal for fixed centroids, the update step optimal for a fixed
+        assignment, so $J$ never increases and the algorithm terminates.
+  \item It converges to a local minimum, not necessarily the global one: $7$ of
+        $200$ random starts on B60 stop at $J \approx 8$ instead of $2.338$.
+  \item Run many random initialisations and keep the lowest $J$; $k$-means++
+        seeds centroids by $D^2$ sampling and does better still.
+  \item Empty clusters arise from bad starts; drop or re-initialise them.
+  \item $J$ always falls with $K$. Use a sharp elbow when there is one --- B60's
+        is at $K = 3$ --- and the downstream purpose always.
+  \item Clustering pixel colours compresses images: $16$ colours store a
+        photograph in a sixth of the space with mean squared colour error
+        $0.0055$.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Distinguish clustering from classification.
+
+\sq State the two steps of $k$-means.
+
+\sq Why is squared distance used in the assignment step?
+
+\sq What is an empty cluster, and how is it handled?
+
+\sq Define the distortion $J$.
+
+\sq Why does $k$-means always terminate?
+
+\sq Why can $k$-means converge to different clusterings from different starts?
+
+\sq Describe $k$-means++ initialisation.
+
+\sq Why can $K$ not be chosen by minimising $J$?
+
+\sq How does $k$-means compress an image, and how many bits per pixel does
+$K = 64$ need?
+
+\exercisesection{Analytical Problems}
+
+\ap Run $k$-means by hand on the six points of \cref{sec:kmeans-alg} starting from
+$\mu_1 = A$, $\mu_2 = C$. Give every assignment, centroid and distortion.
+
+\ap Prove that the mean minimises $\sum_{i\in C_k}\|\xii{i} - \mu\|^2$ over $\mu$,
+both by setting the gradient to zero and by expanding the square around the mean.
+
+\ap Prove that the assignment step cannot increase $J$, and that the update step
+cannot either. Hence prove that $k$-means terminates.
+
+\ap Construct a dataset of four points in the plane and an initialisation for
+which $k$-means with $K = 2$ converges to a clustering that is not the global
+minimum. Compute both distortions.
+
+\ap If a single random start finds the best clustering with probability $0.3$,
+how many starts are needed for a $99\%$ chance of finding it?
+
+\ap Show that if the medians replace the means in the update step, the resulting
+algorithm decreases $\frac1m\sum_i\|\xii{i} - \mu_{c^{(i)}}\|_1$ instead. Why is
+this \emph{$k$-medians} algorithm more robust to outliers?
+
+\exercisesection{Design Problems}
+
+\dpr A supermarket chain wants to segment its loyalty-card customers from a year
+of purchases. Design the features (and their scaling), the choice of $K$, and how
+the marketing team will use and evaluate the segments.
+
+\dpr $k$-means on $10^7$ points with $K = 100$ is too slow to restart $500$
+times. Design a cheaper procedure that still guards against poor local minima,
+and say how you would check it.
+
+\dpr Design three small datasets with known answers that would expose,
+respectively, a wrong assignment rule, a wrong centroid update, and missing
+empty-cluster handling in a $k$-means implementation.
+
+\dpr Design an experiment that tells a client whether the clusters you report are
+real structure or an artefact of random initialisation.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement vectorised $k$-means and reproduce the six-point example and the
+$200$-run table for B60.
+
+\pe Implement $k$-means++ and compare it with random initialisation on a dataset
+of your choice with $K = 10$ well-separated groups.
+
+\pe Reproduce the elbow curves of \cref{fig:elbow} for B60 and U60.
+
+\pe Compress an image of your choice with $K = 2, 4, 8, 16, 32$ and plot the mean
+squared colour error against bits per pixel.
+
+\exercisesection{Self-Test}
+
+\qz The update step of $k$-means sets each centroid to: (a)~the nearest example;
+(b)~the mean of its assigned examples; (c)~the median; (d)~a random example.
+
+\qz The distortion $J$ during $k$-means: (a)~can increase; (b)~never increases;
+(c)~is always zero; (d)~oscillates.
+
+\qz $k$-means is guaranteed to find: (a)~the global minimum; (b)~a local minimum;
+(c)~the true number of clusters; (d)~labels.
+
+\qz $k$-means++ chooses each new centroid with probability proportional to:
+(a)~its distance; (b)~its squared distance to the nearest chosen centroid;
+(c)~a constant; (d)~its label.
+
+\qz As $K$ increases, the best distortion: (a)~increases; (b)~decreases;
+(c)~stays the same; (d)~is undefined.
+
+\qz Compressing an image to $16$ colours needs per pixel: (a)~$16$ bits;
+(b)~$8$ bits; (c)~$4$ bits; (d)~$2$ bits.
+
+\qz If a centroid receives no examples: (a)~$J$ becomes negative; (b)~its mean is
+undefined and it must be dropped or re-initialised; (c)~the algorithm has
+converged; (d)~$K$ doubles.
+
+\furtherreading
+
+\textcite{james2021} §12.4.1 is the primary reading: it states the $k$-means
+objective as the within-cluster variation, proves that the algorithm decreases it
+at every step, and illustrates local optima with six runs from different starts
+--- the experiment of \cref{sec:km-init}. \textcite{bishop2006} §9.1 develops
+$k$-means as coordinate descent on the distortion measure, applies it to image
+segmentation and compression with figures well worth seeing, and leads into §9.2,
+where $k$-means appears as a limiting case of fitting a mixture of Gaussians ---
+the probabilistic view behind the anomaly detection of \cref{ch:ch14}.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch14} turns from groups to outliers: modelling
+what normal data looks like, and flagging what does not.

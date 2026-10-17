@@ -1,17 +1,665 @@
 %% ch14.tex --- Anomaly Detection
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch14_anomaly.py.
+%% E2 (engines) and DC (data-centre machines) are shared with the companion
+%% lecture.  Figure coordinates are generated from the same script's data.
 
 \chapter{Anomaly Detection}
 \label{ch:ch14}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{Normal is an illusion. What is normal for the spider is chaos for the
+fly.}{---\ attributed to Morticia Addams}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Frame anomaly detection as density estimation, and say where it is used.
+  \item State the Gaussian density and derive the maximum-likelihood estimates
+        of its mean and variance.
+  \item Build an anomaly detector from one Gaussian per feature, and flag
+        examples whose density falls below a threshold $\varepsilon$.
+  \item Evaluate the detector on a small labelled validation set and choose
+        $\varepsilon$ by $F_1$, accounting for the skew of \cref{ch:ch11}.
+  \item Decide between anomaly detection and supervised learning for a given
+        problem.
+  \item Transform features towards a Gaussian shape, and invent features from the
+        anomalies the detector misses.
+  \item Use the multivariate Gaussian, and explain how it relates to the
+        independent model.
+\end{enumerate}
+\end{chapterlearning}
+
+\Cref{ch:ch13} asked what the typical examples look like and grouped them.
+Anomaly detection asks the opposite question: which examples look \emph{unlike}
+the rest? A manufacturer wants to catch the faulty engine before it ships; a bank
+the fraudulent transaction before it clears; an operations team the failing
+server before it falls over. In each case almost all the data is normal, the
+anomalies are rare and varied, and many of them have never been seen before.
+
+The approach of this chapter is to learn what normal looks like, as a probability
+density, from unlabelled data that is mostly normal --- and then to flag anything
+that the density says is improbable.
+
+\section{Finding Unusual Events}
+\label{sec:unusual}
+
+\begin{defbox}{Dataset E2}
+Aircraft engines described by two features measured at the end of production:
+$x_1$, the heat generated ($^\circ$C), and $x_2$, the vibration intensity
+(mm/s). There are $6000$ engines that passed inspection, used for training, and
+validation and test sets of $2000$ good and $10$ faulty engines each. The data is
+synthetic, generated so that the truth is known: good engines are Gaussian
+around $(500, 4)$, and faulty ones lie between $3.2$ and $5$ standard deviations
+from the centre, in random directions.
+\end{defbox}
+
+\begin{defbox}{Anomaly detection by density estimation}
+Given unlabelled examples $\xii{1},\dots,\xii{m}$, assumed to be normal, build a
+model $p(\vx)$ of the probability density of the features. For a new example
+$\vx_{\text{test}}$,
+\[
+  p(\vx_{\text{test}}) < \varepsilon \;\Longrightarrow\; \text{flag as an
+  \term{anomaly}},
+\]
+for a threshold $\varepsilon$ chosen as in \cref{sec:ad-eval}.
+\end{defbox}
+
+The same recipe serves many settings. In fraud detection the features describe a
+user's activity --- logins per day, pages visited, typing speed, purchase
+amounts --- and an account whose behaviour is improbable is sent for review. In
+manufacturing they are measurements of each unit off the line. In monitoring
+they are a machine's memory use, disk accesses and CPU load.
+
+\section{The Gaussian Distribution}
+\label{sec:gaussian}
+
+\begin{defbox}{Gaussian (normal) distribution}
+A real random variable $x$ is \term{Gaussian} with mean $\mu$ and variance
+$\sigma^2$, written $x \sim \mathcal{N}(\mu, \sigma^2)$, if its density is
+\[
+  p(x;\mu,\sigma^2) = \frac{1}{\sqrt{2\pi}\,\sigma}
+                      \exp\!\Bigl(-\frac{(x-\mu)^2}{2\sigma^2}\Bigr).
+\]
+$\mu$ is the centre of the bell and $\sigma$ its width. The area under the curve
+is $1$.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.74\linewidth, height=4.8cm,
+      xlabel={$x$}, ylabel={$p(x)$}, xmin=-4, xmax=6, ymin=0, ymax=0.85,
+      legend style={font=\scriptsize, at={(0.98,0.97)}, anchor=north east}]
+      \addplot[MLBlue, very thick, domain=-4:6, samples=120] {exp(-x^2/2)/sqrt(2*pi)};
+      \addlegendentry{$\mu=0,\ \sigma=1$}
+      \addplot[MLRose, very thick, domain=-4:6, samples=120] {exp(-x^2/0.5)/sqrt(0.5*pi)};
+      \addlegendentry{$\mu=0,\ \sigma=0.5$}
+      \addplot[MLTeal, very thick, domain=-4:6, samples=120] {exp(-x^2/8)/sqrt(8*pi)};
+      \addlegendentry{$\mu=0,\ \sigma=2$}
+      \addplot[MLAmber, thick, dashed, domain=-4:6, samples=120] {exp(-(x-3)^2/0.5)/sqrt(0.5*pi)};
+      \addlegendentry{$\mu=3,\ \sigma=0.5$}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Gaussian densities. Halving $\sigma$ makes the bell half as wide and
+  twice as tall, so that the area stays $1$; changing $\mu$ slides it along the
+  axis.}
+  \label{fig:gaussians}
+\end{figure}
+
+\begin{pitfall}{A density is not a probability}
+With $\sigma = 0.5$ the density peaks at $0.798$; with $\sigma = 0.1$ it peaks at
+$3.99$. A density can exceed $1$. Only areas under it are probabilities, so
+$p(\vx)$ is meaningful for \emph{comparing} examples --- which is all anomaly
+detection needs --- but not as ``the probability that $\vx$ is normal''.
+\end{pitfall}
+
+\begin{derivation}{Maximum-likelihood estimates of $\mu$ and $\sigma^2$}
+Given independent samples $\xii{1},\dots,\xii{m}$ from $\mathcal{N}(\mu,\sigma^2)$,
+the log-likelihood is
+\[
+  \ell(\mu,\sigma^2) = \sum_{i=1}^{m}\ln p(\xii{i};\mu,\sigma^2)
+  = -\frac m2\ln(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum_{i=1}^{m}\bigl(\xii{i} - \mu\bigr)^2 .
+\]
+Set its derivative with respect to $\mu$ to zero:
+\[
+  \frac{\partial\ell}{\partial\mu} = \frac{1}{\sigma^2}\sum_{i}\bigl(\xii{i} - \mu\bigr) = 0
+  \quad\Longrightarrow\quad
+  \hat\mu = \frac1m\sum_{i=1}^{m}\xii{i} .
+\]
+Then with respect to $v = \sigma^2$:
+\[
+  \frac{\partial\ell}{\partial v} = -\frac{m}{2v} + \frac{1}{2v^2}\sum_i\bigl(\xii{i} - \hat\mu\bigr)^2 = 0
+  \quad\Longrightarrow\quad
+  \hat\sigma^2 = \frac1m\sum_{i=1}^{m}\bigl(\xii{i} - \hat\mu\bigr)^2 .
+\]
+Fitting a Gaussian is two averages. Statistics texts often divide by $m-1$
+instead, which makes $\hat\sigma^2$ unbiased; for the thousands of examples
+typical in anomaly detection the difference is negligible. On E2's heat feature
+it changes $\hat\sigma^2$ from $630.96$ to $631.07$.
+\end{derivation}
+
+\section{The Anomaly Detection Algorithm}
+\label{sec:ad-alg}
+
+With $n$ features, model each with its own Gaussian and multiply.
+
+\begin{algorithmbox}{Anomaly detection with independent Gaussians}
+\begin{lstlisting}[style=pseudocode]
+choose features x_1..x_n that may indicate anomalies
+fit:      mu_j     = mean of x_j over the training set
+          sigma2_j = mean of (x_j - mu_j)^2
+score:    p(x) = product over j of N(x_j; mu_j, sigma2_j)
+decide:   anomaly if p(x) < epsilon
+\end{lstlisting}
+Multiplying the densities treats the features as statistically independent.
+The algorithm often works well even when they are not; \cref{sec:multivariate}
+shows what to do when the dependence matters.
+\end{algorithmbox}
+
+\begin{workedexample}{Scoring three new engines}
+From the $6000$ training engines: $\hat\mu_1 = 499.79$, $\hat\sigma_1 = 25.12$ for
+heat; $\hat\mu_2 = 3.993$, $\hat\sigma_2 = 0.495$ for vibration.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+engine & $z_1$ & $z_2$ & $p(x_1)$ & $p(x_2)$ & $p(\vx)$\\
+\midrule
+$(505,\ 4.1)$ & $0.21$ & $0.22$ & $0.0155$ & $0.787$ & $1.2\times10^{-2}$\\
+$(560,\ 4.9)$ & $2.40$ & $1.83$ & $0.0009$ & $0.151$ & $1.4\times10^{-4}$\\
+$(590,\ 5.6)$ & $3.59$ & $3.24$ & $0.000025$ & $0.0042$ & $1.0\times10^{-7}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Here $z_j = (x_j - \hat\mu_j)/\hat\sigma_j$, the number of standard deviations
+from the mean. With $\varepsilon = 10^{-5}$ the first two engines are normal and
+the third is flagged. A product is small when \emph{any} factor is small: one
+improbable reading is enough.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.84\linewidth, height=6.0cm, view={0}{90},
+      xlabel={heat $x_1$ ($^\circ$C)}, ylabel={vibration $x_2$ (mm/s)},
+      xmin=380, xmax=620, ymin=1.8, ymax=6.2,
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[only marks, mark=*, mark size=0.8pt, MLBlue!45, forget plot] coordinates {(528.4,3.772)(509.5,3.686)(485.1,4.993)(474.0,4.142)(503.3,4.110)(514.0,4.218)(457.4,3.908)(493.9,3.909)(498.5,4.284)(457.8,4.709)(476.9,4.195)(536.4,4.242)(470.0,3.937)(468.1,4.541)(500.5,2.936)(544.8,4.672)(504.4,4.018)(521.1,4.382)(500.6,3.523)(490.2,4.044)(517.2,3.194)(495.0,4.542)(496.4,3.521)(594.1,4.166)(508.2,4.034)(483.2,3.610)(466.3,4.308)(528.3,3.986)(478.4,3.658)(527.3,5.004)(422.9,4.180)(473.8,4.050)(491.9,3.752)(468.9,4.429)(529.8,3.680)(474.5,4.020)(508.5,3.188)(514.8,3.633)(501.3,3.942)(502.1,3.299)(494.8,3.837)(499.3,4.248)(496.5,3.926)(493.8,4.584)(466.0,4.203)(539.1,4.173)(495.7,3.860)(537.8,4.476)(517.2,4.388)(526.9,4.122)(467.7,4.173)(483.9,3.011)(526.7,2.948)(506.2,4.551)(467.9,4.268)(513.2,3.650)(474.8,3.619)(532.2,4.055)(492.3,3.839)(457.2,3.994)(509.6,5.191)(489.0,3.872)(514.2,4.722)(507.8,4.591)(525.1,3.773)(489.7,4.257)(484.0,4.399)(473.4,2.920)(514.8,3.846)(541.3,4.467)(507.7,2.860)(482.3,3.513)(491.6,4.051)(474.0,4.160)(516.1,4.114)(505.6,3.007)(516.5,3.128)(514.7,3.858)(466.6,4.203)(510.1,3.698)(462.8,3.623)(457.6,3.319)(478.5,4.343)(503.2,3.406)(500.4,4.258)(465.5,4.475)(490.7,3.468)(480.3,3.971)(527.0,4.762)(522.4,3.865)(536.2,3.854)(465.2,4.115)(486.6,4.442)(507.4,4.055)(453.4,4.721)(447.1,3.562)(483.5,3.794)(469.9,3.229)(523.5,4.661)(513.4,4.585)(479.5,4.936)(493.8,4.193)(475.6,2.845)(506.9,4.392)(517.1,3.842)(487.9,4.466)(516.8,3.780)(510.8,4.337)(503.2,4.209)(523.7,4.347)(523.6,4.358)(524.2,3.480)(520.5,4.020)(470.7,3.530)(523.9,3.631)(489.7,4.210)(472.2,3.981)(551.9,3.962)(467.5,3.901)(493.4,4.581)(496.4,3.518)(456.1,3.708)(495.3,2.749)(477.2,5.048)(558.8,3.448)(495.6,4.019)(480.7,4.508)(476.9,4.722)(492.5,4.461)(529.7,3.306)(516.5,4.253)(478.8,3.789)(498.0,4.149)(483.2,4.595)(495.0,3.886)(490.5,3.448)(497.4,4.137)(503.5,3.892)(447.0,3.903)(516.8,3.594)(509.8,3.969)(496.3,2.734)(509.9,4.055)(528.5,3.708)(517.4,3.560)(465.2,4.308)(482.3,4.069)(533.8,4.242)(547.3,3.253)(465.8,3.274)(513.1,3.120)(511.5,5.008)(512.9,3.934)(452.6,3.838)(498.8,3.875)(564.0,4.533)(495.9,4.344)(553.1,4.103)(503.3,3.777)(503.1,4.300)(512.8,4.480)(526.2,4.215)(504.0,3.817)(573.2,3.479)(503.5,4.184)(533.0,3.486)(478.1,3.846)(520.6,3.827)(550.2,4.183)(515.8,4.065)(495.7,4.688)(533.4,4.037)(506.0,4.342)(510.5,3.914)(450.4,3.962)(520.8,3.813)(471.1,3.342)(515.8,3.711)(514.9,4.504)(493.8,4.051)(515.0,4.252)(543.7,3.706)(524.2,3.930)(530.3,3.755)(461.7,3.761)(487.1,2.970)(518.1,3.617)(522.4,4.190)(523.1,3.885)(507.8,4.793)(498.8,3.809)(477.8,4.299)(518.7,3.685)(504.0,4.025)(511.3,3.650)(513.6,3.999)(472.0,3.688)(501.5,4.150)(560.0,3.990)(498.1,3.802)(503.3,4.190)(505.2,3.789)(480.7,4.675)(534.2,5.154)(487.0,2.933)(458.4,3.697)(494.0,3.646)(447.4,3.076)(515.6,4.200)(505.9,3.122)(505.1,3.271)(477.9,3.307)(511.6,3.504)(545.9,3.422)(493.9,3.586)(479.8,3.639)(547.4,3.922)(498.9,4.104)(474.5,4.466)(514.9,3.367)(486.7,3.512)(497.7,3.637)(482.8,4.232)(507.7,4.213)(546.2,3.826)(522.8,3.379)(472.3,3.392)(475.3,4.088)(498.1,4.308)(483.0,3.802)(532.4,3.449)(506.0,3.023)(502.3,2.962)(498.4,3.974)(527.6,5.122)(472.3,3.052)(515.3,4.610)(500.4,5.095)(493.7,4.552)(498.7,3.688)(518.1,4.263)(509.3,3.544)(543.8,3.805)(467.4,4.204)(500.3,4.821)(454.9,3.920)(492.8,4.723)(478.0,3.726)(489.8,4.381)(483.4,4.323)};
+      \costcontour{contour/draw color=MLAmber, very thick, forget plot, domain=380:620, y domain=1.8:6.2}{5.0975}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+      \addlegendimage{MLAmber, very thick}\addlegendentry{$\varepsilon = 10^{-3}$}
+      \costcontour{contour/draw color=MLGray, very thick, forget plot, domain=380:620, y domain=1.8:6.2}{9.7027}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+      \addlegendimage{MLGray, very thick}\addlegendentry{$\varepsilon = 10^{-4}$}
+      \costcontour{contour/draw color=MLTeal, very thick, forget plot, domain=380:620, y domain=1.8:6.2}{14.3078}{((x-499.7865)/25.1190)^2+((y-3.99277)/0.49535)^2}
+      \addlegendimage{MLTeal, very thick}\addlegendentry{$\varepsilon = 10^{-5}$}
+      \addplot[only marks, mark=x, mark size=2.6pt, MLRose, very thick, forget plot] coordinates {(386.4,3.831)(599.2,3.362)(558.5,5.493)(609.5,3.268)(464.5,5.733)(411.0,4.930)(540.4,2.480)(417.4,5.060)(415.1,3.453)(590.4,4.316)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{$250$ of the $6000$ training engines (dots) and the $10$ faulty
+  validation engines (crosses), with the boundaries $p(\vx) = \varepsilon$ for
+  three thresholds --- ellipses aligned with the axes, drawn from the formula. A
+  smaller $\varepsilon$ gives a larger ellipse: fewer false alarms and more missed
+  faults. At $\varepsilon = 10^{-5}$ three faulty engines lie inside.}
+  \label{fig:engines}
+\end{figure}
+
+The boundary $p(\vx) = \varepsilon$ is an ellipse because taking logarithms turns
+the product into a sum: $p(\vx) = \varepsilon$ is equivalent to
+$z_1^2 + z_2^2 = -2\ln\bigl(2\pi\hat\sigma_1\hat\sigma_2\,\varepsilon\bigr)$, a
+circle in standardised coordinates. For $\varepsilon = 10^{-5}$ its radius is
+$3.78$ standard deviations.
+
+\section{Developing and Evaluating a Detector}
+\label{sec:ad-eval}
+
+Anomaly detection is trained without labels, but it cannot be evaluated or tuned
+without some. The standard arrangement uses a few labelled anomalies, kept out of
+training:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+set & good engines & faulty engines\\
+\midrule
+training   & $6000$ & $0$ (assumed)\\
+validation & $2000$ & $10$\\
+test       & $2000$ & $10$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Fit $\mu_j$ and $\sigma_j^2$ on the training set. On the validation set, predict
+$y = 1$ (anomaly) when $p(\vx) < \varepsilon$, and choose $\varepsilon$ --- and,
+if you are comparing them, the features --- by a metric suited to the skew: ten
+anomalies in $2010$ examples is a prevalence of $0.5\%$, so accuracy is useless
+(\cref{sec:skew}) and precision, recall and $F_1$ are the measures.
+
+\begin{workedexample}{Choosing $\varepsilon$ on the validation set}
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+$\varepsilon$ & TP & FP & FN & precision & recall & $F_1$\\
+\midrule
+$10^{-3}$          & $10$ & $156$ & $0$ & $0.060$ & $1.0$ & $0.114$\\
+$10^{-4}$          & $10$ & $16$  & $0$ & $0.385$ & $1.0$ & $0.556$\\
+$3\times10^{-5}$   & $9$  & $8$   & $1$ & $0.529$ & $0.9$ & $0.667$\\
+$10^{-5}$          & $7$  & $2$   & $3$ & $0.778$ & $0.7$ & $\mathbf{0.737}$\\
+$3\times10^{-6}$   & $3$  & $0$   & $7$ & $1.000$ & $0.3$ & $0.462$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+$F_1$ is largest at $\varepsilon = 10^{-5}$. Applied once to the test set, that
+threshold gives TP $= 8$, FP $= 0$, FN $= 2$: precision $1.0$, recall $0.8$,
+$F_1 = 0.889$. It flags $0.07\%$ of the training engines.
+\end{workedexample}
+
+\begin{workedexample}{The same choice by hand, on twelve engines}
+A real validation set is often small. Take nine good and three faulty validation
+engines and sort them by $p(\vx)$:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcr@{}}
+\toprule
+engine & faulty? & $p(\vx)$\\
+\midrule
+$(609.5,\ 3.3)$ & yes & $3.1\times10^{-7}$\\
+$(411.0,\ 4.9)$ & yes & $4.1\times10^{-6}$\\
+$(417.4,\ 5.1)$ & yes & $5.8\times10^{-6}$\\
+$(470.4,\ 3.4)$ & no  & $3.2\times10^{-3}$\\
+$(512.1,\ 3.4)$ & no  & $5.5\times10^{-3}$\\
+\multicolumn{3}{@{}l}{\quad\dots\ seven more good engines, up to $1.2\times10^{-2}$}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Only thresholds between consecutive values change the decisions. Any $\varepsilon$
+between $5.8\times10^{-6}$ and $3.2\times10^{-3}$ flags exactly the three faulty
+engines, $F_1 = 1$; lower thresholds miss some ($F_1 = 0.5$ or $0.8$), higher
+ones add false alarms ($F_1 = 0.857$, falling to $0.429$). The geometric midpoint
+of the perfect range is $1.4\times10^{-4}$ --- ten times the $\varepsilon$ chosen
+on the full validation set. Twelve engines can say that some $\varepsilon$ in a
+range spanning nearly three orders of magnitude is perfect; they cannot say
+where in the range to put it.
+\end{workedexample}
+
+\begin{pitfall}{Very few labelled anomalies}
+With only two or three known anomalies, use them all for validation and skip the
+test set --- but then the reported $F_1$ is optimistic, because it was maximised
+on the same examples it describes. Say so when reporting it. A few anomalies
+slipping into the \emph{training} set, by contrast, do little harm: they move
+$\hat\mu$ and $\hat\sigma^2$ only slightly.
+\end{pitfall}
+
+\begin{researchspotlight}{Chandola, Banerjee \& Kumar (2009) --- Anomaly detection: a survey}
+\textbf{The problem.} Anomaly detection had grown up separately in statistics,
+machine learning, data mining and a dozen application areas, each with its own
+vocabulary, assumptions and methods.
+
+\textbf{The idea.} Organise the field by the assumptions methods make about
+normal data: statistical (normal data comes from a probability model, as in this
+chapter), nearest-neighbour (normal data is dense), clustering-based (normal data
+belongs to clusters), classification-based (labels exist for normal behaviour),
+and others --- and by the type of anomaly: point, contextual, or collective.
+
+\textbf{The result.} A widely cited map of the field, with the strengths,
+weaknesses and computational cost of each family, and a catalogue of
+applications from intrusion detection to medical monitoring.
+
+\textbf{Why it is here.} The Gaussian detector of this chapter is the simplest
+statistical method; the survey is the place to go when its assumptions fail ---
+for instance when an anomaly is a \emph{sequence} of individually normal events.
+\parencite{chandola2009}
+\end{researchspotlight}
+
+\section{Anomaly Detection or Supervised Learning?}
+\label{sec:ad-vs-sl}
+
+If some labelled anomalies exist, why not train a classifier on them?
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{5.3cm}L{5.3cm}@{}}
+\toprule
+\textbf{anomaly detection} & \textbf{supervised learning}\\
+\midrule
+very few positive examples ($0$--$20$), many negatives
+  & enough positives and negatives to learn both\\
+many \emph{different kinds} of anomaly; future ones may look like none seen
+  & future positives resemble the training positives\\
+fraud (attackers keep inventing), new engine faults, failing servers
+  & spam, known defect types such as scratches, weather, known diseases\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keyinsight}{Model normal, or model the positives}
+A classifier learns what the positive class looks like, and so can only find
+positives resembling those it has seen. An anomaly detector learns what
+\emph{normal} looks like, and flags anything else --- including kinds of anomaly
+nobody has seen before. Many production systems run both: a classifier for the
+known fraud patterns, and a detector for the unknown ones.
+\end{keyinsight}
+
+\begin{pitfall}{``Few positives'' is not the whole test}
+A team with forty labelled defects reaches for anomaly detection because forty
+is small. But if every future defect is a scratch, like the forty, a supervised
+model --- perhaps with the data augmentation of \cref{sec:adding-data} --- will
+find scratches better than any model of normality. Ask whether future anomalies
+will resemble past ones before asking how many past ones you have.
+\end{pitfall}
+
+\section{Choosing and Transforming Features}
+\label{sec:ad-features}
+
+Feature choice matters more here than in supervised learning, because there is no
+label to tell the model which features matter: a feature that does not separate
+anomalies from normal data only adds noise to $p(\vx)$.
+
+\subsection{Make features look Gaussian}
+
+The model treats each feature as Gaussian. A feature with a long right tail ---
+transaction amounts, response times, counts --- makes large but perfectly normal
+values look improbable, and squeezes the real outliers together.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, ybar, bar width=7pt, width=\linewidth, height=4.2cm,
+        xmin=-0.25, xmax=6.25, ymin=0, title={raw $x$: skewness $3.33$}, ytick=\empty]
+        \addplot[fill=MLBlue!55, draw=MLBlue] coordinates {(0.25,176)(0.75,310)(1.25,181)(1.75,139)(2.25,60)(2.75,41)(3.25,29)(3.75,22)(4.25,15)(4.75,4)(5.25,6)(5.75,3)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[mlaxis, ybar, bar width=7pt, width=\linewidth, height=4.2cm,
+        xmin=-3.25, xmax=3.25, ymin=0, title={$\ln x$: skewness $-0.08$}, ytick=\empty]
+        \addplot[fill=MLTeal!55, draw=MLTeal] coordinates {(-2.75,1)(-2.25,8)(-1.75,21)(-1.25,63)(-0.75,159)(-0.25,234)(0.25,227)(0.75,171)(1.25,89)(1.75,19)(2.25,6)(2.75,2)};
+      \end{axis}
+    \end{tikzpicture}
+  \end{minipage}
+  \caption{$1000$ readings of a right-skewed feature, before and after taking
+  logarithms. The raw histogram (which omits $14$ values above $6$) has a long
+  tail; the logarithm is close to a symmetric bell, and a Gaussian model of it is
+  reasonable.}
+  \label{fig:skew-hist}
+\end{figure}
+
+Try $\ln x$, $\ln(x+c)$, $\sqrt{x}$ or $x^{1/3}$, judge by the histogram (or a
+skewness statistic), and apply the \emph{same} transformation to the training,
+validation and test data.
+
+\subsection{Invent the feature that exposes the miss}
+
+\term{Error analysis} for anomaly detection looks at the anomalies the detector
+\emph{misses} and asks what makes them unusual.
+
+\begin{workedexample}{A stuck process in a data centre}
+For $500$ machines, CPU load and network traffic are strongly correlated
+(correlation $0.97$): busy machines serve more requests. One machine shows
+$85\%$ CPU with traffic of only $250$ --- a process stuck in a loop.
+
+Each feature on its own is unremarkable: $1.52$ and $-1.37$ standard deviations
+from the mean. The independent model gives it $p(\vx) = 4.5\times10^{-6}$, and
+$79$ of the $500$ normal machines score \emph{lower}. No $\varepsilon$ flags the
+stuck machine without also flagging those $79$.
+
+Add the feature $x_3 = \text{CPU load}/\text{traffic}$. Normal machines have
+$x_3 = 0.1006 \pm 0.0086$; the stuck one has $0.34$, which is $28$ standard
+deviations away. Now it is the most improbable machine by an enormous margin.
+\end{workedexample}
+
+\section{The Multivariate Gaussian}
+\label{sec:multivariate}
+
+The ratio feature worked because someone understood the system well enough to
+invent it. The multivariate Gaussian captures correlations between features
+automatically.
+
+\begin{defbox}{Multivariate Gaussian}
+For $\vx \in \Real{n}$ with mean vector $\boldsymbol\mu$ and covariance matrix
+$\Sigma$ ($n\times n$, symmetric, positive definite),
+\[
+  p(\vx;\boldsymbol\mu,\Sigma) = \frac{1}{(2\pi)^{n/2}|\Sigma|^{1/2}}
+    \exp\!\Bigl(-\tfrac12(\vx - \boldsymbol\mu)^{\mathsf T}\Sigma^{-1}(\vx - \boldsymbol\mu)\Bigr).
+\]
+The maximum-likelihood estimates are $\hat{\boldsymbol\mu} = \frac1m\sum_i\xii{i}$
+and $\hat\Sigma = \frac1m\sum_i(\xii{i} - \hat{\boldsymbol\mu})(\xii{i} -
+\hat{\boldsymbol\mu})^{\mathsf T}$. The quadratic form in the exponent is the
+squared \term{Mahalanobis distance}: distance measured in units of the data's
+own spread, along its own axes.
+\end{defbox}
+
+\begin{keyinsight}{The independent model is a special case}
+If $\Sigma$ is diagonal, with entries $\sigma_1^2,\dots,\sigma_n^2$, the
+multivariate density factorises into exactly the product of \cref{sec:ad-alg}.
+The independent model is a multivariate Gaussian whose ellipses are forced to
+align with the axes; the full model lets them tilt.
+\end{keyinsight}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.84\linewidth, height=6.0cm, view={0}{90},
+      xlabel={CPU load (\%)}, ylabel={network traffic},
+      xmin=0, xmax=110, ymin=-200, ymax=1300, scaled y ticks=false,
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[only marks, mark=*, mark size=1pt, MLBlue!60, forget plot] coordinates {(76.4,673.5)(23.8,276.0)(23.4,248.2)(50.4,500.0)(47.5,483.4)(58.9,541.3)(67.5,686.7)(81.1,703.3)(55.2,517.6)(76.4,780.2)(51.4,512.9)(76.0,824.9)(21.0,229.4)(45.8,389.5)(58.9,569.8)(67.9,768.1)(27.5,301.9)(75.9,764.5)(46.6,489.0)(89.4,986.1)(69.9,663.4)(53.6,534.2)(20.1,204.8)(84.7,887.7)(77.6,708.4)(80.1,864.7)(38.1,384.1)(80.5,821.2)(20.2,189.9)(82.3,748.7)(80.1,857.0)(61.6,624.6)(68.8,706.0)(35.0,328.6)(62.1,721.5)(49.2,509.6)(46.3,436.5)(36.1,341.1)(57.4,483.3)(23.0,243.9)(21.4,186.8)(71.1,810.7)(63.1,667.5)(33.4,379.6)(40.6,338.8)(21.2,197.2)(68.3,663.4)(67.5,643.9)(39.2,373.5)(71.3,662.3)(26.5,222.0)(20.0,210.7)(62.1,625.4)(62.8,583.1)(47.7,494.0)(55.5,508.3)(53.8,506.7)(81.6,824.3)(24.2,246.9)(57.9,534.4)(84.3,835.9)(27.9,288.3)(24.7,252.4)(53.6,521.7)(25.0,252.1)(71.9,703.5)(49.8,570.9)(43.5,423.7)(86.3,723.6)(59.7,600.5)(82.1,832.6)(74.8,770.7)(29.1,269.3)(77.2,723.2)(90.0,1024.8)(66.0,605.7)(24.9,263.0)(37.1,371.6)(24.3,235.9)(85.2,916.5)(34.3,379.6)(60.1,619.0)(61.7,606.8)(54.3,555.3)(56.1,578.5)(37.8,367.6)(68.9,738.5)(43.3,423.6)(68.5,613.7)(25.4,263.3)(37.9,371.6)(22.7,234.3)(75.4,659.8)(24.6,293.6)(71.2,658.1)(36.7,349.2)(34.8,347.8)(21.5,209.0)(74.5,663.3)(65.5,674.4)(28.7,292.8)(32.0,278.9)(83.7,953.0)(49.7,479.8)(35.9,347.1)(85.8,802.4)(75.1,734.1)(22.6,200.2)(59.6,628.1)(20.8,189.9)(39.7,392.2)(36.4,387.1)(79.0,690.9)(56.4,570.3)(71.0,690.6)(20.4,218.7)(77.9,843.9)(64.1,555.0)(24.4,231.7)(82.5,917.4)(57.7,617.6)(80.7,875.5)(86.0,909.2)(43.7,406.2)(36.8,373.7)};
+      \costcontour{contour/draw color=MLAmber, very thick, dashed, forget plot, domain=0:110, y domain=-200:1300}{4.1985}{((x-54.0121)/20.3907)^2+((y-540.6261)/211.4579)^2}
+      \addlegendimage{MLAmber, very thick, dashed}\addlegendentry{independent model, through the stuck machine}
+      \costcontour{contour/draw color=MLTeal, very thick, forget plot, domain=0:110, y domain=-200:1300}{22.9960}{0.04238942*(x-54.0121)^2+2*(-0.00396992)*(x-54.0121)*(y-540.6261)+0.0003941609*(y-540.6261)^2}
+      \addlegendimage{MLTeal, very thick}\addlegendentry{multivariate model, least likely normal machine}
+      \addplot[only marks, mark=x, mark size=3pt, MLRose, very thick, forget plot] coordinates {(85,250)};
+      \node[font=\tiny, MLRose, anchor=west] at (axis cs:87,250) {stuck};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{The data-centre machines (dots) and the stuck one (cross). Dashed: the
+  independent model's contour through the stuck machine --- an axis-aligned
+  ellipse with $79$ normal machines outside it, all scored as more anomalous.
+  Solid: the multivariate model's contour through the least likely
+  \emph{normal} machine, tilted along the correlation. The stuck machine lies
+  far outside it.}
+  \label{fig:multivariate}
+\end{figure}
+
+On the data-centre machines the estimated correlation is $0.9712$. The
+multivariate model gives the stuck machine $p = 3.9\times10^{-36}$, a squared
+Mahalanobis distance of $145.5$, while the least likely normal machine has
+$p = 1.6\times10^{-9}$ and squared distance $23.0$. The anomaly is found from the
+raw features, with no invented ratio.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{3.1cm}L{4.1cm}L{4.1cm}@{}}
+\toprule
+ & independent Gaussians & multivariate Gaussian\\
+\midrule
+correlations & missed unless encoded as features & captured automatically\\
+parameters & $2n$ ($200$ for $n = 100$) & $n + n(n+1)/2$ ($5150$ for $n = 100$)\\
+cost & linear in $n$ & needs $\Sigma^{-1}$: about $n^3$\\
+data needed & works with $m$ small & needs $m > n$, ideally $m \gg n$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{pitfall}{A singular covariance matrix}
+If $m \le n$, or if some features are duplicates or exact linear combinations of
+others, $\hat\Sigma$ is singular and $\Sigma^{-1}$ does not exist --- the
+singular-matrix problem of \cref{sec:singular} again. Remove redundant features,
+or add a small multiple of the identity to $\hat\Sigma$, the same regularization
+idea as ridge regression in \cref{ch:ch07}.
+\end{pitfall}
+
+\begin{labbox}{Lab 14 --- Anomaly detection}
+Implement \code{estimate\_gaussian} returning $\hat\mu$ and $\hat\sigma^2$ per
+feature, and a vectorised \code{p(X)}. Reproduce the estimates and the three
+engine scores of \cref{sec:ad-alg}. Implement \code{select\_threshold} that scans
+candidate $\varepsilon$ values on the validation set and returns the best $F_1$,
+and reproduce $\varepsilon = 10^{-5}$ with $F_1 = 0.737$.
+
+Then fit the multivariate Gaussian to the data-centre machines, plot both models'
+contours as in \cref{fig:multivariate}, and confirm that only the multivariate
+model isolates the stuck machine. Finally apply the detector to a dataset with
+many features, where the provided labels let you report precision and recall.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
 
 \begin{itemize}
-  \item Finding Unusual Events
-  \item The Gaussian Distribution
-  \item The Density-Estimation Algorithm
-  \item Choosing the Threshold
-  \item Anomaly Detection vs.\ Supervised Learning
-  \item Choosing Features
-  \item The Multivariate Gaussian
+  \item Anomaly detection models normal data with a density $p(\vx)$ and flags
+        examples with $p(\vx) < \varepsilon$.
+  \item The maximum-likelihood estimates of a Gaussian's parameters are the
+        sample mean and the sample variance (dividing by $m$).
+  \item The basic detector multiplies one Gaussian per feature; its boundaries are
+        axis-aligned ellipses. On E2, an engine $3.6$ and $3.2$ standard
+        deviations out scores $1.0\times10^{-7}$ and is flagged.
+  \item Train on unlabelled, mostly normal data; choose $\varepsilon$ by $F_1$ on a
+        few labelled anomalies. On E2, $\varepsilon = 10^{-5}$ gives validation
+        $F_1 = 0.737$ and test $F_1 = 0.889$. Tiny validation sets leave
+        $\varepsilon$ poorly determined.
+  \item Prefer anomaly detection when positives are rare \emph{and} varied, so
+        future ones may be new; prefer supervised learning when they are
+        plentiful or alike.
+  \item Transform skewed features towards a bell shape, and build features from
+        the anomalies the detector misses --- a ratio that puts a stuck machine
+        $28$ standard deviations out.
+  \item The multivariate Gaussian captures correlations; the independent model is
+        its diagonal special case. It isolates the stuck machine from the raw
+        features, at the cost of $O(n^2)$ parameters and a covariance matrix that
+        must be invertible.
 \end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Explain anomaly detection by density estimation and give three applications.
+
+\sq Write the Gaussian density and say what $\mu$ and $\sigma$ control.
+
+\sq Why can a density exceed $1$, and why does that not matter here?
+
+\sq What assumption does multiplying the per-feature densities make?
+
+\sq Why is accuracy unsuitable for choosing $\varepsilon$?
+
+\sq Why do a few anomalies in the training set do little harm?
+
+\sq When should supervised learning be preferred to anomaly detection?
+
+\sq Why should features be transformed towards a Gaussian shape, and which
+transformations are common?
+
+\sq How does error analysis lead to new features in anomaly detection?
+
+\sq How many parameters does a multivariate Gaussian have in $n$ dimensions?
+
+\exercisesection{Analytical Problems}
+
+\ap Derive the maximum-likelihood estimates of $\mu$ and $\sigma^2$ for a
+Gaussian, and show that $\hat\sigma^2$ is biased by a factor $(m-1)/m$.
+
+\ap Compute $\hat\mu$ and $\hat\sigma^2$ for $x = \{2, 4, 4, 4, 5, 5, 7, 9\}$, and
+the density at $x = 10$.
+
+\ap Using E2's estimates, compute $p(\vx)$ for $\vx = (450,\ 3.0)$ and decide
+whether it is an anomaly at $\varepsilon = 10^{-5}$.
+
+\ap Show that the boundary $p(\vx) = \varepsilon$ of the independent model in two
+dimensions is an ellipse, and find its semi-axes for E2 at $\varepsilon =
+10^{-5}$.
+
+\ap Show that a multivariate Gaussian with diagonal covariance factorises into a
+product of one-dimensional Gaussians.
+
+\ap Explain, using the Mahalanobis distance, why the stuck machine is far from
+the data under the multivariate model but not under the independent one.
+
+\exercisesection{Design Problems}
+
+\dpr Design a fraud detector for a mobile payment service: the features
+(including at least one ratio), the training data, how you obtain labelled frauds
+for validation, and how you choose $\varepsilon$ given the cost of blocking a
+genuine payment.
+
+\dpr Design an anomaly detector for sewing machines in a factory using vibration
+and power sensors, including how you would detect a machine that degrades slowly
+over weeks.
+
+\dpr You have $40$ labelled defects and $50{,}000$ good circuit boards. Design an
+experiment to decide between anomaly detection and a supervised classifier.
+
+\dpr Design an automatic procedure that chooses a transformation for each
+feature before fitting $p(\vx)$, and a test that it improves validation $F_1$.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement the independent-Gaussian detector and reproduce the
+$\varepsilon$ table of \cref{sec:ad-eval}.
+
+\pe Implement \code{select\_threshold}, scanning candidate thresholds between the
+sorted validation scores, and reproduce the twelve-engine example.
+
+\pe Fit independent and multivariate Gaussians to the data-centre machines and
+reproduce \cref{fig:multivariate}.
+
+\pe Generate a skewed feature, fit the detector with and without a log transform,
+and compare their validation $F_1$ on injected anomalies.
+
+\exercisesection{Self-Test}
+
+\qz The maximum-likelihood estimate of $\sigma^2$ divides by: (a)~$m-1$;
+(b)~$m$; (c)~$n$; (d)~$\sqrt m$.
+
+\qz An example is flagged as anomalous when: (a)~$p(\vx) > \varepsilon$;
+(b)~$p(\vx) < \varepsilon$; (c)~$p(\vx) = 1$; (d)~its label is $1$.
+
+\qz $\varepsilon$ is chosen on: (a)~the training set; (b)~the validation set,
+by $F_1$; (c)~the test set; (d)~no data at all.
+
+\qz Anomaly detection is preferred over supervised learning when: (a)~positives
+are plentiful and alike; (b)~positives are rare and varied; (c)~the data is
+labelled; (d)~accuracy is high.
+
+\qz The independent-Gaussian model is the multivariate Gaussian with:
+(a)~a diagonal covariance; (b)~an identity mean; (c)~zero variance; (d)~a singular
+covariance.
+
+\qz The multivariate Gaussian with $n = 100$ features has about: (a)~$200$
+parameters; (b)~$5150$; (c)~$100$; (d)~$10^4$.
+
+\qz A long right tail in a feature is best handled by: (a)~deleting the feature;
+(b)~a log or similar transform; (c)~squaring it; (d)~nothing.
+
+\furtherreading
+
+\textcite{james2021} §4.4.1--4.4.2 is the primary reading for the probability
+models of this chapter: it develops the one-dimensional Gaussian density and its
+parameter estimates, then the multivariate Gaussian with its covariance matrix,
+in the setting of linear discriminant analysis, where the same densities are used
+to classify rather than to flag outliers. \textcite{bishop2006} §2.3 is the
+supplementary reading: it treats the multivariate Gaussian in depth --- its
+geometry, its Mahalanobis distance and elliptical contours, and in §2.3.4 the
+maximum-likelihood estimates of its mean and covariance --- and is the right place
+to see why the independent model of \cref{sec:ad-alg} is its diagonal special
+case.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch15} opens Part~VI with recommender systems,
+where a matrix of ratings with most entries missing is completed from the few
+that are known.

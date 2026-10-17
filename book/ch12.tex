@@ -1,17 +1,845 @@
 %% ch12.tex --- Decision Trees and Ensembles
-%% STUB. See BOOK_PLAN.md for the full outline of this chapter.
+%% Numbers are computed by verify/ch12_trees.py.
+%% Figure coordinates for the regression-tree curves come from section [12.6].
 
 \chapter{Decision Trees and Ensembles}
 \label{ch:ch12}
 
-\noindent\textit{This chapter is in preparation.} Its planned structure is:
+\epigraph{Begin at the beginning, and go on till you come to the end: then
+stop.}{---\ Lewis Carroll, \emph{Alice in Wonderland}}
+
+\begin{chapterlearning}
+After working through this chapter you will be able to:
+\begin{enumerate}
+  \item Read a decision tree as a sequence of questions and use one to classify
+        an example.
+  \item Compute entropy, Gini impurity and information gain by hand, and choose
+        the best split of a node.
+  \item Build a complete tree on a small dataset, including splits on continuous
+        features and categorical features with many values.
+  \item Explain when to stop splitting, and how pruning limits overfitting.
+  \item Build regression trees by variance reduction.
+  \item Explain why a single tree has high variance, and show it.
+  \item Describe bagging, random forests and gradient boosting, and say what each
+        does to bias and variance.
+  \item Choose between tree ensembles and neural networks for a given kind of
+        data.
+\end{enumerate}
+\end{chapterlearning}
+
+Every model so far has been a weighted sum passed through a function: linear
+regression, logistic regression, and networks of logistic units. This chapter
+introduces a model built on a different principle. A decision tree makes a
+prediction by asking a short sequence of yes/no questions about the features,
+each question chosen to separate the classes as cleanly as possible.
+
+A single tree is easy to interpret and quick to train, but unstable. Combining
+hundreds of trees fixes the instability and produces what remain, in practice,
+the strongest general-purpose models for tabular data: random forests and
+gradient-boosted trees.
+
+\section{A Tree Is a Sequence of Questions}
+\label{sec:tree-idea}
+
+\begin{defbox}{Decision tree}
+A \term{decision tree} is a tree of nodes. Each \term{internal node} tests one
+feature --- ``is the credit history good?'', ``is the income above $39.5$?'' ---
+and sends the example down one of its branches according to the answer. Each
+\term{leaf node} holds a prediction: a class for classification, a number for
+regression. To classify an example, start at the root and follow the answers to
+a leaf.
+\end{defbox}
+
+\begin{defbox}{Dataset T11}
+Ten past loan applicants, each described by three yes/no features and an income
+in thousands of dollars, with the outcome: was the loan repaid?
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}rccccc@{}}
+\toprule
+\# & employed & owns home & good history & income & repaid\\
+\midrule
+1  & yes & yes & yes & $62$ & $1$\\
+2  & yes & no  & yes & $48$ & $1$\\
+3  & no  & no  & yes & $35$ & $0$\\
+4  & yes & yes & no  & $55$ & $1$\\
+5  & no  & yes & yes & $41$ & $1$\\
+6  & yes & no  & no  & $30$ & $0$\\
+7  & no  & no  & no  & $22$ & $0$\\
+8  & yes & no  & yes & $52$ & $1$\\
+9  & no  & yes & no  & $38$ & $0$\\
+10 & yes & no  & no  & $45$ & $0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Five of the ten repaid.
+\end{defbox}
+
+Learning a tree means deciding which question to ask at each node and when to
+stop asking. Both decisions need a measure of how mixed a set of examples is.
+
+\section{Measuring Impurity}
+\label{sec:impurity}
+
+\begin{defbox}{Entropy and Gini impurity}
+Let $p$ be the fraction of positive examples at a node. Its \term{entropy} is
+\[
+  H(p) = -p\log_2 p - (1-p)\log_2(1-p), \qquad 0\log_2 0 \equiv 0,
+\]
+and its \term{Gini impurity} is
+\[
+  G(p) = 1 - p^2 - (1-p)^2 = 2p(1-p) .
+\]
+Both are $0$ for a \emph{pure} node ($p = 0$ or $1$) and largest for an even mix
+($p = \tfrac12$): $H = 1$, $G = 0.5$.
+\end{defbox}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.66\linewidth, height=4.8cm,
+      xlabel={fraction positive $p$}, ylabel={impurity},
+      xmin=0, xmax=1, ymin=0, ymax=1.08,
+      legend style={font=\scriptsize, at={(0.98,0.97)}, anchor=north east}]
+      \addplot[MLBlue, very thick, domain=0.0005:0.9995, samples=150]
+        {-x*ln(x)/ln(2) - (1-x)*ln(1-x)/ln(2)};
+      \addlegendentry{entropy $H(p)$}
+      \addplot[MLAmber, very thick, dashed, domain=0:1, samples=60] {2*x*(1-x)};
+      \addlegendentry{Gini $G(p)$}
+      \addplot[only marks, mark=*, mark size=1.8pt, MLRose, forget plot]
+        coordinates {(0.2,0.7219)(0.8,0.7219)(0.5,1.0)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Entropy and Gini impurity as functions of the fraction of positive
+  examples. Both vanish for a pure node and peak for an even mix. The dots mark
+  values used in this chapter: $H(0.5) = 1$ and $H(0.2) = H(0.8) = 0.7219$.}
+  \label{fig:impurity}
+\end{figure}
+
+Entropy comes from information theory: it is the average number of bits needed
+to transmit the label of an example drawn from the node. A pure node needs none;
+a 50/50 node needs one. In practice entropy and Gini almost always choose the
+same splits; we use entropy, and \tool{scikit-learn} uses Gini by default.
+
+\begin{derivation}{Information gain}
+A split sends a fraction $w_{\text{left}}$ of a node's examples left and
+$w_{\text{right}} = 1 - w_{\text{left}}$ right, with positive fractions
+$p_{\text{left}}$ and $p_{\text{right}}$. The impurity after the split is the
+weighted average of the children's impurities --- weighted because a large child
+matters more than a small one. The \term{information gain} is the reduction:
+\[
+  \text{gain} = H(p_{\text{node}})
+    - \bigl(w_{\text{left}}H(p_{\text{left}}) + w_{\text{right}}H(p_{\text{right}})\bigr) .
+\]
+The weighted average can never exceed $H(p_{\text{node}})$, because $H$ is
+concave and $p_{\text{node}} = w_{\text{left}}p_{\text{left}} +
+w_{\text{right}}p_{\text{right}}$ (Jensen's inequality), so the gain is never
+negative. It is zero exactly when both children have the same mix as the parent
+--- a useless question.
+
+At the root of T11, $p = 5/10$ and $H = 1$. Splitting on \emph{good history}
+sends five examples left, of which four repaid ($p = 0.8$), and five right, of
+which one repaid ($p = 0.2$):
+\[
+  \text{gain} = 1 - \bigl(\tfrac{5}{10}H(0.8) + \tfrac{5}{10}H(0.2)\bigr)
+              = 1 - 0.7219 = 0.2781 .
+\]
+\end{derivation}
+
+\section{Building a Tree}
+\label{sec:build-tree}
+
+The procedure is greedy: at each node, evaluate every possible split, take the
+one with the largest information gain, and recurse on the children.
+
+\begin{algorithmbox}{Growing a decision tree}
+\begin{lstlisting}[style=pseudocode]
+grow(node examples S):
+    if S is pure, or a stopping criterion holds:
+        return leaf predicting the majority class of S
+    for each feature f (each threshold, if numeric):
+        compute the information gain of splitting S on f
+    choose the split with the largest gain
+    split S into children; grow(each child)
+\end{lstlisting}
+The tree is built top-down, one node at a time, and a split once made is never
+revisited. Finding the best tree overall is computationally intractable; greedy
+growth is what makes trees fast.
+\end{algorithmbox}
+
+\begin{workedexample}{The full tree for T11}
+Use the three yes/no features (income is treated separately in
+\cref{sec:continuous}).
+
+\textbf{Root} ($5$ of $10$ repaid, $H = 1$):
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lccr@{}}
+\toprule
+split & yes branch & no branch & gain\\
+\midrule
+employed      & $4$ of $6$ & $1$ of $4$ & $0.1245$\\
+owns home     & $3$ of $4$ & $2$ of $6$ & $0.1245$\\
+good history  & $4$ of $5$ & $1$ of $5$ & $\mathbf{0.2781}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Split on \emph{good history}.
+
+\textbf{Good history = yes} ($4$ of $5$ repaid, $H = 0.7219$): splitting on
+\emph{employed} gives $3$ of $3$ and $1$ of $2$, gain $0.3219$; \emph{owns home}
+gives $2$ of $2$ and $2$ of $3$, gain $0.1710$. Split on \emph{employed}. The
+employed branch is pure: predict \emph{repaid}. The unemployed branch has one
+repayment in two, and splitting it on \emph{owns home} separates them.
+
+\textbf{Good history = no} ($1$ of $5$ repaid): \emph{owns home} gives $1$ of $2$
+and $0$ of $3$, gain $0.3219$, against $0.1710$ for \emph{employed}. The
+non-owners are pure: predict \emph{default}. The two owners are separated by
+\emph{employed}.
+
+The finished tree classifies all ten training examples correctly.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+      q/.style={draw=MLBlue, fill=MLBlue!7, rounded corners, align=center,
+                font=\scriptsize, minimum width=1.9cm, minimum height=7mm},
+      yes/.style={draw=MLTeal, fill=MLTeal!15, rounded corners, align=center,
+                  font=\scriptsize, minimum width=1.3cm},
+      no/.style={draw=MLRose, fill=MLRose!10, rounded corners, align=center,
+                 font=\scriptsize, minimum width=1.3cm},
+      e/.style={-{Stealth[length=1.6mm]}, MLGray, semithick},
+      lab/.style={font=\tiny, MLGray, fill=white, inner sep=1pt}]
+    \node[q] (r) at (0,0) {good history?\\$5/10$};
+    \node[q] (a) at (-3.0,-1.5) {employed?\\$4/5$};
+    \node[q] (b) at (3.0,-1.5) {owns home?\\$1/5$};
+    \node[yes] (a1) at (-4.3,-3.0) {repaid\\$3/3$};
+    \node[q] (a2) at (-1.8,-3.0) {owns home?\\$1/2$};
+    \node[q] (b1) at (1.8,-3.0) {employed?\\$1/2$};
+    \node[no] (b2) at (4.3,-3.0) {default\\$0/3$};
+    \node[yes] (a21) at (-2.6,-4.5) {repaid\\$1/1$};
+    \node[no] (a22) at (-1.0,-4.5) {default\\$0/1$};
+    \node[yes] (b11) at (1.0,-4.5) {repaid\\$1/1$};
+    \node[no] (b12) at (2.6,-4.5) {default\\$0/1$};
+    \foreach \p/\c/\l in {r/a/yes, r/b/no, a/a1/yes, a/a2/no, b/b1/yes, b/b2/no,
+                          a2/a21/yes, a2/a22/no, b1/b11/yes, b1/b12/no}
+      \draw[e] (\p) -- node[lab] {\l} (\c);
+  \end{tikzpicture}
+  \caption{The decision tree learned from T11's three yes/no features. Each node
+  shows how many of its examples repaid. The two deepest splits each separate a
+  single pair of examples --- a warning sign, taken up in \cref{sec:stopping}.}
+  \label{fig:t11-tree}
+\end{figure}
+
+\begin{researchspotlight}{Quinlan (1986) --- Induction of decision trees}
+\textbf{The problem.} Expert systems of the time were built by interviewing
+experts and writing their knowledge down as rules --- slow, expensive, and
+inconsistent. Could the rules be induced automatically from examples?
+
+\textbf{The idea.} ID3 grows a tree top-down, choosing at each node the attribute
+with the largest information gain, exactly as in \cref{sec:build-tree}. The paper
+also discusses noisy data, missing values, and the bias of information gain
+towards attributes with many values.
+
+\textbf{The result.} A fast, practical algorithm that produced readable
+classifiers from thousands of examples. Its successors, C4.5 and CART (developed
+independently by Breiman and colleagues), added continuous features, pruning and
+regression trees, and remain the basis of every tree library.
+
+\textbf{Why it is here.} ID3 is the algorithm of this chapter's first half. The
+many-values bias it identified is the pitfall of \cref{sec:categorical}.
+\parencite{quinlan1986}
+\end{researchspotlight}
+
+\section{Continuous Features}
+\label{sec:continuous}
+
+A numeric feature such as income is split by a threshold: ``is income above $t$?''
+Only thresholds between consecutive distinct values in the training set give
+different splits, so the candidates are the midpoints. For T11's ten incomes
+there are nine:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}rccr@{}}
+\toprule
+threshold & above: repaid & below: repaid & gain\\
+\midrule
+$26.0$ & $5$ of $9$ & $0$ of $1$ & $0.1080$\\
+$32.5$ & $5$ of $8$ & $0$ of $2$ & $0.2365$\\
+$36.5$ & $5$ of $7$ & $0$ of $3$ & $0.3958$\\
+$39.5$ & $5$ of $6$ & $0$ of $4$ & $\mathbf{0.6100}$\\
+$43.0$ & $4$ of $5$ & $1$ of $5$ & $0.2781$\\
+$46.5$ & $4$ of $4$ & $1$ of $6$ & $\mathbf{0.6100}$\\
+$50.0$ & $3$ of $3$ & $2$ of $7$ & $0.3958$\\
+$53.5$ & $2$ of $2$ & $3$ of $8$ & $0.2365$\\
+$58.5$ & $1$ of $1$ & $4$ of $9$ & $0.1080$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Income is far more informative than any yes/no feature: its best split has gain
+$0.6100$, against $0.2781$ for good history, so a tree allowed to use income puts
+it at the root. Two thresholds tie. Either can be chosen; libraries take the
+first they encounter. Sorting the values once makes the scan linear in the
+number of examples, which is why trees train fast even on large datasets.
+
+\section{Categorical Features}
+\label{sec:categorical}
+
+A feature with $k$ unordered values --- a region, a product category --- can be
+split into $k$ branches, or encoded first.
+
+\begin{defbox}{One-hot encoding}
+Replace a categorical feature with $k$ values by $k$ binary features, exactly one
+of which is $1$. A ``region'' feature with values \emph{north}, \emph{south},
+\emph{east} becomes three yes/no features, \emph{is north}, \emph{is south},
+\emph{is east}. The same encoding lets categorical features enter linear models
+and neural networks.
+\end{defbox}
+
+\begin{pitfall}{Information gain loves many-valued features}
+A feature with a different value for every example --- an applicant ID, a
+timestamp --- splits the training set into pure singletons and has the largest
+possible information gain. It is also useless for prediction. Never feed
+identifier-like features to a tree; and when categorical features have many
+levels, prefer one-hot encoding or a gain measure that penalises many-way splits
+(C4.5's \emph{gain ratio}).
+\end{pitfall}
+
+\section{When to Stop, and Pruning}
+\label{sec:stopping}
+
+The T11 tree split until every leaf was pure, and its two deepest splits each
+separated a single pair of applicants. Those splits fit the training data
+exactly and almost certainly fit noise: an unemployed applicant with a good
+history repaid because they owned a home, according to one example.
+
+Growing to purity is overfitting by the definition of \cref{ch:ch07}. Two
+standard controls limit it:
 
 \begin{itemize}
-  \item Trees as a Sequence of Questions
-  \item Entropy, Gini, and Information Gain
-  \item Choosing a Split
-  \item Stopping and Pruning
-  \item Regression Trees
-  \item Bagging and Random Forests
-  \item Boosting
+  \item \textbf{Stopping criteria}: do not split a node if the tree has reached a
+        maximum depth, if the node has fewer than a minimum number of examples,
+        or if the best gain is below a threshold.
+  \item \textbf{Pruning}: grow the full tree, then remove subtrees whose removal
+        does not increase validation error (or that a complexity penalty judges
+        not worth their size).
 \end{itemize}
+
+The maximum depth and minimum leaf size are hyperparameters, chosen on
+validation data exactly like $\lambda$ in \cref{ch:ch10}. Pruning tends to work
+better than early stopping, because a split that looks weak can enable strong
+splits below it.
+
+\section{Regression Trees}
+\label{sec:regression-trees}
+
+Trees predict numbers too. A leaf predicts the mean target of its training
+examples, and a split is chosen to reduce the \emph{variance} of the targets
+instead of the entropy of the labels.
+
+\begin{workedexample}{Variance reduction on six points}
+Targets $1.0,\ 1.4,\ 1.2,\ 3.8,\ 4.2,\ 4.0$ at $x = 1,\dots,6$ have variance
+$1.9867$. For each threshold, the reduction is the root variance minus the
+weighted variance of the two sides:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+split & left mean & right mean & variance reduction\\
+\midrule
+$x < 1.5$ & $1.0000$ & $2.9200$ & $0.5120$\\
+$x < 2.5$ & $1.2000$ & $3.3000$ & $0.9800$\\
+$x < 3.5$ & $1.2000$ & $4.0000$ & $\mathbf{1.9600}$\\
+$x < 4.5$ & $1.8500$ & $4.1000$ & $1.1250$\\
+$x < 5.5$ & $2.3200$ & $4.0000$ & $0.3920$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The split at $3.5$ removes almost all the variance, leaving two leaves
+predicting $1.2$ and $4.0$.
+\end{workedexample}
+
+A regression tree's prediction is a step function. On the $35$ training points
+of T10 (\cref{ch:ch10}), the first split is at $x = 1.4872$, with leaf means
+$1.1894$ and $0.6300$. Deeper trees add steps:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+max depth & leaves & $J_{\text{train}}$ & $J_{\text{test}}$\\
+\midrule
+$1$ & $2$  & $0.0650$ & $0.1038$\\
+$2$ & $4$  & $0.0323$ & $0.0977$\\
+$3$ & $8$  & $0.0252$ & $0.0937$\\
+$5$ & $20$ & $0.0119$ & $0.0790$\\
+unlimited & $35$ & $0.0000$ & $0.0657$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.82\linewidth, height=5.0cm,
+      xlabel={$x$}, ylabel={$y$}, xmin=0, xmax=3, ymin=-0.6, ymax=2.3,
+      legend style={font=\scriptsize, at={(0.02,0.02)}, anchor=south west}]
+      \addplot[MLAmber, very thick, const plot] coordinates {(0.000,0.793)(0.030,0.793)(0.060,0.793)(0.090,0.793)(0.120,0.793)(0.150,0.793)(0.180,0.793)(0.210,0.793)(0.240,0.793)(0.270,0.793)(0.300,0.793)(0.330,0.793)(0.360,0.793)(0.390,0.793)(0.420,0.793)(0.450,0.793)(0.480,1.269)(0.510,1.269)(0.540,1.269)(0.570,1.269)(0.600,1.269)(0.630,1.269)(0.660,1.269)(0.690,1.269)(0.720,1.269)(0.750,1.269)(0.780,1.269)(0.810,1.269)(0.840,1.269)(0.870,1.269)(0.900,1.269)(0.930,1.269)(0.960,1.269)(0.990,1.269)(1.020,1.269)(1.050,1.269)(1.080,1.269)(1.110,1.269)(1.140,1.269)(1.170,1.269)(1.200,1.269)(1.230,1.269)(1.260,1.269)(1.290,1.269)(1.320,1.269)(1.350,1.269)(1.380,1.269)(1.410,1.269)(1.440,1.269)(1.470,1.269)(1.500,0.478)(1.530,0.478)(1.560,0.478)(1.590,0.478)(1.620,0.478)(1.650,0.478)(1.680,0.478)(1.710,0.478)(1.740,0.478)(1.770,0.478)(1.800,0.478)(1.830,0.478)(1.860,0.478)(1.890,0.478)(1.920,0.478)(1.950,0.478)(1.980,0.478)(2.010,0.478)(2.040,0.478)(2.070,0.478)(2.100,0.478)(2.130,0.478)(2.160,0.478)(2.190,0.478)(2.220,0.478)(2.250,0.478)(2.280,0.478)(2.310,0.478)(2.340,0.478)(2.370,0.478)(2.400,0.478)(2.430,0.478)(2.460,0.478)(2.490,0.478)(2.520,0.478)(2.550,0.478)(2.580,0.478)(2.610,0.478)(2.640,0.478)(2.670,0.478)(2.700,0.478)(2.730,0.478)(2.760,0.478)(2.790,0.478)(2.820,0.478)(2.850,1.177)(2.880,1.177)(2.910,1.177)(2.940,1.177)(2.970,1.177)(3.000,1.177)};
+      \addlegendentry{depth 2 (4 leaves)}
+      \addplot[MLRose, thin, const plot] coordinates {(0.000,0.702)(0.030,0.702)(0.060,0.702)(0.090,0.702)(0.120,0.702)(0.150,0.702)(0.180,0.702)(0.210,0.702)(0.240,0.702)(0.270,0.702)(0.300,0.702)(0.330,0.884)(0.360,0.884)(0.390,0.884)(0.420,0.884)(0.450,0.884)(0.480,1.321)(0.510,1.321)(0.540,0.893)(0.570,0.893)(0.600,0.893)(0.630,1.248)(0.660,1.248)(0.690,1.248)(0.720,1.248)(0.750,1.601)(0.780,1.601)(0.810,1.601)(0.840,1.601)(0.870,1.601)(0.900,1.601)(0.930,1.181)(0.960,1.181)(0.990,1.181)(1.020,1.181)(1.050,1.181)(1.080,1.395)(1.110,1.395)(1.140,1.245)(1.170,1.245)(1.200,1.245)(1.230,1.388)(1.260,1.388)(1.290,1.388)(1.320,1.388)(1.350,1.388)(1.380,1.033)(1.410,1.033)(1.440,1.033)(1.470,1.382)(1.500,0.808)(1.530,0.714)(1.560,0.370)(1.590,0.370)(1.620,1.037)(1.650,1.037)(1.680,1.037)(1.710,0.510)(1.740,0.510)(1.770,0.510)(1.800,0.191)(1.830,0.727)(1.860,0.727)(1.890,-0.164)(1.920,-0.164)(1.950,-0.164)(1.980,0.760)(2.010,0.760)(2.040,0.760)(2.070,-0.022)(2.100,-0.022)(2.130,-0.022)(2.160,-0.022)(2.190,-0.022)(2.220,-0.022)(2.250,0.349)(2.280,0.349)(2.310,0.349)(2.340,0.349)(2.370,0.349)(2.400,0.211)(2.430,0.211)(2.460,0.211)(2.490,0.211)(2.520,0.109)(2.550,0.109)(2.580,0.109)(2.610,0.109)(2.640,0.109)(2.670,0.501)(2.700,0.501)(2.730,0.501)(2.760,0.822)(2.790,0.822)(2.820,0.561)(2.850,1.344)(2.880,1.196)(2.910,0.996)(2.940,0.979)(2.970,1.372)(3.000,1.372)};
+      \addlegendentry{unlimited (35 leaves)}
+      \addplot[MLGray, dashed, domain=0:3, samples=120] {sin(deg(2*x)) + 0.5*x};
+      \addlegendentry{true curve}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Regression trees on T10. A depth-$2$ tree approximates the curve with
+  four steps. The unlimited tree has one leaf per training point and follows
+  every one, noise included, with zero training error.}
+  \label{fig:reg-tree}
+\end{figure}
+
+On this smooth, low-dimensional curve even the fully grown tree has the lowest
+test error of the five, $0.0657$ --- but that is worse than Chapter~10's cubic
+polynomial ($0.0390$), and its training error of exactly zero says it has
+memorised the training set. Steps are a poor way to describe a smooth function;
+trees shine instead on data with interactions and thresholds, which is most
+tabular data.
+
+\section{One Tree Is Unstable}
+\label{sec:instability}
+
+Small changes in the data can change a tree completely, because the choice of
+root split depends on small differences in gain, and every split below depends on
+it. Resample T11 with replacement --- ten draws from its ten rows, a
+\term{bootstrap sample} --- and grow a tree using all four features, a thousand
+times. The root feature varies:
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}lr@{}}
+\toprule
+root split & bootstrap samples (of $1000$)\\
+\midrule
+income        & $659$\\
+good history  & $224$\\
+owns home     & $81$\\
+employed      & $34$\\
+(sample pure) & $2$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A third of the time the tree has a different root, and therefore a completely
+different structure. In the language of \cref{ch:ch10}, a fully grown tree is a
+low-bias, \emph{high-variance} model. The same holds on larger data: fifty fully
+grown trees, each fitted to a bootstrap sample of a $400$-point two-moons
+dataset, have test accuracies ranging from $0.8275$ to $0.8705$.
+
+\begin{keyinsight}{Average away the variance}
+If $B$ models have independent errors of variance $\sigma^2$, their average has
+variance $\sigma^2/B$. Trees grown on different data make partly independent
+errors. Averaging many of them keeps the low bias of a deep tree and removes much
+of its variance --- the idea behind every method in the rest of the chapter.
+\end{keyinsight}
+
+\section{Bagging and Random Forests}
+\label{sec:forests}
+
+\begin{algorithmbox}{Bagging (bootstrap aggregating)}
+\begin{lstlisting}[style=pseudocode]
+for b = 1 to B:
+    draw a bootstrap sample: m examples from the
+        training set, with replacement
+    grow a full decision tree on it
+predict: majority vote of the B trees
+         (average, for regression)
+\end{lstlisting}
+\end{algorithmbox}
+
+\begin{defbox}{Random forest}
+A \term{random forest} is bagging with one change: at each node, the split is
+chosen from a random subset of the features --- typically $\sqrt{n}$ of the $n$
+features --- rather than from all of them. This stops every tree from choosing
+the same dominant feature at the root, so the trees are more different from one
+another, their errors are less correlated, and the average removes more
+variance.
+\end{defbox}
+
+\begin{workedexample}{Ensembles on two moons}
+Two interleaved half-moons with noise: $400$ training and $2000$ test points.
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+model & train accuracy & test accuracy\\
+\midrule
+logistic regression          & --- & $0.8495$\\
+one tree, fully grown        & $1.0000$ & $0.8525$\\
+one tree, depth $4$          & $0.9050$ & $0.8500$\\
+bagging, $200$ trees         & $1.0000$ & $0.8720$\\
+random forest, $200$ trees   & $1.0000$ & $0.8780$\\
+gradient boosting, $200$ stumps & $0.9475$ & $\mathbf{0.8835}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Every ensemble beats every single model. Bagging's test accuracy rises quickly
+with the number of trees and then levels off: $0.8465$ with one tree, $0.8655$
+with five, $0.8720$ with $25$, and essentially no better beyond ($0.8735$ at
+$100$). Adding trees never causes overfitting in bagging; it only stops helping.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.62\linewidth, height=4.6cm, xmode=log,
+      xlabel={number of trees $B$}, ylabel={test accuracy},
+      xmin=0.8, xmax=260, ymin=0.84, ymax=0.88,
+      xtick={1,5,10,25,50,100,200}, xticklabels={1,5,10,25,50,100,200},
+      yticklabel style={/pgf/number format/fixed, /pgf/number format/precision=3}]
+      \addplot[MLBlue, very thick, mark=*, mark size=1.5pt] coordinates
+        {(1,0.8465)(5,0.8655)(10,0.8675)(25,0.8720)(50,0.8710)(100,0.8735)(200,0.8720)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Bagging on two moons: test accuracy against the number of bootstrap
+  trees. Most of the gain comes from the first $25$ trees.}
+  \label{fig:bagging-B}
+\end{figure}
+
+\begin{researchspotlight}{Breiman (2001) --- Random forests}
+\textbf{The problem.} Bagging reduced the variance of trees, but trees grown on
+bootstrap samples of the same data remain strongly correlated --- they tend to
+choose the same strong features --- which limits how much averaging can help.
+
+\textbf{The idea.} Inject a second source of randomness: choose each split from a
+random subset of features. Use the examples left out of each bootstrap sample
+(about a third) as a built-in validation set --- the \emph{out-of-bag} estimate
+--- and measure feature importance by permuting each feature and recording the
+loss in accuracy.
+
+\textbf{The result.} An upper bound on the forest's error in terms of the strength
+of the individual trees and the correlation between them, and a method that was
+accurate across many datasets, robust to noise, and nearly free of tuning.
+
+\textbf{Why it is here.} It is the random forest of \cref{sec:forests}. Its
+out-of-bag estimate and permutation importance are still among the most-used
+tools for understanding tabular models.
+\parencite{breiman2001}
+\end{researchspotlight}
+
+\section{Boosting}
+\label{sec:boosting}
+
+Bagging grows trees independently and averages them, to reduce variance.
+\term{Boosting} grows them \emph{sequentially}, each one fitted to the mistakes
+of the ensemble so far, to reduce bias. The trees are usually small --- stumps
+(one split) or depth $3$ to $6$.
+
+\begin{algorithmbox}{Gradient boosting for squared error}
+\begin{lstlisting}[style=pseudocode]
+F_0(x) <- mean of the targets
+for t = 1 to T:
+    r_i <- y_i - F_{t-1}(x_i)       # residuals
+    fit a small regression tree h_t to the r_i
+    F_t(x) <- F_{t-1}(x) + eta * h_t(x)
+predict F_T(x)
+\end{lstlisting}
+The learning rate $\eta \in (0,1]$ shrinks each tree's contribution; smaller
+$\eta$ needs more trees but generalises better. For squared error the residual
+$y - F$ is the negative gradient of the loss with respect to the prediction, so
+each round is a gradient-descent step in function space --- hence the name. Other
+losses (logistic, absolute) replace the residual by their own negative gradient.
+\end{algorithmbox}
+
+\begin{workedexample}{Three rounds of boosting by hand}
+Targets $1.0,\ 1.2,\ 2.6,\ 3.0,\ 4.4,\ 4.8$ at $x = 1,\dots,6$; stumps;
+$\eta = 0.5$.
+
+$F_0 = 2.8333$, the mean, so the residuals are
+$(-1.8333,\ -1.6333,\ -0.2333,\ 0.1667,\ 1.5667,\ 1.9667)$.
+
+\textbf{Round 1.} The best stump on the residuals splits at $x < 4.5$, with leaf
+values $-0.8833$ and $1.7667$. Adding half of it:
+$F_1 = (2.3917,\ 2.3917,\ 2.3917,\ 2.3917,\ 3.7167,\ 3.7167)$; squared error
+$5.4108$.
+
+\textbf{Round 2.} The new residuals are now largest for $x \le 2$. The best stump
+splits at $x < 2.5$, with values $-1.2917$ and $0.6458$:
+$F_2 = (1.7458,\ 1.7458,\ 2.7146,\ 2.7146,\ 4.0396,\ 4.0396)$; error $1.6569$.
+
+\textbf{Round 3.} A split at $x < 3.5$ separates the middle pair:
+$F_3 = (1.5115,\ 1.5115,\ 2.4802,\ 2.9490,\ 4.2740,\ 4.2740)$; error $0.6682$.
+
+Each round attacks the largest remaining error with a different split, building
+a staircase up the data.
+\end{workedexample}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[mlaxis, width=0.7\linewidth, height=4.8cm,
+      xlabel={$x$}, ylabel={$y$}, xmin=0.5, xmax=6.5, ymin=0.5, ymax=5.2,
+      legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west}]
+      \addplot[MLGray!60, thick, const plot mark mid] coordinates
+        {(0.5,2.8333)(6.5,2.8333)};
+      \addlegendentry{$F_0$}
+      \addplot[MLAmber, thick, const plot mark mid] coordinates
+        {(0.5,2.3917)(4.5,2.3917)(4.5,3.7167)(6.5,3.7167)};
+      \addlegendentry{$F_1$}
+      \addplot[MLBlue, very thick, const plot] coordinates
+        {(0.5,1.5115)(2.5,1.5115)(2.5,2.4802)(3.5,2.4802)(3.5,2.9490)(4.5,2.9490)(4.5,4.2740)(6.5,4.2740)};
+      \addlegendentry{$F_3$}
+      \addplot[only marks, mark=*, mark size=2pt, MLRose, forget plot]
+        coordinates {(1,1.0)(2,1.2)(3,2.6)(4,3.0)(5,4.4)(6,4.8)};
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Gradient boosting with stumps and $\eta = 0.5$. $F_0$ is a constant;
+  the first stump adds a step at $4.5$; after three rounds the model is a
+  four-step staircase following the data.}
+  \label{fig:boosting}
+\end{figure}
+
+\begin{pitfall}{Boosting can overfit}
+Unlike bagging, adding boosting rounds eventually fits the noise, because each
+round fits whatever error remains. On two moons, $200$ boosted stumps reach test
+accuracy $0.8835$, while $200$ boosted depth-$3$ trees fit the training set
+almost perfectly ($0.9975$) and do worse on test data ($0.8705$). The number of
+rounds, the tree depth and the learning rate are hyperparameters, chosen on
+validation data --- often with \emph{early stopping} when the validation error
+stops falling.
+\end{pitfall}
+
+\begin{researchspotlight}{Chen \& Guestrin (2016) --- XGBoost}
+\textbf{The problem.} Gradient boosting was accurate but slow on large datasets,
+and its behaviour on sparse data and missing values was ad hoc.
+
+\textbf{The idea.} A regularized boosting objective with penalties on the number
+of leaves and the size of leaf values; a second-order (Newton) step for each
+tree; split finding with sparsity-aware handling of missing values; and systems
+engineering --- cache-aware access, out-of-core computation, parallelism --- to
+make it fast.
+
+\textbf{The result.} A library that scaled to billions of examples and dominated
+machine-learning competitions on structured data for years; LightGBM and
+CatBoost followed the same path.
+
+\textbf{Why it is here.} It is the gradient boosting of \cref{sec:boosting} at
+industrial strength, and the reason boosted trees are the first model to try on
+a table of features.
+\parencite{chen2016}
+\end{researchspotlight}
+
+\section{Trees or Neural Networks?}
+\label{sec:trees-vs-nn}
+
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}L{3.2cm}L{3.9cm}L{3.9cm}@{}}
+\toprule
+ & tree ensembles & neural networks\\
+\midrule
+data type & tables of features & images, audio, text, and tables\\
+training speed & fast & often slow\\
+feature scaling & not needed & essential\\
+small trees & human-readable & not interpretable\\
+transfer learning & not available & central (\cref{ch:ch11})\\
+combining with other models & awkward & easy: one differentiable system\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keyinsight}{The practical default}
+For structured, tabular data --- customers, transactions, sensor summaries ---
+start with gradient-boosted trees: they are fast, need little preprocessing, and
+are very hard to beat. For unstructured data --- pixels, waveforms, words ---
+start with a neural network, ideally a pre-trained one. Trees cannot learn the
+hierarchical features of \cref{ch:ch08}; networks can.
+\end{keyinsight}
+
+\begin{labbox}{Lab 12 --- Decision trees and ensembles}
+Implement entropy, information gain and the greedy tree-growing procedure for
+binary features. Reproduce the T11 root table and the tree of \cref{fig:t11-tree},
+then add income as a numeric feature and confirm that the root becomes
+\emph{income $> 39.5$} with gain $0.6100$.
+
+Then fit \code{DecisionTreeClassifier}, \code{RandomForestClassifier} and
+\code{GradientBoostingClassifier} to the two-moons data and reproduce the
+ensemble table. Plot each model's decision boundary, and plot validation accuracy
+against the number of boosting rounds to choose when to stop.
+\end{labbox}
+
+\section*{Chapter Summary}
+\addcontentsline{toc}{section}{Chapter Summary}
+
+\begin{itemize}
+  \item A decision tree classifies by a sequence of feature tests from the root to
+        a leaf.
+  \item Entropy $H(p)$ and Gini $2p(1-p)$ measure impurity. Information gain is
+        the drop in weighted impurity from a split; it is never negative.
+  \item Trees are grown greedily: split on the largest gain, recurse. On T11 the
+        root is \emph{good history} (gain $0.2781$) among the yes/no features,
+        or \emph{income $> 39.5$} (gain $0.6100$) when income is allowed.
+  \item Continuous features are split at midpoints between sorted values;
+        categorical ones are one-hot encoded. Identifier-like features must be
+        excluded.
+  \item Growing to purity overfits. Limit depth or leaf size, or prune, with the
+        hyperparameters chosen on validation data.
+  \item Regression trees split by variance reduction and predict leaf means: a
+        step function.
+  \item A single tree is high-variance: T11's root split changes in a third of
+        bootstrap samples.
+  \item Bagging and random forests average many deep trees to cut variance; a
+        forest of $200$ trees lifts test accuracy on two moons from $0.8525$ to
+        $0.8780$.
+  \item Boosting adds small trees sequentially, each fitted to the current
+        residuals, to cut bias; it can overfit and needs early stopping.
+  \item For tabular data, start with boosted trees; for images, audio and text,
+        start with a neural network.
+\end{itemize}
+
+\section*{Exercises}
+\addcontentsline{toc}{section}{Exercises}
+
+\exercisesection{Short Questions}
+
+\sq Describe how a decision tree classifies a new example.
+
+\sq Define entropy and Gini impurity, and give their values for a pure node and a
+50/50 node.
+
+\sq Define information gain and explain why it is weighted by the sizes of the
+children.
+
+\sq Why is tree growing called greedy, and why is a greedy algorithm used?
+
+\sq How are thresholds for a continuous feature chosen?
+
+\sq Why is an applicant ID a dangerous feature for a tree?
+
+\sq Name two stopping criteria and explain pruning.
+
+\sq What does a leaf of a regression tree predict, and how is a split chosen?
+
+\sq Why is a single deep tree described as high-variance?
+
+\sq How does a random forest differ from bagging, and why does the difference
+help?
+
+\sq Contrast bagging and boosting in terms of bias and variance.
+
+\exercisesection{Analytical Problems}
+
+\ap Compute the information gain of each yes/no feature at the root of T11, and
+verify the table of \cref{sec:build-tree}.
+
+\ap Prove that information gain is non-negative using the concavity of $H$, and
+state when it is zero.
+
+\ap Repeat the root computation for T11 using Gini impurity. Does the chosen
+split change?
+
+\ap Find the best threshold for income at the root of T11 and explain why two
+thresholds tie.
+
+\ap For the six-point regression example, verify the variance reduction of the
+split at $x < 3.5$ and explain why it is close to the root variance.
+
+\ap Show that if $B$ models have errors with variance $\sigma^2$ and pairwise
+correlation $\rho$, the variance of their average is
+$\rho\sigma^2 + (1-\rho)\sigma^2/B$. Use this to explain why random forests
+decorrelate their trees.
+
+\ap Carry out the first two rounds of the boosting example by hand and confirm
+$F_2$.
+
+\exercisesection{Design Problems}
+
+\dpr A bank wants a credit model that loan officers can read and explain to
+applicants. Design the model --- tree depth, features, validation --- and explain
+what you give up compared with a gradient-boosted ensemble.
+
+\dpr You have $500{,}000$ transactions with $80$ numeric and categorical features
+and want to detect fraud. Choose between a random forest, gradient boosting and a
+neural network, and design the preprocessing, validation and hyperparameter
+search.
+
+\dpr A tree trained on hospital records places ``ward number'' at the root.
+Diagnose what may have gone wrong and design checks to find similar problems in
+other features.
+
+\dpr Design an experiment to choose the number of boosting rounds, the learning
+rate and the tree depth under a fixed compute budget.
+
+\exercisesection{Programming Exercises}
+
+\pe Implement ID3 for binary features and reproduce the T11 tree.
+
+\pe Extend your implementation to continuous features with midpoint thresholds and
+a maximum-depth limit. Compare its predictions with \code{DecisionTreeClassifier}
+on T11.
+
+\pe Implement bagging around your tree, and plot test accuracy against $B$ on the
+two-moons data.
+
+\pe Implement gradient boosting for regression with stumps, reproduce the
+three-round example, and then fit T10 with $200$ rounds at $\eta = 0.1$.
+
+\exercisesection{Self-Test}
+
+\qz The entropy of a node with $p = 0.5$ is: (a)~$0$; (b)~$0.5$; (c)~$1$;
+(d)~$2$.
+
+\qz Information gain is: (a)~always positive; (b)~never negative; (c)~can be
+negative; (d)~bounded by $0.5$.
+
+\qz At the root of T11, among the yes/no features, the best split is:
+(a)~employed; (b)~owns home; (c)~good history; (d)~all tie.
+
+\qz A regression tree leaf predicts: (a)~the median; (b)~the mean of its
+targets; (c)~a linear function; (d)~zero.
+
+\qz Bagging mainly reduces: (a)~bias; (b)~variance; (c)~training time;
+(d)~the number of features.
+
+\qz A random forest chooses each split from: (a)~all features; (b)~a random
+subset of features; (c)~one fixed feature; (d)~the labels.
+
+\qz Gradient boosting fits each new tree to: (a)~the original targets; (b)~the
+current residuals; (c)~random labels; (d)~the test set.
+
+\qz For tabular data, a strong default is: (a)~a single deep tree;
+(b)~gradient-boosted trees; (c)~$k$-means; (d)~PCA.
+
+\furtherreading
+
+\textcite{james2021} §8.1 is the primary reading for single trees: regression
+trees by recursive binary splitting, cost-complexity pruning, and classification
+trees with the Gini index and entropy. §8.2 covers bagging with the out-of-bag
+estimate, random forests, and boosting, with the variable-importance plots that
+make ensembles interpretable. \textcite{bishop2006} §14.4 treats tree-based models
+as a partition of the input space, with a short but clear account of growing and
+pruning, and §14.3 derives boosting (AdaBoost) as sequential minimisation of an
+exponential error --- the ancestor of the gradient boosting of
+\cref{sec:boosting}.
+
+\bigskip
+\noindent\emph{Next:} \Cref{ch:ch13} opens Part~V, unsupervised learning, with
+the first algorithm in the book that learns without labels at all: $k$-means
+clustering.

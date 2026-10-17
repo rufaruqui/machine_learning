@@ -173,9 +173,9 @@ reading list, so exam preparation stays two books wide.
 | | 9 | Training Neural Networks | 44 | **DONE** (28) |
 | **IV — Making Learning Systems Work** | 10 | Evaluation, Bias and Variance | 38 | **DONE** (22) |
 | | 11 | Error Analysis, Data, Skew, and Ethics | 36 | **DONE** (20) |
-| | 12 | Decision Trees and Ensembles | 34 | PLANNED |
-| **V — Unsupervised Learning** | 13 | Clustering with *k*-Means | 30 | PLANNED |
-| | 14 | Anomaly Detection | 30 | PLANNED |
+| | 12 | Decision Trees and Ensembles | 34 | **DONE** (22) |
+| **V — Unsupervised Learning** | 13 | Clustering with *k*-Means | 30 | **DONE** (14) |
+| | 14 | Anomaly Detection | 30 | **DONE** (18) |
 | **VI — Recommenders and Dimensionality Reduction** | 15 | Recommender Systems | 40 | PLANNED |
 | | 16 | Principal Component Analysis | 26 | PLANNED |
 | **VII — Reinforcement Learning** | 17 | Reinforcement Learning and Deep Q-Networks | 42 | PLANNED |
@@ -642,6 +642,20 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
   `TEXINPUTS=/usr/local/texlive/2026basic/texmf-dist/tex/latex/biblatex//:/usr/local/texlive/2026basic/texmf-dist/tex/latex/etoolbox//: make`.
   Permanent fix: remove or rename those two directories under `~/Library/texmf/tex/latex/`.
 
+### Notes from writing Ch 12–14 (2026-10-19)
+
+- **G3 resolved by request**: the author asked for Ch 12; it is written as a full chapter and
+  can be assigned as reading even though no lecture week covers trees.
+- **New datasets**: **T11** (ten loan applicants, three binary features plus income; Ch 12),
+  **K6** (six points, Ch 13 hand example), **B60** and **U60** (Ch 13; B60 is the companion
+  Week 7 lecture's data), **E2** (engines) and **DC** (data-centre machines) in Ch 14, both
+  shared with the Week 7 lecture. Ch 13's image example uses scikit-learn's bundled
+  `china.jpg`; the 16-colour palette is drawn as TikZ swatches (no raster image).
+- Ch 12's regression trees on T10 keep improving with depth on its 15-point test set; the text
+  says so rather than claiming overfitting, and compares with Ch 10's cubic instead.
+- Ch 14 reads ISLR §4.4.1–4.4.2 (Gaussian densities) rather than the outline's "§12.4
+  (context)", which does not cover the material.
+
 ### Known gaps to resolve (raise, do not silently fix)
 
 - **G1** `plan.md` headers say 12 weeks; 9 weeks of content are listed. Ch 12, Ch 18–19 and
@@ -673,8 +687,8 @@ does expand to 12 weeks (gap G1), they are the three weeks to add.
 | **M2** | Part II (Ch 6–7) | **COMPLETE.** Completes the linear-model core. |
 | **M3** | Appendices A–B | Written early; Ch 8 onward leans on them. |
 | **M4** | Part III (Ch 8–9) | **COMPLETE.** Heaviest derivations. |
-| **M5** | Part IV (Ch 10–12) | Ch 10–11 **DONE**; Ch 12 gated on G3. |
-| **M6** | Parts V–VII (Ch 13–17) | |
+| **M5** | Part IV (Ch 10–12) | **COMPLETE.** Ch 12 written on request (see G3). |
+| **M6** | Parts V–VII (Ch 13–17) | Ch 13–14 **DONE**. |
 | **M7** | Ch 18–19 | Depend on Ch 9 and Ch 16 being final; Ch 19 depends on Ch 18. |
 | **M8** | Part IX (Ch 20–22) | Depends on Ch 10–11 for the modelling/engineering boundary. |
 | **M9** | Back matter and polish | Appendices C–E, index pass, `make check` clean, cover. |
